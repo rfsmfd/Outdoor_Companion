@@ -1184,6 +1184,15 @@
 
   function uid(){ return 's_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
+  // Ensures only one modal can ever be visibly open at a time. Called before showing
+  // any modal, so a leftover/forgotten one (e.g. an unclosed print sheet) can never
+  // silently resurface once a newer modal on top of it gets dismissed.
+  function closeAllModals(){
+    document.querySelectorAll('.oc-modal-backdrop').forEach(function(el){
+      el.classList.remove('show');
+    });
+  }
+
   function markerIcon(type){
     var t = TYPES[type] || TYPES.custom;
     return L.divIcon({
@@ -2016,6 +2025,7 @@
   }
 
   document.getElementById('exportBtn').addEventListener('click', function(){
+    closeAllModals();
     document.getElementById('exportModalBackdrop').classList.add('show');
   });
   document.getElementById('exportModalClose').addEventListener('click', function(){
@@ -2222,6 +2232,7 @@
 
   function showUseCameraAppReminder(mode){
     pendingScanMode = mode;
+    closeAllModals();
     document.getElementById('useCameraAppModalBackdrop').classList.add('show');
   }
   document.getElementById('useCameraAppClose').addEventListener('click', function(){
@@ -2290,6 +2301,7 @@
         '<div class="code">'+cam.id+'</div>';
       grid.appendChild(card);
     });
+    closeAllModals();
     document.getElementById('printSheetBackdrop').classList.add('show');
     // QRCode.js needs the target element attached to the DOM before rendering
     setTimeout(function(){
@@ -2318,6 +2330,7 @@
     display.innerHTML = '';
     new QRCode(display, {text: camQrUrl(cam.id), width:220, height:220, correctLevel: QRCode.CorrectLevel.M});
     document.getElementById('qrCameraName').textContent = cam.name + ' — print this and attach it to the camera';
+    closeAllModals();
     document.getElementById('qrModalBackdrop').classList.add('show');
     document.getElementById('qrDownloadBtn').onclick = function(){
       setTimeout(function(){
@@ -2349,6 +2362,7 @@
   var scannerVideoTrack = null;
 
   async function openScanModal(){
+    closeAllModals();
     document.getElementById('scanModalBackdrop').classList.add('show');
     setScanStatus('Requesting camera access…');
     lastScanAt = 0;
@@ -2485,6 +2499,7 @@
     document.querySelector('.tab-btn[data-tab="cameras"]').click();
     document.getElementById('camChooserName').textContent = cam.name;
     document.getElementById('camChooserStatus').textContent = cam.currentSiteId ? 'Currently deployed' : 'Not deployed yet';
+    closeAllModals();
     document.getElementById('camChooserModalBackdrop').classList.add('show');
   }
 
@@ -2510,6 +2525,7 @@
     document.getElementById('editCamMake').value = cam.make || '';
     document.getElementById('editCamModel').value = cam.model || '';
     document.getElementById('editCamNotes').value = cam.notes || '';
+    closeAllModals();
     document.getElementById('editCamModalBackdrop').classList.add('show');
   }
   document.getElementById('editCamClose').addEventListener('click', function(){
@@ -2596,6 +2612,7 @@
       document.getElementById('deployCoords').textContent = 'Using map center (no GPS fix yet)';
       document.getElementById('deployGpsNote').textContent = 'No GPS fix yet — drag the pin below to the right spot.';
     }
+    closeAllModals();
     document.getElementById('deployModalBackdrop').classList.add('show');
 
     ensureDeployMap();
