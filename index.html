@@ -104,6 +104,7 @@
     #quickLogFab .fab-label{ top:80px; }
     #layerSwitch{ bottom:24px; }
     .layer-btn{ font-size:16px; padding:13px 18px; }
+    #followMeBtn{ bottom:78px; width:50px; height:50px; font-size:22px; }
 
     /* Readability: everything in the sidebar was sized for a desktop screen — scale up. */
     #brand h1{ font-size:25px; }
@@ -348,6 +349,25 @@
   .layer-btn + .layer-btn{border-left:1px solid var(--line);}
   .layer-btn.active{background:var(--accent);color:#1A1204;font-weight:600;}
   .layer-btn:hover:not(.active){color:var(--text);}
+
+  #followMeBtn{
+    position:absolute;
+    bottom:70px;left:14px;
+    z-index:1000;
+    width:42px;height:42px;
+    border-radius:50%;
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text-dim);
+    font-size:18px;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+  }
+  #followMeBtn.active{
+    background:#3B9EFF;
+    color:#0A1A2E;
+    border-color:#3B9EFF;
+  }
 
   .site-marker{
     width:28px;height:28px;border-radius:50%;
@@ -923,6 +943,7 @@
       <button class="layer-btn active" data-layer="aerial">Aerial</button>
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
+    <button id="followMeBtn" title="Follow my location">🧭</button>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1783,6 +1804,8 @@
   // Keep a continuously-updated position in the background (no user action needed)
   // so Quick Log taps never have to wait on a GPS fix. Never auto-recenters the map —
   // only the initial load (above) or an explicit "My Location" tap does that.
+  var followMe = false; // when true, map recenters on the live GPS position as it updates
+
   if (navigator.geolocation && navigator.geolocation.watchPosition){
     navigator.geolocation.watchPosition(function(pos){
       lastKnownPos = {lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy};
@@ -1790,12 +1813,33 @@
       var acc = Math.round(lastKnownPos.accuracy);
       if (lastKnownPos.accuracy <= AUTO_CENTER_ACCURACY_M){
         setGpsStatus('located · accuracy ~' + acc + 'm', 'ok');
+        if (followMe){
+          map.panTo([lastKnownPos.lat, lastKnownPos.lng], {animate:true});
+        }
       } else {
         setGpsStatus('low-confidence fix (~' + (acc >= 1000 ? (acc/1000).toFixed(1)+'km' : acc+'m') + ' off)', 'err');
       }
     }, function(){ /* keep last known fix on transient errors — don't overwrite a good status with a flaky one */ },
     {enableHighAccuracy:true, maximumAge:15000, timeout:10000});
   }
+
+  // Follow-me toggle button
+  var followBtn = document.getElementById('followMeBtn');
+  followBtn.addEventListener('click', function(){
+    followMe = !followMe;
+    followBtn.classList.toggle('active', followMe);
+    if (followMe && lastKnownPos){
+      map.panTo([lastKnownPos.lat, lastKnownPos.lng], {animate:true});
+    }
+  });
+  // Manually panning the map turns follow-me off automatically — same behavior as
+  // Google Maps' navigation mode — so the user immediately regains full manual control.
+  map.on('dragstart', function(){
+    if (followMe){
+      followMe = false;
+      followBtn.classList.remove('active');
+    }
+  });
 
 
   // "My Location" button — grabs a fresh GPS fix and opens the save form right there,
@@ -2388,8 +2432,16 @@
     deployMap = L.map('deployMiniMap', {
       zoomControl:false,
       attributionControl:false,
-      dragging:true,
-      scrollWheelZoom:false
+      // Panning disabled on purpose — this is a small confirmation map, and on a phone
+      // a touch meant for the pin often grabs the map instead. Since the only interaction
+      // this map needs is dragging the pin, removing map-panning entirely eliminates the
+      // conflict rather than trying to out-guess which one the user meant to touch.
+      dragging:false,
+      touchZoom:false,
+      scrollWheelZoom:false,
+      doubleClickZoom:false,
+      boxZoom:false,
+      keyboard:false
     });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom:19
