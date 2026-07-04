@@ -565,10 +565,15 @@
     font-size:16px;
     text-transform:uppercase;
     letter-spacing:0.5px;
-    margin:0 0 12px 0;
     display:flex;
     justify-content:space-between;
     align-items:center;
+    position:sticky;
+    top:-20px;
+    background:var(--panel);
+    z-index:10;
+    margin:-20px 0 12px 0;
+    padding:20px 0 10px 0;
   }
   .oc-modal .close-x{
     background:transparent;border:none;color:var(--text-dim);
@@ -678,7 +683,15 @@
   }
 
   /* ---------- Printable QR sheet ---------- */
-  #printSheetModal h3{display:flex;justify-content:space-between;align-items:center;}
+  #printSheetModal h3{
+    display:flex;justify-content:space-between;align-items:center;
+    position:sticky;
+    top:-20px;
+    background:#fff;
+    z-index:10;
+    padding:20px 0 10px 0;
+    margin:-20px 0 0 0;
+  }
   #printSheetModal h3 span{display:flex;align-items:center;gap:10px;}
   .print-sheet-grid{
     display:grid;
