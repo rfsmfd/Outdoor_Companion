@@ -1008,6 +1008,18 @@
     </div>
   </div>
 
+  <!-- Export format chooser -->
+  <div class="oc-modal-backdrop" id="exportModalBackdrop">
+    <div class="oc-modal">
+      <h3>Export Data <button class="close-x" id="exportModalClose">&times;</button></h3>
+      <p style="font-size:12.5px;color:var(--text-dim);margin:0 0 14px 0;">Exports all Sites and Field Observations together. Choose a format for the tool you're using:</p>
+      <button class="btn-primary" id="exportKmlBtn" style="width:100%;margin-bottom:8px;background:#4A9E4F;color:#0A1A0A;">🌍 KML — Google Earth</button>
+      <button class="btn-primary" id="exportCsvBtn" style="width:100%;margin-bottom:8px;background:#3B9EFF;color:#0A1A2E;">📍 CSV — Google Maps ("My Maps")</button>
+      <button class="btn-primary" id="exportGpxBtn" style="width:100%;margin-bottom:8px;background:#B8AF9C;color:#1A1204;">🛰 GPX — GPS devices / universal</button>
+      <button class="btn-ghost" id="exportGeojsonBtn" style="width:100%;">GeoJSON — ArcGIS Pro / other GIS tools</button>
+    </div>
+  </div>
+
   <!-- Reminder: nudge toward the phone's native Camera app instead of the in-app scanner -->
   <div class="oc-modal-backdrop" id="useCameraAppModalBackdrop">
     <div class="oc-modal">
@@ -1890,31 +1902,131 @@
   });
 
   // ---------- export ----------
-  document.getElementById('exportBtn').addEventListener('click', function(){
-    var siteFeatures = sites.map(function(s){
-      return {
-        type: 'Feature',
-        geometry: {type:'Point', coordinates:[s.lng, s.lat]},
-        properties: {kind:'site', id:s.id, name:s.name, type:s.type, notes:s.notes, createdAt:s.createdAt}
-      };
+  // ---------- Export: shared data gathering + per-format generators ----------
+  function gatherExportRecords(){
+    var records = [];
+    sites.forEach(function(s){
+      records.push({
+        kind:'site', id:s.id, name:s.name, type:s.type, notes:s.notes||'',
+        lat:s.lat, lng:s.lng, createdAt:s.createdAt, siteId:null, approx:false, count:null
+      });
     });
-    var obsFeatures = observations.map(function(o){
-      return {
-        type: 'Feature',
-        geometry: {type:'Point', coordinates:[o.lng, o.lat]},
-        properties: {kind:'observation', id:o.id, type:o.type, siteId:o.siteId||null, approx:!!o.approx, count:o.count||1, notes:o.notes||'', createdAt:o.createdAt}
-      };
+    observations.forEach(function(o){
+      var t = OBS_TYPES[o.type] || OBS_TYPES.custom;
+      records.push({
+        kind:'observation', id:o.id, name:t.label, type:o.type, notes:o.notes||'',
+        lat:o.lat, lng:o.lng, createdAt:o.createdAt, siteId:o.siteId||null, approx:!!o.approx, count:o.count||1
+      });
     });
-    var geojson = { type: 'FeatureCollection', features: siteFeatures.concat(obsFeatures) };
-    var blob = new Blob([JSON.stringify(geojson, null, 2)], {type:'application/geo+json'});
+    return records;
+  }
+
+  function downloadTextFile(filename, mimeType, text){
+    var blob = new Blob([text], {type:mimeType});
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
-    a.download = 'outdoor-companion-export.geojson';
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  function escapeXml(str){
+    return String(str == null ? '' : str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+  }
+  function escapeCsv(str){
+    var s = String(str == null ? '' : str);
+    if (/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+    return s;
+  }
+
+  function buildGeoJson(records){
+    var features = records.map(function(r){
+      return {
+        type:'Feature',
+        geometry:{type:'Point', coordinates:[r.lng, r.lat]},
+        properties:{kind:r.kind, id:r.id, name:r.name, type:r.type, notes:r.notes, siteId:r.siteId, approx:r.approx, count:r.count, createdAt:r.createdAt}
+      };
+    });
+    return JSON.stringify({type:'FeatureCollection', features:features}, null, 2);
+  }
+
+  function buildKml(records){
+    var placemarks = records.map(function(r){
+      var label = (r.kind === 'observation' ? r.name + (r.count > 1 ? ' ×' + r.count : '') : r.name);
+      var desc = [r.notes, r.approx ? '(approximate location)' : '', new Date(r.createdAt).toLocaleString()].filter(Boolean).join(' — ');
+      return '    <Placemark>\n' +
+        '      <name>' + escapeXml(label) + '</name>\n' +
+        '      <description>' + escapeXml(desc) + '</description>\n' +
+        '      <Point><coordinates>' + r.lng + ',' + r.lat + ',0</coordinates></Point>\n' +
+        '    </Placemark>';
+    }).join('\n');
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
+      '  <Document>\n' +
+      '    <name>Outdoor Companion Export</name>\n' +
+      placemarks + '\n' +
+      '  </Document>\n' +
+      '</kml>\n';
+  }
+
+  function buildGpx(records){
+    var wpts = records.map(function(r){
+      var label = (r.kind === 'observation' ? r.name + (r.count > 1 ? ' x' + r.count : '') : r.name);
+      var desc = [r.notes, r.approx ? '(approximate location)' : ''].filter(Boolean).join(' — ');
+      return '  <wpt lat="' + r.lat + '" lon="' + r.lng + '">\n' +
+        '    <name>' + escapeXml(label) + '</name>\n' +
+        (desc ? '    <desc>' + escapeXml(desc) + '</desc>\n' : '') +
+        '    <time>' + new Date(r.createdAt).toISOString() + '</time>\n' +
+        '  </wpt>';
+    }).join('\n');
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<gpx version="1.1" creator="Outdoor Companion" xmlns="http://www.topografix.com/GPX/1/1">\n' +
+      wpts + '\n' +
+      '</gpx>\n';
+  }
+
+  function buildCsv(records){
+    var header = ['kind','name','type','lat','lng','notes','count','approx','linked_site_id','created_at'];
+    var rows = records.map(function(r){
+      return [
+        r.kind, r.name, r.type, r.lat, r.lng, r.notes || '',
+        r.count == null ? '' : r.count, r.approx ? 'yes' : 'no',
+        r.siteId || '', new Date(r.createdAt).toISOString()
+      ].map(escapeCsv).join(',');
+    });
+    return header.join(',') + '\n' + rows.join('\n') + '\n';
+  }
+
+  document.getElementById('exportBtn').addEventListener('click', function(){
+    document.getElementById('exportModalBackdrop').classList.add('show');
+  });
+  document.getElementById('exportModalClose').addEventListener('click', function(){
+    document.getElementById('exportModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('exportModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('show');
+  });
+
+  document.getElementById('exportGeojsonBtn').addEventListener('click', function(){
+    downloadTextFile('outdoor-companion-export.geojson', 'application/geo+json', buildGeoJson(gatherExportRecords()));
+    document.getElementById('exportModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('exportKmlBtn').addEventListener('click', function(){
+    downloadTextFile('outdoor-companion-export.kml', 'application/vnd.google-earth.kml+xml', buildKml(gatherExportRecords()));
+    document.getElementById('exportModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('exportGpxBtn').addEventListener('click', function(){
+    downloadTextFile('outdoor-companion-export.gpx', 'application/gpx+xml', buildGpx(gatherExportRecords()));
+    document.getElementById('exportModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('exportCsvBtn').addEventListener('click', function(){
+    downloadTextFile('outdoor-companion-export.csv', 'text/csv', buildCsv(gatherExportRecords()));
+    document.getElementById('exportModalBackdrop').classList.remove('show');
   });
 
   // ---------- toast ----------
