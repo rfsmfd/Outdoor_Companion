@@ -371,7 +371,7 @@
   }
 
   #buildBadge{
-    position:absolute;
+    position:fixed;
     top:85px;right:14px;
     z-index:2500;
     background:#FFE066;
@@ -974,7 +974,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 1</div>
+    <div id="buildBadge">BUILD 3</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -2184,7 +2184,7 @@
       return;
     }
     list.innerHTML = '';
-    cameras.slice().sort(function(a,b){ return b.createdAt - a.createdAt; }).forEach(function(cam){
+    cameras.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}); }).forEach(function(cam){
       var site = cam.currentSiteId ? sites.filter(function(s){ return s.id === cam.currentSiteId; })[0] : null;
       var row = document.createElement('div');
       row.className = 'cam-row';
