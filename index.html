@@ -1192,7 +1192,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 12</div>
+    <div id="buildBadge">BUILD 13</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1294,11 +1294,20 @@
   <div class="oc-modal-backdrop" id="exportModalBackdrop">
     <div class="oc-modal">
       <h3>Export Data <button class="close-x" id="exportModalClose">&times;</button></h3>
-      <p style="font-size:12.5px;color:var(--text-dim);margin:0 0 14px 0;">Exports all Sites and Field Observations together. Choose a format for the tool you're using:</p>
-      <button class="btn-primary" id="exportKmlBtn" style="width:100%;margin-bottom:8px;background:#4A9E4F;color:#0A1A0A;">🌍 KML — Google Earth</button>
+      <p style="font-size:12.5px;color:var(--text-dim);margin:0 0 14px 0;">Exports all Sites and Field Observations/Catches together. Choose a format for the tool you're using:</p>
+      <button class="btn-primary" id="exportBothBtn" style="width:100%;margin-bottom:8px;background:#FF6A13;color:#1A1204;font-weight:700;">📦 Export Both — KMZ + GeoJSON (with Photos)</button>
+      <button class="btn-primary" id="exportKmlBtn" style="width:100%;margin-bottom:8px;background:#4A9E4F;color:#0A1A0A;">🌍 KMZ — Google Earth (with photos)</button>
       <button class="btn-primary" id="exportCsvBtn" style="width:100%;margin-bottom:8px;background:#3B9EFF;color:#0A1A2E;">📍 CSV — Google Maps ("My Maps")</button>
       <button class="btn-primary" id="exportGpxBtn" style="width:100%;margin-bottom:8px;background:#B8AF9C;color:#1A1204;">🛰 GPX — GPS devices / universal</button>
-      <button class="btn-ghost" id="exportGeojsonBtn" style="width:100%;">GeoJSON — ArcGIS Pro / other GIS tools</button>
+      <button class="btn-ghost" id="exportGeojsonBtn" style="width:100%;margin-bottom:14px;">GeoJSON — ArcGIS Pro (with photos)</button>
+
+      <div style="border-top:1px solid var(--line);padding-top:14px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-dim);margin-bottom:8px;">Full Data Backup (Safety Net)</div>
+        <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 10px 0;">A complete, exact copy of everything — meant to load straight back into this app, not for viewing elsewhere. This is your protection against losing everything if your phone's storage gets cleared.</p>
+        <button class="btn-primary" id="fullBackupBtn" style="width:100%;margin-bottom:8px;background:#8FA05C;color:#14201A;">💾 Download Full Backup</button>
+        <label class="btn-ghost" for="restoreBackupInput" style="width:100%;display:block;text-align:center;box-sizing:border-box;cursor:pointer;">📤 Restore From Backup File</label>
+        <input type="file" accept=".json" id="restoreBackupInput" style="display:none;" />
+      </div>
     </div>
   </div>
 
@@ -1557,6 +1566,23 @@
   }
 
   var map = L.map('map', {zoomControl:true}).setView([39.5, -98.35], 5);
+
+  // Tracks whether ANY marker popup is currently open. renderObsMarkers()/renderMarkers()
+  // destroy and recreate every marker (including whatever popup is open), which would
+  // silently wipe out in-progress unsaved form input — e.g. someone still filling in a
+  // catch's weight/length/photo when a background weather fetch tries to refresh the map.
+  // Background updates check this flag and defer their refresh until the popup closes.
+  var anyPopupOpen = false;
+  var pendingObsRenderAfterClose = false;
+  map.on('popupopen', function(){ anyPopupOpen = true; });
+  map.on('popupclose', function(){
+    anyPopupOpen = false;
+    if (pendingObsRenderAfterClose){
+      pendingObsRenderAfterClose = false;
+      renderObsMarkers();
+      if (activeTab === 'log') renderLogList();
+    }
+  });
 
   var baseLayers = {
     street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -2751,19 +2777,84 @@
     return OBS_TYPES_HUNTING[typeKey] || OBS_TYPES_FISHING[typeKey] || OBS_TYPES_HUNTING.custom;
   }
 
+  // ---------- Full Data Backup: a complete, lossless copy of everything ----------
+  // Different purpose from the GIS exports below — this is meant to round-trip straight
+  // back into this app (or feed a real database migration later), not for viewing in
+  // outside tools. Includes everything: sites, cameras, deployments, observations/catches
+  // (with photos, weight/length/tag#), and properties.
+  function gatherFullBackup(){
+    return {
+      backupFormat: 'outdoor-companion-full-backup-v1',
+      exportedAt: new Date().toISOString(),
+      sites: sites,
+      observations: observations,
+      cameras: cameras,
+      deployments: deployments,
+      properties: properties
+    };
+  }
+
+  document.getElementById('fullBackupBtn').addEventListener('click', function(){
+    var backup = gatherFullBackup();
+    var dateStr = new Date().toISOString().slice(0,10);
+    downloadTextFile('outdoor-companion-full-backup-' + dateStr + '.json', 'application/json', JSON.stringify(backup, null, 2));
+    showToast('Full backup downloaded — keep this file somewhere safe');
+    document.getElementById('exportModalBackdrop').classList.remove('show');
+  });
+
+  document.getElementById('restoreBackupInput').addEventListener('change', async function(){
+    var file = this.files[0];
+    if (!file) return;
+    var sure = confirm('This will REPLACE all current data (sites, cameras, deployments, catches/observations, properties) with what\'s in this backup file. This cannot be undone. Continue?');
+    if (!sure){ this.value = ''; return; }
+    try{
+      var text = await file.text();
+      var backup = JSON.parse(text);
+      if (!backup || backup.backupFormat !== 'outdoor-companion-full-backup-v1'){
+        alert('That doesn\'t look like a valid Outdoor Companion backup file.');
+        return;
+      }
+      sites = backup.sites || [];
+      observations = backup.observations || [];
+      cameras = backup.cameras || [];
+      deployments = backup.deployments || [];
+      properties = backup.properties || [];
+      // Persist every restored record back to storage, not just memory.
+      for (var i=0;i<sites.length;i++){ await saveSite(sites[i]); }
+      for (var j=0;j<observations.length;j++){ await saveObservation(observations[j]); }
+      for (var k=0;k<cameras.length;k++){ await saveCamera(cameras[k]); }
+      for (var m=0;m<deployments.length;m++){ await saveDeployment(deployments[m]); }
+      for (var n=0;n<properties.length;n++){ await saveProperty(properties[n]); }
+      activeFilters = new Set(Object.keys(getActiveTypes()));
+      renderChips();
+      renderPropertySelect();
+      renderAll();
+      renderObsMarkers();
+      if (activeTab === 'log') renderLogList();
+      if (activeTab === 'cameras') renderCameraList();
+      showToast('Backup restored — ' + sites.length + ' sites, ' + observations.length + ' logged, ' + cameras.length + ' cameras');
+      document.getElementById('exportModalBackdrop').classList.remove('show');
+    }catch(e){
+      console.error('Outdoor Companion: restore failed', e);
+      alert('Could not read that backup file — it may be corrupted or not a valid export from this app.');
+    }
+    this.value = '';
+  });
+
   function gatherExportRecords(){
     var records = [];
     sites.forEach(function(s){
       records.push({
         kind:'site', id:s.id, name:s.name, type:s.type, notes:s.notes||'',
-        lat:s.lat, lng:s.lng, createdAt:s.createdAt, siteId:null, approx:false, count:null
+        lat:s.lat, lng:s.lng, createdAt:s.createdAt, siteId:null, approx:false, count:null, photoThumb:null
       });
     });
     observations.forEach(function(o){
       var t = lookupObsTypeAnyModule(o.type);
       records.push({
         kind:'observation', id:o.id, name:t.label, type:o.type, notes:o.notes||'',
-        lat:o.lat, lng:o.lng, createdAt:o.createdAt, siteId:o.siteId||null, approx:!!o.approx, count:o.count||1
+        lat:o.lat, lng:o.lng, createdAt:o.createdAt, siteId:o.siteId||null, approx:!!o.approx, count:o.count||1,
+        photoThumb: o.photoThumb || null, weight: o.weight || null, length: o.length || null, tagNumber: o.tagNumber || null
       });
     });
     return records;
@@ -2794,22 +2885,37 @@
 
   function buildGeoJson(records){
     var features = records.map(function(r){
+      var props = {kind:r.kind, id:r.id, name:r.name, type:r.type, notes:r.notes, siteId:r.siteId, approx:r.approx, count:r.count, createdAt:r.createdAt};
+      if (r.weight) props.weightLbs = r.weight;
+      if (r.length) props.lengthIn = r.length;
+      if (r.tagNumber) props.tagNumber = r.tagNumber;
+      if (r.photoThumb) props.photoBase64 = r.photoThumb; // self-contained — the image travels with the file
       return {
         type:'Feature',
         geometry:{type:'Point', coordinates:[r.lng, r.lat]},
-        properties:{kind:r.kind, id:r.id, name:r.name, type:r.type, notes:r.notes, siteId:r.siteId, approx:r.approx, count:r.count, createdAt:r.createdAt}
+        properties: props
       };
     });
     return JSON.stringify({type:'FeatureCollection', features:features}, null, 2);
   }
 
   function buildKml(records){
-    var placemarks = records.map(function(r){
+    var placemarks = records.map(function(r, idx){
       var label = (r.kind === 'observation' ? r.name + (r.count > 1 ? ' ×' + r.count : '') : r.name);
-      var desc = [r.notes, r.approx ? '(approximate location)' : '', new Date(r.createdAt).toLocaleString()].filter(Boolean).join(' — ');
+      var descParts = [];
+      if (r.tagNumber) descParts.push('Tag #' + r.tagNumber);
+      if (r.weight) descParts.push(r.weight + ' lbs');
+      if (r.length) descParts.push(r.length + ' in');
+      if (r.notes) descParts.push(r.notes);
+      if (r.approx) descParts.push('(approximate location)');
+      descParts.push(new Date(r.createdAt).toLocaleString());
+      var descText = escapeXml(descParts.join(' — '));
+      var descHtml = r.photoThumb
+        ? '<![CDATA[<img src="photos/photo_' + idx + '.jpg" width="300"/><br/>' + descText + ']]>'
+        : descText;
       return '    <Placemark>\n' +
         '      <name>' + escapeXml(label) + '</name>\n' +
-        '      <description>' + escapeXml(desc) + '</description>\n' +
+        '      <description>' + descHtml + '</description>\n' +
         '      <Point><coordinates>' + r.lng + ',' + r.lat + ',0</coordinates></Point>\n' +
         '    </Placemark>';
     }).join('\n');
@@ -2820,6 +2926,35 @@
       placemarks + '\n' +
       '  </Document>\n' +
       '</kml>\n';
+  }
+
+  // Builds a KMZ (zipped KML + photo files) — Google Earth natively displays the photo
+  // right in the location's info balloon when you click a pin, no extra setup needed.
+  async function buildKmz(records){
+    var kmlText = buildKml(records);
+    var zip = new JSZip();
+    zip.file('doc.kml', kmlText);
+    var photosFolder = zip.folder('photos');
+    records.forEach(function(r, idx){
+      if (r.photoThumb){
+        // photoThumb is a data URI (e.g. "data:image/jpeg;base64,...") — strip the prefix
+        // to get the raw base64 JSZip needs.
+        var base64Data = r.photoThumb.split(',')[1];
+        if (base64Data) photosFolder.file('photo_' + idx + '.jpg', base64Data, {base64: true});
+      }
+    });
+    return await zip.generateAsync({type:'blob'});
+  }
+
+  function downloadBlob(filename, blob){
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   function buildGpx(records){
@@ -2865,8 +3000,18 @@
     downloadTextFile('outdoor-companion-export.geojson', 'application/geo+json', buildGeoJson(gatherExportRecords()));
     document.getElementById('exportModalBackdrop').classList.remove('show');
   });
-  document.getElementById('exportKmlBtn').addEventListener('click', function(){
-    downloadTextFile('outdoor-companion-export.kml', 'application/vnd.google-earth.kml+xml', buildKml(gatherExportRecords()));
+  document.getElementById('exportKmlBtn').addEventListener('click', async function(){
+    var records = gatherExportRecords();
+    var kmzBlob = await buildKmz(records);
+    downloadBlob('outdoor-companion-export.kmz', kmzBlob);
+    document.getElementById('exportModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('exportBothBtn').addEventListener('click', async function(){
+    var records = gatherExportRecords();
+    var kmzBlob = await buildKmz(records);
+    downloadBlob('outdoor-companion-export.kmz', kmzBlob);
+    downloadTextFile('outdoor-companion-export.geojson', 'application/geo+json', buildGeoJson(records));
+    showToast('Downloaded both KMZ and GeoJSON');
     document.getElementById('exportModalBackdrop').classList.remove('show');
   });
   document.getElementById('exportGpxBtn').addEventListener('click', function(){
@@ -2993,8 +3138,16 @@
       liveObs.weather = weatherResult;
       liveObs.weatherStatus = weatherResult ? 'ok' : 'unavailable';
       try{ await saveObservation(liveObs); }catch(e){ console.error('Outdoor Companion: failed to save weather onto observation', e); }
-      renderObsMarkers();
-      if (activeTab === 'log') renderLogList();
+      // Never destroy/recreate markers while a popup is open — that would silently wipe
+      // out whatever the person is currently typing (weight, length, tag #, a photo they
+      // just took). Defer the visual refresh until they close the popup instead; the data
+      // itself is already saved above regardless.
+      if (anyPopupOpen){
+        pendingObsRenderAfterClose = true;
+      } else {
+        renderObsMarkers();
+        if (activeTab === 'log') renderLogList();
+      }
     });
   }
 
