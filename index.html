@@ -1192,7 +1192,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 14</div>
+    <div id="buildBadge">BUILD 15</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -2319,9 +2319,42 @@
     var delBtn = node.querySelector('[data-act="delete-obs"]');
     if (delBtn) delBtn.addEventListener('click', function(){ removeObservation(id); map.closePopup(); });
 
+    // Auto-saves a single field immediately — used for every input below, so nothing
+    // ever sits unsaved in the DOM waiting for a final "Save Details" click. This matters
+    // because taking a photo backgrounds the browser to open the native Camera app, and
+    // some phones reload the page when you return to free memory — which would silently
+    // wipe anything not yet persisted. Saving field-by-field as you go closes that gap.
+    async function autoSaveField(mutateFn){
+      var o = observations.filter(function(x){ return x.id === id; })[0];
+      if (!o) return;
+      mutateFn(o);
+      try{ await saveObservation(o); }catch(e){ console.error('Outdoor Companion: auto-save failed', e); }
+    }
+
+    var countEl = node.querySelector('#o_count');
+    var notesEl = node.querySelector('#o_notes');
+    if (countEl) countEl.addEventListener('change', function(){
+      autoSaveField(function(o){ o.count = Math.max(1, parseInt(countEl.value, 10) || 1); });
+    });
+    if (notesEl) notesEl.addEventListener('blur', function(){
+      autoSaveField(function(o){ o.notes = notesEl.value.trim(); });
+    });
+
+    var weightEl = node.querySelector('#o_weight');
+    var lengthEl = node.querySelector('#o_length');
+    var tagEl = node.querySelector('#o_tag');
+    if (weightEl) weightEl.addEventListener('change', function(){
+      autoSaveField(function(o){ o.weight = weightEl.value ? parseFloat(weightEl.value) : null; });
+    });
+    if (lengthEl) lengthEl.addEventListener('change', function(){
+      autoSaveField(function(o){ o.length = lengthEl.value ? parseFloat(lengthEl.value) : null; });
+    });
+    if (tagEl) tagEl.addEventListener('blur', function(){
+      autoSaveField(function(o){ o.tagNumber = tagEl.value.trim() || null; });
+    });
+
     var photoBtn = node.querySelector('#o_photo_btn');
     var photoInput = node.querySelector('#o_photo_input');
-    var pendingPhotoBase64 = null; // staged until Save Details is tapped, so Cancel-by-closing doesn't half-save
     if (photoBtn && photoInput){
       photoBtn.addEventListener('click', function(){ photoInput.click(); });
       photoInput.addEventListener('change', async function(){
@@ -2329,17 +2362,21 @@
         if (!file) return;
         photoBtn.textContent = 'Compressing…';
         try{
-          pendingPhotoBase64 = await compressImageToBase64(file, 500, 0.6);
+          var compressed = await compressImageToBase64(file, 500, 0.6);
           var existingImg = node.querySelector('img');
           if (existingImg){
-            existingImg.src = pendingPhotoBase64;
+            existingImg.src = compressed;
           } else {
             var img = document.createElement('img');
-            img.src = pendingPhotoBase64;
+            img.src = compressed;
             img.style.cssText = 'width:100%;max-height:140px;object-fit:cover;border-radius:6px;margin-bottom:8px;';
             photoBtn.parentNode.insertBefore(img, photoBtn);
           }
           photoBtn.textContent = '📷 Retake Photo';
+          // Saved immediately — not staged for a later "Save Details" click — since this
+          // is exactly the action that risks the browser backgrounding/reloading.
+          await autoSaveField(function(o){ o.photoThumb = compressed; });
+          showToast('Photo saved');
         }catch(e){
           console.error('Outdoor Companion: photo compression failed', e);
           photoBtn.textContent = '📷 Add Photo';
@@ -2349,22 +2386,9 @@
     }
 
     var saveBtn = node.querySelector('[data-act="save-obs"]');
-    if (saveBtn) saveBtn.addEventListener('click', async function(){
-      var o = observations.filter(function(x){ return x.id === id; })[0];
-      if (!o) return;
-      var countEl = node.querySelector('#o_count');
-      var notesEl = node.querySelector('#o_notes');
-      o.count = Math.max(1, parseInt(countEl.value, 10) || 1);
-      o.notes = notesEl.value.trim();
-      var weightEl = node.querySelector('#o_weight');
-      var lengthEl = node.querySelector('#o_length');
-      var tagEl = node.querySelector('#o_tag');
-      if (weightEl) o.weight = weightEl.value ? parseFloat(weightEl.value) : null;
-      if (lengthEl) o.length = lengthEl.value ? parseFloat(lengthEl.value) : null;
-      if (tagEl) o.tagNumber = tagEl.value.trim() || null;
-      if (pendingPhotoBase64) o.photoThumb = pendingPhotoBase64;
-      try{ await saveObservation(o); }catch(e){ console.error('Outdoor Companion: failed to save observation details', e); }
-      if (activeTab === 'log') renderLogList();
+    if (saveBtn) saveBtn.addEventListener('click', function(){
+      // Everything above already auto-saves as you go — this button is now just a
+      // convenient "I'm done" confirmation, not the only point data gets persisted.
       showToast('Details saved');
       map.closePopup();
     });
@@ -2854,7 +2878,8 @@
       records.push({
         kind:'observation', id:o.id, name:t.label, type:o.type, notes:o.notes||'',
         lat:o.lat, lng:o.lng, createdAt:o.createdAt, siteId:o.siteId||null, approx:!!o.approx, count:o.count||1,
-        photoThumb: o.photoThumb || null, weight: o.weight || null, length: o.length || null, tagNumber: o.tagNumber || null
+        photoThumb: o.photoThumb || null, weight: o.weight || null, length: o.length || null, tagNumber: o.tagNumber || null,
+        moonPhase: o.moonPhase || null, weather: (o.weatherStatus === 'ok' ? o.weather : null)
       });
     });
     return records;
@@ -2889,6 +2914,13 @@
       if (r.weight) props.weightLbs = r.weight;
       if (r.length) props.lengthIn = r.length;
       if (r.tagNumber) props.tagNumber = r.tagNumber;
+      if (r.moonPhase){ props.moonPhase = r.moonPhase.name; props.moonIllumination = r.moonPhase.illumination; }
+      if (r.weather){
+        props.tempF = r.weather.tempF;
+        props.windDir = r.weather.windDir;
+        props.windMph = r.weather.windMph;
+        props.pressureHpa = r.weather.pressureHpa;
+      }
       if (r.photoThumb) props.photoBase64 = r.photoThumb; // self-contained — the image travels with the file
       return {
         type:'Feature',
@@ -2906,6 +2938,8 @@
       if (r.tagNumber) descParts.push('Tag #' + r.tagNumber);
       if (r.weight) descParts.push(r.weight + ' lbs');
       if (r.length) descParts.push(r.length + ' in');
+      if (r.moonPhase) descParts.push('🌙 ' + r.moonPhase.name + ' (' + r.moonPhase.illumination + '%)');
+      if (r.weather) descParts.push(r.weather.tempF + '°F, ' + r.weather.windDir + ' ' + r.weather.windMph + 'mph, ' + r.weather.pressureHpa + 'hPa');
       if (r.notes) descParts.push(r.notes);
       if (r.approx) descParts.push('(approximate location)');
       descParts.push(new Date(r.createdAt).toLocaleString());
