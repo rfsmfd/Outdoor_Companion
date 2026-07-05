@@ -235,6 +235,23 @@
     color:var(--text-dim);
     margin-bottom:8px;
   }
+  #dateFilterBtn{
+    margin-top:10px;
+    width:100%;
+    background:var(--panel-alt);
+    border:1px solid var(--line);
+    color:var(--text-dim);
+    font-size:12px;
+    padding:8px 10px;
+    border-radius:4px;
+    text-align:left;
+  }
+  #dateFilterBtn.filtered{
+    background:var(--accent);
+    color:#1A1204;
+    border-color:var(--accent);
+    font-weight:600;
+  }
   .chips{display:flex;flex-wrap:wrap;gap:6px;}
   .chip{
     font-size:11px;
@@ -680,6 +697,28 @@
     width:520px;
     max-width:94vw;
   }
+
+  #historyModal{ width:420px; max-width:92vw; }
+  #historyList{ max-height:50vh; overflow-y:auto; }
+  .history-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:10px;
+    border:1px solid var(--line);
+    border-radius:6px;
+    margin-bottom:8px;
+    background:var(--panel-alt);
+  }
+  .history-row .info .dt{font-size:13px;font-weight:600;}
+  .history-row .info .co{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--moss);}
+  .history-view-marker{
+    width:20px;height:20px;border-radius:50%;
+    background:transparent;
+    border:3px dashed #FFE066;
+    box-shadow:0 0 0 4px rgba(255,224,102,0.25);
+  }
   #deployMiniMapWrap{
     position:relative;
     width:100%;
@@ -945,6 +984,7 @@
     <div id="filters">
       <div class="flabel">Site Types</div>
       <div class="chips" id="chips"></div>
+      <button id="dateFilterBtn">📅 <span id="dateFilterLabel">All Time</span></button>
     </div>
 
     <div id="tabs">
@@ -980,7 +1020,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 4</div>
+    <div id="buildBadge">BUILD 6</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1075,6 +1115,37 @@
       </p>
       <button class="btn-primary" id="useCameraAppGotIt" style="width:100%;margin-bottom:8px;">Got It</button>
       <button class="btn-ghost" id="useCameraAppFallback" style="width:100%;">My Camera app isn't working — use in-app scanner</button>
+    </div>
+  </div>
+
+  <!-- Deployment History: every past deployment for a camera, permanently preserved -->
+  <div class="oc-modal-backdrop" id="historyModalBackdrop">
+    <div class="oc-modal" id="historyModal">
+      <h3><span id="historyCamName">Camera</span> — History <button class="close-x" id="historyModalClose">&times;</button></h3>
+      <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Every deployment is permanently recorded, even after the camera moves on. Nothing here is ever deleted.</p>
+      <div id="historyList"></div>
+    </div>
+  </div>
+
+  <!-- Date filter: decluttering the map by recency -->
+  <div class="oc-modal-backdrop" id="dateFilterModalBackdrop">
+    <div class="oc-modal">
+      <h3>Filter by Date <button class="close-x" id="dateFilterClose">&times;</button></h3>
+      <p style="font-size:12px;color:var(--text-dim);margin:0 0 12px 0;">
+        Hides older pins on the map — handy after moving cameras around a lot. Sites show by their most recent deploy/placement date; Log entries by when they were logged.
+      </p>
+      <button class="btn-primary date-preset-btn" data-preset="all" style="width:100%;margin-bottom:6px;">All Time</button>
+      <button class="btn-primary date-preset-btn" data-preset="7" style="width:100%;margin-bottom:6px;background:#8FA05C;color:#14201A;">Last 7 Days</button>
+      <button class="btn-primary date-preset-btn" data-preset="30" style="width:100%;margin-bottom:6px;background:#8FA05C;color:#14201A;">Last 30 Days</button>
+      <button class="btn-primary date-preset-btn" data-preset="90" style="width:100%;margin-bottom:14px;background:#8FA05C;color:#14201A;">Last 90 Days</button>
+      <div class="form-pop" style="border-top:1px solid var(--line);padding-top:12px;">
+        <label>Custom Range</label>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input type="date" id="dateFilterFrom" style="flex:1;">
+          <input type="date" id="dateFilterTo" style="flex:1;">
+        </div>
+        <button class="btn-primary" id="dateFilterApplyCustom" style="width:100%;background:#3B9EFF;color:#0A1A2E;">Apply Custom Range</button>
+      </div>
     </div>
   </div>
 
@@ -1485,11 +1556,79 @@
     });
   }
 
+  var activeDateFilter = null; // null = All Time, otherwise {from, to, label}
+
+  function setDateFilter(filterObj){
+    activeDateFilter = filterObj;
+    var btn = document.getElementById('dateFilterBtn');
+    var label = document.getElementById('dateFilterLabel');
+    if (filterObj){
+      label.textContent = filterObj.label;
+      btn.classList.add('filtered');
+    } else {
+      label.textContent = 'All Time';
+      btn.classList.remove('filtered');
+    }
+    renderMarkers();
+    renderObsMarkers();
+    renderActiveList();
+  }
+
+  document.getElementById('dateFilterBtn').addEventListener('click', function(){
+    closeAllModals();
+    document.getElementById('dateFilterModalBackdrop').classList.add('show');
+  });
+  document.getElementById('dateFilterClose').addEventListener('click', function(){
+    document.getElementById('dateFilterModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('dateFilterModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('show');
+  });
+
+  document.querySelectorAll('.date-preset-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var preset = btn.getAttribute('data-preset');
+      if (preset === 'all'){
+        setDateFilter(null);
+      } else {
+        var days = parseInt(preset, 10);
+        var to = Date.now();
+        var from = to - (days * 24 * 60 * 60 * 1000);
+        setDateFilter({from: from, to: to, label: 'Last ' + days + ' Days'});
+      }
+      document.getElementById('dateFilterModalBackdrop').classList.remove('show');
+    });
+  });
+
+  document.getElementById('dateFilterApplyCustom').addEventListener('click', function(){
+    var fromStr = document.getElementById('dateFilterFrom').value;
+    var toStr = document.getElementById('dateFilterTo').value;
+    if (!fromStr || !toStr){
+      alert('Please choose both a start and end date.');
+      return;
+    }
+    var from = new Date(fromStr + 'T00:00:00').getTime();
+    var to = new Date(toStr + 'T23:59:59').getTime();
+    if (from > to){
+      alert('The start date needs to be before the end date.');
+      return;
+    }
+    var label = fromStr + ' to ' + toStr;
+    setDateFilter({from: from, to: to, label: label});
+    document.getElementById('dateFilterModalBackdrop').classList.remove('show');
+  });
+
+  function passesDateFilter(timestamp){
+    if (!activeDateFilter) return true;
+    return timestamp >= activeDateFilter.from && timestamp <= activeDateFilter.to;
+  }
+
   function renderMarkers(){
     Object.keys(markers).forEach(function(id){ map.removeLayer(markers[id]); });
     markers = {};
     sites.forEach(function(s){
       if (!activeFilters.has(s.type)) return;
+      if (!passesDateFilter(s.lastActivityAt || s.createdAt)) return;
       var m = L.marker([s.lat,s.lng], {icon: markerIcon(s.type)}).addTo(map);
       m.bindPopup(popupHtml(s));
       m.on('popupopen', function(e){ bindPopupActions(e.popup, s.id); });
@@ -1533,10 +1672,14 @@
   function renderList(){
     if (activeTab !== 'sites') return;
     var list = document.getElementById('site-list');
-    var filtered = sites.filter(function(s){ return activeFilters.has(s.type); });
+    var filtered = sites.filter(function(s){ return activeFilters.has(s.type) && passesDateFilter(s.lastActivityAt || s.createdAt); });
     document.getElementById('siteCount').textContent = filtered.length + (filtered.length===1 ? ' SITE' : ' SITES');
     if (filtered.length === 0){
-      list.innerHTML = '<div class="empty">No observation sites yet.<br>Tap “+ Add Site” and place your first pin on the map.</div>';
+      if (sites.length > 0){
+        list.innerHTML = '<div class="empty">No sites match the current filter.<br>Try <strong>All Time</strong> in the date filter, or check your Site Types selection.</div>';
+      } else {
+        list.innerHTML = '<div class="empty">No observation sites yet.<br>Tap “+ Add Site” and place your first pin on the map.</div>';
+      }
       return;
     }
     list.innerHTML = '';
@@ -1603,6 +1746,7 @@
     Object.keys(obsMarkers).forEach(function(id){ map.removeLayer(obsMarkers[id]); });
     obsMarkers = {};
     observations.forEach(function(o){
+      if (!passesDateFilter(o.createdAt)) return;
       var m = L.marker([o.lat,o.lng], {icon: obsMarkerIcon(o.type)}).addTo(map);
       m.bindPopup(obsPopupHtml(o));
       m.on('popupopen', function(e){ bindObsPopupActions(e.popup, o.id); });
@@ -1624,13 +1768,18 @@
   function renderLogList(){
     if (activeTab !== 'log') return;
     var list = document.getElementById('site-list');
-    document.getElementById('siteCount').textContent = observations.length + (observations.length===1 ? ' LOGGED' : ' LOGGED');
-    if (observations.length === 0){
-      list.innerHTML = '<div class="empty">No field observations yet.<br>Tap the orange <strong>Quick Log</strong> button on the map to log a sighting in one tap — add notes now or come back later.</div>';
+    var filteredObs = observations.filter(function(o){ return passesDateFilter(o.createdAt); });
+    document.getElementById('siteCount').textContent = filteredObs.length + (filteredObs.length===1 ? ' LOGGED' : ' LOGGED');
+    if (filteredObs.length === 0){
+      if (observations.length > 0){
+        list.innerHTML = '<div class="empty">No log entries match the current date filter.<br>Try <strong>All Time</strong> in the date filter.</div>';
+      } else {
+        list.innerHTML = '<div class="empty">No field observations yet.<br>Tap the orange <strong>Quick Log</strong> button on the map to log a sighting in one tap — add notes now or come back later.</div>';
+      }
       return;
     }
     list.innerHTML = '';
-    observations.slice().sort(function(a,b){ return b.createdAt - a.createdAt; }).forEach(function(o){
+    filteredObs.slice().sort(function(a,b){ return b.createdAt - a.createdAt; }).forEach(function(o){
       var t = OBS_TYPES[o.type] || OBS_TYPES.custom;
       var site = o.siteId ? sites.filter(function(s){ return s.id === o.siteId; })[0] : null;
       var countTxt = (o.count && o.count > 1) ? o.count + '× ' : '';
@@ -1746,7 +1895,8 @@
           notes: notes,
           lat: latlng.lat,
           lng: latlng.lng,
-          createdAt: Date.now()
+          createdAt: Date.now(),
+          lastActivityAt: Date.now()
         };
         sites.push(site);
         try{
@@ -2229,6 +2379,7 @@
         '<div class="cam-actions">' +
           '<button data-act="deploy-cam" data-id="'+cam.id+'" style="'+deployBtnStyle+'">'+(site ? 'Deployed' : 'Deploy')+'</button>' +
           '<button class="btn-ghost" data-act="edit-cam" data-id="'+cam.id+'">Edit</button>' +
+          '<button class="btn-ghost" data-act="history-cam" data-id="'+cam.id+'">📜 History</button>' +
           '<button class="btn-ghost" data-act="delete-cam" data-id="'+cam.id+'" style="color:#D94A2E;">Delete</button>' +
         '</div>';
       list.appendChild(row);
@@ -2250,6 +2401,10 @@
         openEditCameraModal(cam); // convenience: edit without needing to rescan the physical tag
       });
 
+      row.querySelector('[data-act="history-cam"]').addEventListener('click', function(){
+        openDeploymentHistory(cam);
+      });
+
       row.querySelector('[data-act="delete-cam"]').addEventListener('click', function(){
         deleteCameraFlow(cam.id);
       });
@@ -2259,6 +2414,71 @@
   // Manual, one-at-a-time camera deletion only — never a bulk/batch action.
   // Removes the camera from inventory but leaves its map pin (Observation Site) untouched,
   // since that location data has value independent of the camera inventory.
+
+  // ---------- Deployment History: view every past deployment, permanently preserved ----------
+  var historyViewMarker = null; // temporary, non-persistent marker shown when viewing a past location
+
+  document.getElementById('historyModalClose').addEventListener('click', function(){
+    document.getElementById('historyModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('historyModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('show');
+  });
+
+  function openDeploymentHistory(cam){
+    document.getElementById('historyCamName').textContent = cam.name;
+    var camDeployments = deployments
+      .filter(function(d){ return d.cameraId === cam.id; })
+      .sort(function(a,b){ return b.deployedAt - a.deployedAt; });
+
+    var list = document.getElementById('historyList');
+    if (camDeployments.length === 0){
+      list.innerHTML = '<div class="empty" style="padding:20px 0;">No deployments recorded yet for this camera.</div>';
+    } else {
+      list.innerHTML = '';
+      camDeployments.forEach(function(d, idx){
+        var row = document.createElement('div');
+        row.className = 'history-row';
+        var dateStr = new Date(d.deployedAt).toLocaleString(undefined, {
+          month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'
+        });
+        var isLatest = idx === 0;
+        row.innerHTML =
+          '<div class="info">' +
+            '<div class="dt">' + escapeHtml(dateStr) + (isLatest ? ' <span style="color:var(--accent);">· current</span>' : '') + '</div>' +
+            '<div class="co">' + fmtCoord(d.lat) + ', ' + fmtCoord(d.lng) + '</div>' +
+          '</div>' +
+          '<button class="btn-ghost" data-lat="' + d.lat + '" data-lng="' + d.lng + '" data-date="' + escapeHtml(dateStr) + '">View on Map</button>';
+        list.appendChild(row);
+      });
+      list.querySelectorAll('button[data-lat]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var lat = parseFloat(btn.getAttribute('data-lat'));
+          var lng = parseFloat(btn.getAttribute('data-lng'));
+          var dateStr = btn.getAttribute('data-date');
+          viewHistoricalLocation(cam.name, dateStr, lat, lng);
+        });
+      });
+    }
+    closeAllModals();
+    document.getElementById('historyModalBackdrop').classList.add('show');
+  }
+
+  function viewHistoricalLocation(camName, dateStr, lat, lng){
+    document.getElementById('historyModalBackdrop').classList.remove('show');
+    if (window.innerWidth <= 820) closeSidebar();
+    if (historyViewMarker) map.removeLayer(historyViewMarker);
+    historyViewMarker = L.marker([lat, lng], {
+      icon: L.divIcon({className:'', html:'<div class="history-view-marker"></div>', iconSize:[20,20], iconAnchor:[10,10]})
+    }).addTo(map);
+    historyViewMarker.bindPopup(
+      '<div class="pop"><h3>' + escapeHtml(camName) + '</h3>' +
+      '<div class="ty" style="color:#FFE066;">Past location · ' + escapeHtml(dateStr) + '</div>' +
+      '<div class="coords">' + fmtCoord(lat) + ', ' + fmtCoord(lng) + '</div></div>'
+    );
+    map.flyTo([lat, lng], Math.max(map.getZoom(), 16));
+    setTimeout(function(){ historyViewMarker.openPopup(); }, 400);
+  }
 
   async function deleteCameraFlow(camId){
     var cam = cameras.filter(function(c){ return c.id === camId; })[0];
@@ -2691,6 +2911,7 @@
       site.lat = pos.lat;
       site.lng = pos.lng;
       site.notes = 'Trail camera · redeployed ' + new Date().toLocaleDateString();
+      site.lastActivityAt = Date.now();
     } else {
       site = {
         id: uid(),
@@ -2699,7 +2920,8 @@
         notes: 'Deployed via QR scan',
         lat: pos.lat,
         lng: pos.lng,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        lastActivityAt: Date.now()
       };
       sites.push(site);
       cam.currentSiteId = site.id;
