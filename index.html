@@ -252,6 +252,44 @@
     border-color:var(--accent);
     font-weight:600;
   }
+
+  #propertyRow{
+    display:flex;
+    gap:8px;
+    padding:12px 16px;
+    border-bottom:1px solid var(--line);
+  }
+  #propertySelect{
+    flex:1;
+    background:var(--panel-alt);
+    border:1px solid var(--line);
+    color:var(--text);
+    font-size:12.5px;
+    padding:8px 10px;
+    border-radius:4px;
+    font-family:'IBM Plex Sans',sans-serif;
+  }
+  #managePropertiesBtn{
+    width:38px;
+    background:var(--panel-alt);
+    border:1px solid var(--line);
+    color:var(--text-dim);
+    border-radius:4px;
+    font-size:16px;
+  }
+  .property-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding:9px 10px;
+    border:1px solid var(--line);
+    border-radius:4px;
+    margin-bottom:6px;
+    background:var(--panel-alt);
+  }
+  .property-row .nm{font-size:13px;font-weight:500;}
+  .property-row .count{font-size:10.5px;color:var(--text-dim);}
   .chips{display:flex;flex-wrap:wrap;gap:6px;}
   .chip{
     font-size:11px;
@@ -699,6 +737,43 @@
   }
 
   #historyModal{ width:420px; max-width:92vw; }
+
+  #importPhotosModal{ width:600px; max-width:95vw; }
+  #importPreviewNotice{
+    background:rgba(255,224,102,0.12);
+    border:1px solid #FFE066;
+    color:#FFE066;
+    font-size:11.5px;
+    padding:10px 12px;
+    border-radius:6px;
+    margin-bottom:14px;
+    line-height:1.5;
+  }
+  #importProgress{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;
+    color:var(--moss);
+    margin:10px 0;
+  }
+  #importResultsGrid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(130px, 1fr));
+    gap:10px;
+    max-height:50vh;
+    overflow-y:auto;
+    margin-top:10px;
+  }
+  .import-photo-card{
+    background:var(--panel-alt);
+    border:1px solid var(--line);
+    border-radius:6px;
+    overflow:hidden;
+  }
+  .import-photo-card img{ width:100%; height:90px; object-fit:cover; display:block; background:#000; }
+  .import-photo-card .meta{ padding:6px 8px; }
+  .import-photo-card .dt{ font-size:10px; color:var(--text-dim); }
+  .import-photo-card .site{ font-size:10.5px; font-weight:600; }
+  .import-photo-card .site.unmatched{ color:#D94A2E; }
   #historyList{ max-height:50vh; overflow-y:auto; }
   .history-row{
     display:flex;
@@ -981,6 +1056,10 @@
       <button class="btn-ghost" id="exportBtn">Export</button>
     </div>
 
+    <div id="propertyRow">
+      <select id="propertySelect"></select>
+      <button id="managePropertiesBtn" title="Add/rename/delete properties">⚙</button>
+    </div>
     <div id="filters">
       <div class="flabel">Site Types</div>
       <div class="chips" id="chips"></div>
@@ -999,6 +1078,7 @@
       <button class="btn-primary" id="scanDeployBtn" style="flex:1 1 45%;background:#3B9EFF;color:#0A1A2E;">📷 Deploy Camera</button>
       <button class="btn-primary" id="batchAddBtn" style="flex:1 1 45%;background:#B8AF9C;color:#1A1204;">🖶 Batch Generate QR Codes</button>
       <button class="btn-ghost" id="printAllBtn" style="flex:1 1 45%;">Print / Re-print Sheet</button>
+      <button class="btn-primary" id="importPhotosBtn" style="flex:1 1 100%;background:#6B8F5C;color:#0F1A0C;">🗂 Import Photos (Preview)</button>
     </div>
 
     <div id="site-list"></div>
@@ -1020,7 +1100,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 6</div>
+    <div id="buildBadge">BUILD 8</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1118,6 +1198,39 @@
     </div>
   </div>
 
+  <!-- Import Photos (Preview): matches photos to the site a camera was at, by real EXIF timestamp -->
+  <div class="oc-modal-backdrop" id="importPhotosModalBackdrop">
+    <div class="oc-modal" id="importPhotosModal">
+      <h3>Import Photos <button class="close-x" id="importPhotosClose">&times;</button></h3>
+      <div id="importPreviewNotice">⚠ Preview only — this proves the matching logic works, but photos are NOT saved yet (no cloud storage in this prototype). They'll disappear if you reload the page.</div>
+
+      <div class="form-pop" id="importPickerArea">
+        <label>Which camera are these photos from?</label>
+        <select id="importCameraSelect"></select>
+        <label>Photos (ZIP export from Reveal/WiseEye, or select image files directly)</label>
+        <input type="file" id="importFileInput" accept=".zip,image/*" multiple />
+        <button class="btn-primary" id="importProcessBtn" style="width:100%;margin-top:12px;">Process Photos</button>
+      </div>
+
+      <div id="importProgress" style="display:none;"></div>
+      <div id="importResultsGrid"></div>
+    </div>
+  </div>
+
+  <!-- Manage Properties: organizes Sites under named properties -->
+  <div class="oc-modal-backdrop" id="managePropertiesModalBackdrop">
+    <div class="oc-modal">
+      <h3>Properties <button class="close-x" id="managePropertiesClose">&times;</button></h3>
+      <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Organize your Sites by property (e.g. different leases or land parcels). Sites keep their data if you delete a property — they just become Unassigned again.</p>
+      <div id="propertiesList" style="margin-bottom:14px;"></div>
+      <div class="form-pop">
+        <label>Add New Property</label>
+        <input type="text" id="newPropertyName" placeholder="e.g. Home Farm, North Lease" />
+        <button class="btn-primary" id="addPropertyBtn" style="width:100%;margin-top:8px;">+ Add Property</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Deployment History: every past deployment for a camera, permanently preserved -->
   <div class="oc-modal-backdrop" id="historyModalBackdrop">
     <div class="oc-modal" id="historyModal">
@@ -1210,6 +1323,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
 <script>
 (function(){
 
@@ -1252,6 +1367,8 @@
   var activeTab = 'sites'; // 'sites' | 'log' | 'cameras'
 
   var cameras = [];      // {id, name, createdAt, currentSiteId, lastDeployedAt}
+  var properties = [];   // {id, name, notes, createdAt}
+  var activePropertyId = null; // null = "All Properties"
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
   var QR_PREFIX = 'OC-CAM:'; // legacy format, still recognized by the in-page scanner as a fallback
 
@@ -1462,6 +1579,7 @@
   // ---------- camera + deployment storage ----------
   var CAM_LS_KEY = 'outdoor_companion_cameras';
   var DEP_LS_KEY = 'outdoor_companion_deployments';
+  var PROP_LS_KEY = 'outdoor_companion_properties';
 
   function camLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(CAM_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
@@ -1474,6 +1592,48 @@
   }
   function depLocalSaveAll(list){
     try{ window.localStorage.setItem(DEP_LS_KEY, JSON.stringify(list)); }catch(e){}
+  }
+  function propLocalLoadAll(){
+    try{ var raw = window.localStorage.getItem(PROP_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
+  }
+  function propLocalSaveAll(list){
+    try{ window.localStorage.setItem(PROP_LS_KEY, JSON.stringify(list)); }catch(e){}
+  }
+
+  async function loadProperties(){
+    if (hasChatStorage){
+      try{
+        var res = await window.storage.list('prop:', false);
+        var keys = (res && res.keys) ? res.keys : [];
+        var loaded = [];
+        for (var i=0;i<keys.length;i++){
+          try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
+        }
+        properties = loaded;
+      }catch(e){ properties = []; }
+    } else {
+      properties = propLocalLoadAll();
+    }
+    renderPropertySelect();
+  }
+
+  async function saveProperty(prop){
+    if (hasChatStorage){
+      await window.storage.set('prop:'+prop.id, JSON.stringify(prop), false);
+    } else {
+      var all = propLocalLoadAll();
+      var idx = all.findIndex(function(p){ return p.id === prop.id; });
+      if (idx >= 0) all[idx] = prop; else all.push(prop);
+      propLocalSaveAll(all);
+    }
+  }
+  async function deletePropertyStorage(id){
+    if (hasChatStorage){
+      try{ await window.storage.delete('prop:'+id, false); }catch(e){}
+    } else {
+      var all = propLocalLoadAll().filter(function(p){ return p.id !== id; });
+      propLocalSaveAll(all);
+    }
   }
 
   async function loadCameras(){
@@ -1556,6 +1716,95 @@
     });
   }
 
+  // ---------- Property layer: organize Sites under named properties ----------
+  function renderPropertySelect(){
+    var sel = document.getElementById('propertySelect');
+    var prevValue = sel.value;
+    sel.innerHTML = '';
+    var allOpt = document.createElement('option');
+    allOpt.value = '';
+    allOpt.textContent = 'All Properties';
+    sel.appendChild(allOpt);
+    properties.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); }).forEach(function(p){
+      var opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      sel.appendChild(opt);
+    });
+    // Restore previous selection if it still exists, else fall back to "All Properties"
+    if (properties.some(function(p){ return p.id === prevValue; })){
+      sel.value = prevValue;
+    } else {
+      sel.value = '';
+      activePropertyId = null;
+    }
+  }
+
+  document.getElementById('propertySelect').addEventListener('change', function(){
+    activePropertyId = this.value || null;
+    renderMarkers();
+    renderList();
+  });
+
+  document.getElementById('managePropertiesBtn').addEventListener('click', function(){
+    renderPropertiesManageList();
+    closeAllModals();
+    document.getElementById('managePropertiesModalBackdrop').classList.add('show');
+  });
+  document.getElementById('managePropertiesClose').addEventListener('click', function(){
+    document.getElementById('managePropertiesModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('managePropertiesModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('show');
+  });
+
+  function renderPropertiesManageList(){
+    var list = document.getElementById('propertiesList');
+    if (properties.length === 0){
+      list.innerHTML = '<div class="empty" style="padding:14px 0;">No properties yet — add one below.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    properties.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); }).forEach(function(p){
+      var siteCount = sites.filter(function(s){ return s.propertyId === p.id; }).length;
+      var row = document.createElement('div');
+      row.className = 'property-row';
+      row.innerHTML =
+        '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + '</div></div>' +
+        '<button class="btn-ghost" data-act="delete-prop" data-id="' + p.id + '" style="color:#D94A2E;">Delete</button>';
+      list.appendChild(row);
+      row.querySelector('[data-act="delete-prop"]').addEventListener('click', async function(){
+        var sure = confirm('Delete "' + p.name + '"?\n\nSites assigned to it will NOT be deleted — they\'ll just become Unassigned.');
+        if (!sure) return;
+        properties = properties.filter(function(x){ return x.id !== p.id; });
+        try{ await deletePropertyStorage(p.id); }catch(e){ console.error('Outdoor Companion: failed to delete property', e); }
+        // Unassign any sites that referenced this property — never delete the sites themselves.
+        sites.filter(function(s){ return s.propertyId === p.id; }).forEach(function(s){
+          s.propertyId = null;
+          saveSite(s).catch(function(err){ console.error('Outdoor Companion: failed to unassign site from deleted property', err); });
+        });
+        if (activePropertyId === p.id) activePropertyId = null;
+        renderPropertySelect();
+        renderPropertiesManageList();
+        renderMarkers();
+        renderList();
+      });
+    });
+  }
+
+  document.getElementById('addPropertyBtn').addEventListener('click', async function(){
+    var nameInput = document.getElementById('newPropertyName');
+    var name = nameInput.value.trim();
+    if (!name) return;
+    var prop = {id: uid(), name: name, notes: '', createdAt: Date.now()};
+    properties.push(prop);
+    try{ await saveProperty(prop); }catch(e){ console.error('Outdoor Companion: failed to save property', e); }
+    nameInput.value = '';
+    renderPropertySelect();
+    renderPropertiesManageList();
+    showToast('Property "' + name + '" added');
+  });
+
   var activeDateFilter = null; // null = All Time, otherwise {from, to, label}
 
   function setDateFilter(filterObj){
@@ -1623,12 +1872,18 @@
     return timestamp >= activeDateFilter.from && timestamp <= activeDateFilter.to;
   }
 
+  function passesPropertyFilter(site){
+    if (!activePropertyId) return true; // "All Properties" selected
+    return site.propertyId === activePropertyId;
+  }
+
   function renderMarkers(){
     Object.keys(markers).forEach(function(id){ map.removeLayer(markers[id]); });
     markers = {};
     sites.forEach(function(s){
       if (!activeFilters.has(s.type)) return;
       if (!passesDateFilter(s.lastActivityAt || s.createdAt)) return;
+      if (!passesPropertyFilter(s)) return;
       var m = L.marker([s.lat,s.lng], {icon: markerIcon(s.type)}).addTo(map);
       m.bindPopup(popupHtml(s));
       m.on('popupopen', function(e){ bindPopupActions(e.popup, s.id); });
@@ -1672,7 +1927,7 @@
   function renderList(){
     if (activeTab !== 'sites') return;
     var list = document.getElementById('site-list');
-    var filtered = sites.filter(function(s){ return activeFilters.has(s.type) && passesDateFilter(s.lastActivityAt || s.createdAt); });
+    var filtered = sites.filter(function(s){ return activeFilters.has(s.type) && passesDateFilter(s.lastActivityAt || s.createdAt) && passesPropertyFilter(s); });
     document.getElementById('siteCount').textContent = filtered.length + (filtered.length===1 ? ' SITE' : ' SITES');
     if (filtered.length === 0){
       if (sites.length > 0){
@@ -1857,6 +2112,10 @@
     if (tempMarker) map.removeLayer(tempMarker);
     tempMarker = L.marker(latlng, {icon: markerIcon('custom')}).addTo(map);
 
+    var propertyOptions = '<option value="">Unassigned</option>' +
+      properties.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
+        .map(function(p){ return '<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>'; }).join('');
+
     var formHtml =
       '<div class="form-pop">' +
         '<h3 style="margin:0 0 2px 0;font-family:Oswald,sans-serif;font-size:14px;text-transform:uppercase;">New Observation Site</h3>' +
@@ -1867,6 +2126,10 @@
         '<select id="f_type">' +
           Object.keys(TYPES).map(function(k){ return '<option value="'+k+'">'+TYPES[k].label+'</option>'; }).join('') +
         '</select>' +
+        (properties.length > 0 ?
+          '<label>Property</label>' +
+          '<select id="f_property">' + propertyOptions + '</select>'
+          : '') +
         '<label>Notes (optional)</label>' +
         '<textarea id="f_notes" placeholder="Any details worth remembering"></textarea>' +
         '<div class="row">' +
@@ -1883,11 +2146,14 @@
     setTimeout(function(){
       var saveBtn = document.getElementById('f_save');
       var cancelBtn = document.getElementById('f_cancel');
+      var propSel = document.getElementById('f_property');
+      if (propSel && activePropertyId) propSel.value = activePropertyId; // default to whatever property filter is active
       if (saveBtn) saveBtn.addEventListener('click', async function(){
         var name = document.getElementById('f_name').value.trim();
         var type = document.getElementById('f_type').value;
         var notes = document.getElementById('f_notes').value.trim();
         if (!name){ document.getElementById('f_name').style.borderColor = '#D94A2E'; return; }
+        var propertyIdVal = document.getElementById('f_property') ? (document.getElementById('f_property').value || null) : null;
         var site = {
           id: uid(),
           name: name,
@@ -1896,7 +2162,8 @@
           lat: latlng.lat,
           lng: latlng.lng,
           createdAt: Date.now(),
-          lastActivityAt: Date.now()
+          lastActivityAt: Date.now(),
+          propertyId: propertyIdVal
         };
         sites.push(site);
         try{
@@ -2347,6 +2614,7 @@
     await loadObservations();
     await loadCameras();
     await loadDeployments();
+    await loadProperties();
     handleCameraUrlParam();
   })();
 
@@ -2479,6 +2747,162 @@
     map.flyTo([lat, lng], Math.max(map.getZoom(), 16));
     setTimeout(function(){ historyViewMarker.openPopup(); }, 400);
   }
+
+  // ---------- Bulk Photo Import (Preview) ----------
+  // Session-only storage — proves the real matching logic (EXIF timestamp + Deployment
+  // History cross-reference) without needing real cloud storage yet. Swapping this for
+  // permanent storage later means replacing ONLY persistImportedPhoto()'s body — nothing
+  // else in this feature needs to change.
+  var importedPhotosSession = [];
+
+  function persistImportedPhoto(photoRecord){
+    // TODO when real backend exists: upload photoRecord.blob to cloud storage here,
+    // save the resulting URL + metadata to the real database, instead of this array.
+    importedPhotosSession.push(photoRecord);
+  }
+
+  document.getElementById('importPhotosBtn').addEventListener('click', function(){
+    var sel = document.getElementById('importCameraSelect');
+    sel.innerHTML = cameras.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
+      .map(function(c){ return '<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>'; }).join('');
+    document.getElementById('importResultsGrid').innerHTML = '';
+    document.getElementById('importProgress').style.display = 'none';
+    document.getElementById('importPickerArea').style.display = 'block';
+    document.getElementById('importFileInput').value = '';
+    if (cameras.length === 0){
+      sel.innerHTML = '<option value="">No cameras registered yet</option>';
+    }
+    closeAllModals();
+    document.getElementById('importPhotosModalBackdrop').classList.add('show');
+  });
+  document.getElementById('importPhotosClose').addEventListener('click', function(){
+    document.getElementById('importPhotosModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('importPhotosModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('show');
+  });
+
+  function readFileAsArrayBuffer(file){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(e){ resolve(e.target.result); };
+      reader.onerror = reject;
+      reader.readAsArrayBuffer(file);
+    });
+  }
+
+  // Reads the REAL embedded EXIF capture date from a photo — standard across virtually
+  // all cameras, not a guessed/proprietary format. Returns a timestamp, or null if the
+  // photo has no EXIF date (caller falls back to file modified date).
+  async function extractExifTimestamp(blob){
+    try{
+      var buffer = await readFileAsArrayBuffer(blob);
+      var tags = EXIF.readFromBinaryFile(buffer);
+      var raw = tags && (tags.DateTimeOriginal || tags.DateTime);
+      if (raw){
+        var parts = raw.split(' ');
+        var d = parts[0].split(':');
+        var t = (parts[1] || '00:00:00').split(':');
+        var dt = new Date(parseInt(d[0],10), parseInt(d[1],10)-1, parseInt(d[2],10), parseInt(t[0],10), parseInt(t[1],10), parseInt(t[2],10));
+        if (!isNaN(dt.getTime())) return dt.getTime();
+      }
+    }catch(e){ /* no EXIF or unreadable — caller falls back */ }
+    return null;
+  }
+
+  // Given a camera and a photo's real timestamp, finds which Site that camera was
+  // deployed to AT THAT TIME — using the permanent Deployment History, not just wherever
+  // the camera happens to be sitting today. This is what makes matching meaningful even
+  // for a camera that's been moved multiple times since.
+  function findSiteForCameraAtTime(cameraId, timestamp){
+    var priorDeployments = deployments.filter(function(d){ return d.cameraId === cameraId && d.deployedAt <= timestamp; });
+    if (priorDeployments.length === 0) return null; // photo predates any known deployment
+    priorDeployments.sort(function(a,b){ return b.deployedAt - a.deployedAt; });
+    var latest = priorDeployments[0];
+    return sites.filter(function(s){ return s.id === latest.siteId; })[0] || null;
+  }
+
+  document.getElementById('importProcessBtn').addEventListener('click', async function(){
+    var cameraId = document.getElementById('importCameraSelect').value;
+    var files = document.getElementById('importFileInput').files;
+    if (!cameraId){ alert('Please register a camera first.'); return; }
+    if (!files || files.length === 0){ alert('Please choose a ZIP file or select some photos.'); return; }
+
+    var progress = document.getElementById('importProgress');
+    progress.style.display = 'block';
+    progress.textContent = 'Reading files…';
+    document.getElementById('importPickerArea').style.display = 'none';
+
+    // Flatten input into a plain list of {name, blob, fallbackDate} regardless of
+    // whether it came from a ZIP or direct image file selection.
+    var imageJobs = [];
+    for (var i=0; i<files.length; i++){
+      var file = files[i];
+      if (/\.zip$/i.test(file.name)){
+        try{
+          var zip = await JSZip.loadAsync(file);
+          var entryNames = Object.keys(zip.files).filter(function(name){
+            return /\.(jpe?g|png)$/i.test(name) && !zip.files[name].dir;
+          });
+          for (var j=0; j<entryNames.length; j++){
+            var entry = zip.files[entryNames[j]];
+            var blob = await entry.async('blob');
+            imageJobs.push({name: entryNames[j], blob: blob, fallbackDate: entry.date ? entry.date.getTime() : Date.now()});
+          }
+        }catch(e){
+          console.error('Outdoor Companion: failed to read ZIP', e);
+          alert('Could not read that ZIP file — it may be corrupted or password-protected.');
+        }
+      } else if (file.type.indexOf('image/') === 0){
+        imageJobs.push({name: file.name, blob: file, fallbackDate: file.lastModified || Date.now()});
+      }
+    }
+
+    if (imageJobs.length === 0){
+      progress.textContent = 'No photos found in what was selected.';
+      return;
+    }
+
+    var results = [];
+    for (var k=0; k<imageJobs.length; k++){
+      progress.textContent = 'Processing ' + (k+1) + ' of ' + imageJobs.length + '…';
+      var job = imageJobs[k];
+      var timestamp = await extractExifTimestamp(job.blob);
+      var usedFallback = false;
+      if (!timestamp){ timestamp = job.fallbackDate; usedFallback = true; }
+      var matchedSite = findSiteForCameraAtTime(cameraId, timestamp);
+      var objectUrl = URL.createObjectURL(job.blob);
+      var record = {
+        id: uid(),
+        cameraId: cameraId,
+        filename: job.name,
+        timestamp: timestamp,
+        usedFallbackDate: usedFallback,
+        matchedSiteId: matchedSite ? matchedSite.id : null,
+        matchedSiteName: matchedSite ? matchedSite.name : null,
+        objectUrl: objectUrl
+      };
+      persistImportedPhoto(record);
+      results.push(record);
+    }
+
+    progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed.';
+    results.sort(function(a,b){ return a.timestamp - b.timestamp; });
+    var grid = document.getElementById('importResultsGrid');
+    grid.innerHTML = '';
+    results.forEach(function(r){
+      var card = document.createElement('div');
+      card.className = 'import-photo-card';
+      var dateStr = new Date(r.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
+      card.innerHTML =
+        '<img src="' + r.objectUrl + '" alt="' + escapeHtml(r.filename) + '">' +
+        '<div class="meta">' +
+          '<div class="dt">' + escapeHtml(dateStr) + (r.usedFallbackDate ? ' <em>(file date)</em>' : '') + '</div>' +
+          '<div class="site' + (r.matchedSiteName ? '' : ' unmatched') + '">' + (r.matchedSiteName ? escapeHtml(r.matchedSiteName) : 'No site match') + '</div>' +
+        '</div>';
+      grid.appendChild(card);
+    });
+  });
 
   async function deleteCameraFlow(camId){
     var cam = cameras.filter(function(c){ return c.id === camId; })[0];
