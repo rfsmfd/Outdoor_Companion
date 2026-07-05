@@ -676,27 +676,33 @@
   .deploy-review-row .info .nm{font-size:13px;font-weight:600;}
   .deploy-review-row .info .co{font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:var(--moss);}
 
+  #deployReviewModal{
+    width:520px;
+    max-width:94vw;
+  }
   #deployMiniMapWrap{
+    position:relative;
     width:100%;
-    height:220px;
+    height:420px;
     border-radius:6px;
     overflow:hidden;
     border:1px solid var(--line);
     margin-bottom:10px;
   }
   #deployMiniMap{ width:100%; height:100%; background:#0e1712; }
+  #deployCrosshair{
+    position:absolute;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    z-index:500;
+    filter:drop-shadow(0 1px 3px rgba(0,0,0,0.8));
+  }
   #deployDragHint{
     font-size:11px;
     color:var(--text-dim);
     text-align:center;
     margin-bottom:14px;
-  }
-  .deploy-pin-marker{
-    width:26px;height:26px;border-radius:50% 50% 50% 0;
-    background:#FF6A13;
-    border:2px solid #1A1204;
-    transform:rotate(-45deg);
-    box-shadow:0 2px 5px rgba(0,0,0,0.5);
   }
 
   /* ---------- Printable QR sheet ---------- */
@@ -974,7 +980,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 3</div>
+    <div id="buildBadge">BUILD 4</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1020,7 +1026,7 @@
 
   <!-- Deploy review modal -->
   <div class="oc-modal-backdrop" id="deployModalBackdrop">
-    <div class="oc-modal">
+    <div class="oc-modal" id="deployReviewModal">
       <h3>Confirm Deployment <button class="close-x" id="deployModalClose">&times;</button></h3>
       <div class="deploy-review-row">
         <div class="badge">📷</div>
@@ -1032,8 +1038,17 @@
       <div id="deployGpsNote" style="font-size:11px;color:var(--text-dim);margin-bottom:10px;"></div>
       <div id="deployMiniMapWrap">
         <div id="deployMiniMap"></div>
+        <div id="deployCrosshair">
+          <svg width="44" height="44" viewBox="0 0 44 44">
+            <circle cx="22" cy="22" r="9" fill="none" stroke="#FF6A13" stroke-width="3"/>
+            <line x1="22" y1="0" x2="22" y2="10" stroke="#FF6A13" stroke-width="3"/>
+            <line x1="22" y1="34" x2="22" y2="44" stroke="#FF6A13" stroke-width="3"/>
+            <line x1="0" y1="22" x2="10" y2="22" stroke="#FF6A13" stroke-width="3"/>
+            <line x1="34" y1="22" x2="44" y2="22" stroke="#FF6A13" stroke-width="3"/>
+          </svg>
+        </div>
       </div>
-      <div id="deployDragHint">Drag the pin to fine-tune the spot if the GPS signal was weak</div>
+      <div id="deployDragHint">Pan or pinch-zoom the map to line up the crosshair with the camera's real spot</div>
       <button class="btn-primary" id="deploySaveBtn" style="width:100%;margin-bottom:8px;">Lock In Deployment</button>
       <button class="btn-ghost" id="deployCancelBtn" style="width:100%;">Cancel</button>
     </div>
@@ -1484,10 +1499,22 @@
 
   function popupHtml(s){
     var t = TYPES[s.type] || TYPES.custom;
+    var camInfo = '';
+    if (s.type === 'camera'){
+      var cam = cameras.filter(function(c){ return c.currentSiteId === s.id; })[0];
+      if (cam){
+        var makeModel = [cam.make, cam.model].filter(Boolean).join(' ');
+        camInfo =
+          (makeModel ? '<div class="notes"><strong>' + escapeHtml(makeModel) + '</strong></div>' : '') +
+          (cam.notes ? '<div class="notes">' + escapeHtml(cam.notes) + '</div>' : '') +
+          (cam.lastDeployedAt ? '<div class="coords">Deployed ' + relTime(cam.lastDeployedAt) + '</div>' : '');
+      }
+    }
     return '' +
       '<div class="pop">' +
         '<h3>'+escapeHtml(s.name)+'</h3>' +
         '<div class="ty" style="color:'+t.color+'">'+t.label+'</div>' +
+        camInfo +
         (s.notes ? '<div class="notes">'+escapeHtml(s.notes)+'</div>' : '') +
         '<div class="coords">'+fmtCoord(s.lat)+', '+fmtCoord(s.lng)+'</div>' +
         '<div class="row">' +
@@ -2583,21 +2610,20 @@
   // ---------- Deploy review + save ----------
   var pendingDeployCam = null;
   var deployMap = null;
-  var deployMarker = null;
-  var deployPos = null; // current pin position — starts at GPS fix, can be nudged by dragging
+  var deployPos = null; // current confirmed position — starts at GPS fix, corrected by panning the map
 
   function ensureDeployMap(){
     if (deployMap) return;
     deployMap = L.map('deployMiniMap', {
-      zoomControl:false,
+      zoomControl:true,
       attributionControl:false,
-      // Panning disabled on purpose — this is a small confirmation map, and on a phone
-      // a touch meant for the pin often grabs the map instead. Since the only interaction
-      // this map needs is dragging the pin, removing map-panning entirely eliminates the
-      // conflict rather than trying to out-guess which one the user meant to touch.
-      dragging:false,
-      touchZoom:false,
-      scrollWheelZoom:false,
+      // Full panning/zooming is intentional here — the pin is a fixed crosshair at
+      // screen-center, and the user moves the MAP underneath it instead of dragging a
+      // small on-screen target. This works with big fingers, and unlike a locked map,
+      // lets you reach a spot even if GPS put you well off under tree canopy.
+      dragging:true,
+      touchZoom:true,
+      scrollWheelZoom:true,
       doubleClickZoom:false,
       boxZoom:false,
       keyboard:false
@@ -2605,14 +2631,13 @@
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom:19
     }).addTo(deployMap);
-    deployMarker = L.marker([0,0], {
-      draggable:true,
-      icon: L.divIcon({className:'', html:'<div class="deploy-pin-marker"></div>', iconSize:[26,26], iconAnchor:[13,24]})
-    }).addTo(deployMap);
-    deployMarker.on('drag', function(e){
-      var ll = e.target.getLatLng();
-      deployPos = {lat: ll.lat, lng: ll.lng, accuracy: deployPos ? deployPos.accuracy : null};
-      document.getElementById('deployCoords').textContent = fmtCoord(deployPos.lat) + ', ' + fmtCoord(deployPos.lng) + ' (adjusted)';
+
+    // Update the confirmed position live as the map is panned — the crosshair itself
+    // never moves on screen; the map moves under it.
+    deployMap.on('move', function(){
+      var c = deployMap.getCenter();
+      deployPos = {lat: c.lat, lng: c.lng, accuracy: deployPos ? deployPos.accuracy : null};
+      document.getElementById('deployCoords').textContent = fmtCoord(deployPos.lat) + ', ' + fmtCoord(deployPos.lng);
     });
   }
 
@@ -2623,12 +2648,12 @@
     if (pos){
       deployPos = {lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy};
       document.getElementById('deployCoords').textContent = fmtCoord(pos.lat) + ', ' + fmtCoord(pos.lng);
-      document.getElementById('deployGpsNote').textContent = 'GPS accuracy ~' + Math.round(pos.accuracy) + 'm — drag the pin below if it\'s not quite right';
+      document.getElementById('deployGpsNote').textContent = 'GPS accuracy ~' + Math.round(pos.accuracy) + 'm — pan the map below if the crosshair isn\'t quite right';
     } else {
       var c = map.getCenter();
       deployPos = {lat: c.lat, lng: c.lng, accuracy: null};
       document.getElementById('deployCoords').textContent = 'Using map center (no GPS fix yet)';
-      document.getElementById('deployGpsNote').textContent = 'No GPS fix yet — drag the pin below to the right spot.';
+      document.getElementById('deployGpsNote').textContent = 'No GPS fix yet — pan the map below to the right spot.';
     }
     closeAllModals();
     document.getElementById('deployModalBackdrop').classList.add('show');
@@ -2636,8 +2661,7 @@
     ensureDeployMap();
     setTimeout(function(){
       deployMap.invalidateSize();
-      deployMap.setView([deployPos.lat, deployPos.lng], 18);
-      deployMarker.setLatLng([deployPos.lat, deployPos.lng]);
+      deployMap.setView([deployPos.lat, deployPos.lng], 17);
     }, 50);
   }
 
@@ -2656,7 +2680,7 @@
   document.getElementById('deploySaveBtn').addEventListener('click', async function(){
     if (!pendingDeployCam) return;
     var cam = pendingDeployCam;
-    // Use the pin's current position — this reflects any manual drag-adjustment,
+    // Use the crosshair's current position — this reflects any manual pan-adjustment,
     // falling back to raw GPS/map-center if the person never touched it.
     var pos = deployPos || lastKnownPos || (function(){ var c = map.getCenter(); return {lat:c.lat, lng:c.lng, accuracy:null}; })();
 
