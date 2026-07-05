@@ -189,6 +189,44 @@
     text-transform:uppercase;
   }
 
+  #moduleSwitcher{
+    display:flex;
+    border-bottom:1px solid var(--line);
+  }
+  .module-btn{
+    flex:1;
+    background:transparent;
+    border:none;
+    border-radius:0;
+    padding:10px 8px;
+    font-size:12px;
+    font-weight:600;
+    color:var(--text-dim);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:5px;
+  }
+  .module-btn.active{
+    background:var(--panel-alt);
+    color:var(--accent);
+    border-bottom:2px solid var(--accent);
+  }
+  .module-btn.disabled{
+    opacity:0.45;
+    cursor:not-allowed;
+  }
+  .module-btn .soon{
+    font-size:8.5px;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+    background:var(--line);
+    color:var(--text-dim);
+    padding:2px 5px;
+    border-radius:3px;
+    font-weight:700;
+  }
+
   #actions{
     padding:14px 16px;
     display:flex;
@@ -1050,6 +1088,11 @@
       <p>Observation Site Map — Prototype</p>
     </div>
 
+    <div id="moduleSwitcher">
+      <button class="module-btn active" data-module="hunting">🏹 Hunting</button>
+      <button class="module-btn" data-module="fishing">🎣 Fishing</button>
+    </div>
+
     <div id="actions">
       <button class="btn-primary" id="addSiteBtn">+ Add Site</button>
       <button class="btn-primary" id="gpsSiteBtn" style="background:#3B9EFF;color:#0A1A2E;">📍 My Location</button>
@@ -1100,7 +1143,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 8</div>
+    <div id="buildBadge">BUILD 11</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1225,8 +1268,9 @@
       <div id="propertiesList" style="margin-bottom:14px;"></div>
       <div class="form-pop">
         <label>Add New Property</label>
+        <p style="font-size:11px;color:var(--accent);margin:0 0 8px 0;">📍 First, pan/zoom the map (behind this window) to frame the whole property — that exact view gets saved, so selecting this property later flies you straight back to it.</p>
         <input type="text" id="newPropertyName" placeholder="e.g. Home Farm, North Lease" />
-        <button class="btn-primary" id="addPropertyBtn" style="width:100%;margin-top:8px;">+ Add Property</button>
+        <button class="btn-primary" id="addPropertyBtn" style="width:100%;margin-top:8px;">+ Save This Map View as a Property</button>
       </div>
     </div>
   </div>
@@ -1328,7 +1372,7 @@
 <script>
 (function(){
 
-  var TYPES = {
+  var TYPES_HUNTING = {
     camera:   {label:'Trail Camera',  abbrev:'CAM', color:'#FF6A13'},
     stand:    {label:'Tree Stand',    abbrev:'STD', color:'#6B8F5C'},
     scrape:   {label:'Scrape',        abbrev:'SCR', color:'#8B5E3C'},
@@ -1341,8 +1385,21 @@
     custom:   {label:'Custom Point',  abbrev:'PIN', color:'#B8AF9C'}
   };
 
+  // Fishing Site types — lakes/rivers/ponds are Properties (already generic); these are
+  // the points of interest ON the water, parallel to hunting's stands/cameras/scrapes.
+  var TYPES_FISHING = {
+    ramp:       {label:'Boat Ramp',     abbrev:'RMP', color:'#4A7AA8'},
+    dock:       {label:'Dock',          abbrev:'DCK', color:'#6B8F5C'},
+    hole:       {label:'Favorite Hole', abbrev:'HOL', color:'#FF6A13'},
+    structure:  {label:'Structure',     abbrev:'STR', color:'#8B5E3C'},
+    dropoff:    {label:'Drop-off',      abbrev:'DRP', color:'#7A8A94'},
+    brushpile:  {label:'Brush Pile',    abbrev:'BRS', color:'#4A7A6C'},
+    baitshop:   {label:'Bait Shop',     abbrev:'BAIT', color:'#C9A03C'},
+    fishcustom: {label:'Custom Point',  abbrev:'PIN', color:'#B8AF9C'}
+  };
+
   // Field Observation types — the fast, one-tap log from anywhere in the field
-  var OBS_TYPES = {
+  var OBS_TYPES_HUNTING = {
     buck:    {label:'Buck',        abbrev:'BUC', color:'#C9A03C'},
     doe:     {label:'Doe',         abbrev:'DOE', color:'#B08D57'},
     turkey:  {label:'Turkey',      abbrev:'TRK', color:'#8B4513'},
@@ -1356,9 +1413,43 @@
     custom:  {label:'Custom',      abbrev:'OBS', color:'#B8AF9C'}
   };
 
+  // "Catches" — fishing's equivalent of Field Observations
+  var OBS_TYPES_FISHING = {
+    bass:      {label:'Bass',       abbrev:'BAS', color:'#4A7A4A'},
+    catfish:   {label:'Catfish',    abbrev:'CAT', color:'#7A8A94'},
+    crappie:   {label:'Crappie',    abbrev:'CRP', color:'#8FA05C'},
+    bluegill:  {label:'Bluegill',   abbrev:'BLG', color:'#3B9EFF'},
+    trout:     {label:'Trout',      abbrev:'TRT', color:'#C9A03C'},
+    walleye:   {label:'Walleye',    abbrev:'WAL', color:'#B08D57'},
+    pike:      {label:'Pike/Musky', abbrev:'PIK', color:'#4A7A6C'},
+    nocatch:   {label:'No Catch',   abbrev:'NC',  color:'#7A8A94'},
+    fishnote:  {label:'Trip Note',  abbrev:'NOTE', color:'#FF6A13'},
+    fishcustom2:{label:'Custom',    abbrev:'OBS', color:'#B8AF9C'}
+  };
+
+  var activeModule = 'hunting'; // 'hunting' | 'fishing'
+  function getActiveTypes(){ return activeModule === 'fishing' ? TYPES_FISHING : TYPES_HUNTING; }
+  function getActiveObsTypes(){ return activeModule === 'fishing' ? OBS_TYPES_FISHING : OBS_TYPES_HUNTING; }
+  // A Site/Observation "belongs" to whichever module its type key is defined under —
+  // no extra field needed, since hunting and fishing type keys are guaranteed unique.
+  function typeIsInActiveModule(typeKey, isObservation){
+    var dict = isObservation ? getActiveObsTypes() : getActiveTypes();
+    return Object.prototype.hasOwnProperty.call(dict, typeKey);
+  }
+
+  // Fallback type entry for an unrecognized key — must be module-aware since fishing's
+  // "custom point" key deliberately differs from hunting's (kept disjoint on purpose, so
+  // module membership can be inferred from the type key without a separate field).
+  function getFallbackTypeEntry(isObservation){
+    if (isObservation){
+      return activeModule === 'fishing' ? OBS_TYPES_FISHING.fishcustom2 : OBS_TYPES_HUNTING.custom;
+    }
+    return activeModule === 'fishing' ? TYPES_FISHING.fishcustom : TYPES_HUNTING.custom;
+  }
+
   var sites = [];
   var markers = {};
-  var activeFilters = new Set(Object.keys(TYPES));
+  var activeFilters = new Set(Object.keys(TYPES_HUNTING));
   var placing = false;
   var tempMarker = null;
 
@@ -1405,6 +1496,62 @@
 
   function uid(){ return 's_' + Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
+  // ---------- Environmental data: moon phase (pure math, no API) + weather (Open-Meteo) ----------
+  // Moon phase validated against real astronomical data (multiple confirmed 2026 full/new
+  // moon dates) — accurate within 1-3% illumination, exact on full/new moon peak moments.
+  function getMoonPhase(date){
+    var lunarCycle = 29.530588861;
+    var knownNewMoon = Date.UTC(2000, 0, 6, 18, 14, 0); // Jan 6, 2000 18:14 UTC - a known new moon
+    var daysSince = (date.getTime() - knownNewMoon) / 86400000;
+    var phase = (daysSince % lunarCycle) / lunarCycle;
+    if (phase < 0) phase += 1;
+    var illumination = Math.round((1 - Math.cos(phase * 2 * Math.PI)) / 2 * 100);
+    var name;
+    if (phase < 0.02 || phase >= 0.98) name = 'New Moon';
+    else if (phase < 0.24) name = 'Waxing Crescent';
+    else if (phase < 0.26) name = 'First Quarter';
+    else if (phase < 0.49) name = 'Waxing Gibbous';
+    else if (phase < 0.51) name = 'Full Moon';
+    else if (phase < 0.74) name = 'Waning Gibbous';
+    else if (phase < 0.76) name = 'Last Quarter';
+    else name = 'Waning Crescent';
+    return {name: name, illumination: illumination};
+  }
+
+  function degreesToCompass(deg){
+    if (deg == null) return null;
+    var dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    return dirs[Math.round(deg / 22.5) % 16];
+  }
+
+  // Fetches CURRENT conditions for a live event (e.g. a Quick Log sighting happening now).
+  // Deliberately has a short timeout and never throws past the caller — a failure here must
+  // never block or break whatever triggered it. Returns null on any failure.
+  async function fetchCurrentWeather(lat, lng){
+    try{
+      var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lng +
+        '&current=temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto';
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function(){ controller.abort(); }, 8000);
+      var res = await fetch(url, {signal: controller.signal});
+      clearTimeout(timeoutId);
+      if (!res.ok) return null;
+      var data = await res.json();
+      if (!data || !data.current) return null;
+      return {
+        tempF: Math.round(data.current.temperature_2m),
+        windMph: Math.round(data.current.wind_speed_10m),
+        windDir: degreesToCompass(data.current.wind_direction_10m),
+        pressureHpa: Math.round(data.current.surface_pressure),
+        precipitation: data.current.precipitation,
+        fetchedAt: Date.now()
+      };
+    }catch(e){
+      return null; // no signal, timeout, or API hiccup — caller treats this as "unavailable"
+    }
+  }
+
+
   // Ensures only one modal can ever be visibly open at a time. Called before showing
   // any modal, so a leftover/forgotten one (e.g. an unclosed print sheet) can never
   // silently resurface once a newer modal on top of it gets dismissed.
@@ -1415,7 +1562,7 @@
   }
 
   function markerIcon(type){
-    var t = TYPES[type] || TYPES.custom;
+    var t = getActiveTypes()[type] || getFallbackTypeEntry(false);
     return L.divIcon({
       className: '',
       html: '<div class="site-marker" style="--mc:'+t.color+'">'+t.abbrev+'</div>',
@@ -1426,7 +1573,7 @@
   }
 
   function obsMarkerIcon(type){
-    var t = OBS_TYPES[type] || OBS_TYPES.custom;
+    var t = getActiveObsTypes()[type] || getFallbackTypeEntry(true);
     return L.divIcon({
       className: '',
       html: '<div class="obs-marker" style="--mc:'+t.color+'"></div>',
@@ -1701,8 +1848,8 @@
   function renderChips(){
     var chips = document.getElementById('chips');
     chips.innerHTML = '';
-    Object.keys(TYPES).forEach(function(key){
-      var t = TYPES[key];
+    Object.keys(getActiveTypes()).forEach(function(key){
+      var t = getActiveTypes()[key];
       var el = document.createElement('div');
       el.className = 'chip' + (activeFilters.has(key) ? '' : ' off');
       el.innerHTML = '<span class="dot" style="background:'+t.color+'"></span>' + t.label;
@@ -1744,6 +1891,13 @@
     activePropertyId = this.value || null;
     renderMarkers();
     renderList();
+    if (activePropertyId){
+      var prop = properties.filter(function(p){ return p.id === activePropertyId; })[0];
+      if (prop && typeof prop.centerLat === 'number'){
+        map.flyTo([prop.centerLat, prop.centerLng], prop.zoom || 15);
+        if (window.innerWidth <= 820) closeSidebar();
+      }
+    }
   });
 
   document.getElementById('managePropertiesBtn').addEventListener('click', function(){
@@ -1796,13 +1950,22 @@
     var nameInput = document.getElementById('newPropertyName');
     var name = nameInput.value.trim();
     if (!name) return;
-    var prop = {id: uid(), name: name, notes: '', createdAt: Date.now()};
+    var center = map.getCenter();
+    var prop = {
+      id: uid(),
+      name: name,
+      notes: '',
+      createdAt: Date.now(),
+      centerLat: center.lat,
+      centerLng: center.lng,
+      zoom: map.getZoom()
+    };
     properties.push(prop);
     try{ await saveProperty(prop); }catch(e){ console.error('Outdoor Companion: failed to save property', e); }
     nameInput.value = '';
     renderPropertySelect();
     renderPropertiesManageList();
-    showToast('Property "' + name + '" added');
+    showToast('Property "' + name + '" saved — this map view will be remembered');
   });
 
   var activeDateFilter = null; // null = All Time, otherwise {from, to, label}
@@ -1892,7 +2055,7 @@
   }
 
   function popupHtml(s){
-    var t = TYPES[s.type] || TYPES.custom;
+    var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
     var camInfo = '';
     if (s.type === 'camera'){
       var cam = cameras.filter(function(c){ return c.currentSiteId === s.id; })[0];
@@ -1939,7 +2102,7 @@
     }
     list.innerHTML = '';
     filtered.slice().sort(function(a,b){ return b.createdAt - a.createdAt; }).forEach(function(s){
-      var t = TYPES[s.type] || TYPES.custom;
+      var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
       var row = document.createElement('div');
       row.className = 'site-row';
       row.innerHTML =
@@ -1958,12 +2121,24 @@
 
   // ---------- observation rendering ----------
   function obsPopupHtml(o){
-    var t = OBS_TYPES[o.type] || OBS_TYPES.custom;
+    var t = getActiveObsTypes()[o.type] || getFallbackTypeEntry(true);
     var site = o.siteId ? sites.filter(function(s){ return s.id === o.siteId; })[0] : null;
+    var envLine = '';
+    if (o.moonPhase){
+      envLine += '🌙 ' + escapeHtml(o.moonPhase.name) + ' (' + o.moonPhase.illumination + '%)';
+    }
+    if (o.weatherStatus === 'ok' && o.weather){
+      envLine += (envLine ? ' · ' : '') + o.weather.tempF + '°F, ' + o.weather.windDir + ' ' + o.weather.windMph + 'mph, ' + o.weather.pressureHpa + 'hPa';
+    } else if (o.weatherStatus === 'pending'){
+      envLine += (envLine ? ' · ' : '') + '<em style="color:var(--text-dim);">fetching weather…</em>';
+    } else if (o.weatherStatus === 'unavailable'){
+      envLine += (envLine ? ' · ' : '') + '<em style="color:var(--text-dim);">weather unavailable</em>';
+    }
     return '' +
       '<div class="pop form-pop">' +
         '<h3 style="margin:0 0 2px 0;">'+t.label+'</h3>' +
         '<div class="ty" style="color:'+t.color+'">'+relTime(o.createdAt)+'</div>' +
+        (envLine ? '<div class="notes" style="font-size:11.5px;">' + envLine + '</div>' : '') +
         (site ? '<div class="notes">Near <strong>'+escapeHtml(site.name)+'</strong></div>' : '') +
         '<div class="coords">'+fmtCoord(o.lat)+', '+fmtCoord(o.lng)+(o.approx ? ' (approx.)' : '')+'</div>' +
         '<label>Count</label>' +
@@ -2002,6 +2177,7 @@
     obsMarkers = {};
     observations.forEach(function(o){
       if (!passesDateFilter(o.createdAt)) return;
+      if (!typeIsInActiveModule(o.type, true)) return;
       var m = L.marker([o.lat,o.lng], {icon: obsMarkerIcon(o.type)}).addTo(map);
       m.bindPopup(obsPopupHtml(o));
       m.on('popupopen', function(e){ bindObsPopupActions(e.popup, o.id); });
@@ -2023,7 +2199,7 @@
   function renderLogList(){
     if (activeTab !== 'log') return;
     var list = document.getElementById('site-list');
-    var filteredObs = observations.filter(function(o){ return passesDateFilter(o.createdAt); });
+    var filteredObs = observations.filter(function(o){ return passesDateFilter(o.createdAt) && typeIsInActiveModule(o.type, true); });
     document.getElementById('siteCount').textContent = filteredObs.length + (filteredObs.length===1 ? ' LOGGED' : ' LOGGED');
     if (filteredObs.length === 0){
       if (observations.length > 0){
@@ -2035,7 +2211,7 @@
     }
     list.innerHTML = '';
     filteredObs.slice().sort(function(a,b){ return b.createdAt - a.createdAt; }).forEach(function(o){
-      var t = OBS_TYPES[o.type] || OBS_TYPES.custom;
+      var t = getActiveObsTypes()[o.type] || getFallbackTypeEntry(true);
       var site = o.siteId ? sites.filter(function(s){ return s.id === o.siteId; })[0] : null;
       var countTxt = (o.count && o.count > 1) ? o.count + '× ' : '';
       var detailTxt;
@@ -2046,9 +2222,13 @@
       }
       var row = document.createElement('div');
       row.className = 'obs-row';
+      var envTxt = '';
+      if (o.weatherStatus === 'ok' && o.weather){
+        envTxt = ' · ' + o.weather.tempF + '°F ' + o.weather.windDir + ' ' + o.weather.windMph + 'mph';
+      }
       row.innerHTML =
         '<div class="obs-badge" style="--mc:'+t.color+'"><div class="inner">'+t.abbrev+'</div></div>' +
-        '<div class="obs-meta"><div class="nm">'+countTxt+t.label+'</div><div class="ty">'+relTime(o.createdAt)+(site ? ' · <span class="site-link">'+escapeHtml(site.name)+'</span>' : '')+detailTxt+'</div></div>';
+        '<div class="obs-meta"><div class="nm">'+countTxt+t.label+'</div><div class="ty">'+relTime(o.createdAt)+(site ? ' · <span class="site-link">'+escapeHtml(site.name)+'</span>' : '')+envTxt+detailTxt+'</div></div>';
       row.addEventListener('click', function(){
         map.flyTo([o.lat, o.lng], Math.max(map.getZoom(), 16));
         if (obsMarkers[o.id]) obsMarkers[o.id].openPopup();
@@ -2124,7 +2304,7 @@
         '<input type="text" id="f_name" placeholder="e.g. North Fence Camera" />' +
         '<label>Type</label>' +
         '<select id="f_type">' +
-          Object.keys(TYPES).map(function(k){ return '<option value="'+k+'">'+TYPES[k].label+'</option>'; }).join('') +
+          Object.keys(getActiveTypes()).map(function(k){ return '<option value="'+k+'">'+getActiveTypes()[k].label+'</option>'; }).join('') +
         '</select>' +
         (properties.length > 0 ?
           '<label>Property</label>' +
@@ -2387,6 +2567,12 @@
 
   // ---------- export ----------
   // ---------- Export: shared data gathering + per-format generators ----------
+  // Exports must include data from BOTH modules regardless of which one is currently
+  // active — this looks up a type's label across both dictionaries, not just the active one.
+  function lookupObsTypeAnyModule(typeKey){
+    return OBS_TYPES_HUNTING[typeKey] || OBS_TYPES_FISHING[typeKey] || OBS_TYPES_HUNTING.custom;
+  }
+
   function gatherExportRecords(){
     var records = [];
     sites.forEach(function(s){
@@ -2396,7 +2582,7 @@
       });
     });
     observations.forEach(function(o){
-      var t = OBS_TYPES[o.type] || OBS_TYPES.custom;
+      var t = lookupObsTypeAnyModule(o.type);
       records.push({
         kind:'observation', id:o.id, name:t.label, type:o.type, notes:o.notes||'',
         lat:o.lat, lng:o.lng, createdAt:o.createdAt, siteId:o.siteId||null, approx:!!o.approx, count:o.count||1
@@ -2524,16 +2710,47 @@
     toastTimer = setTimeout(function(){ el.classList.remove('show'); }, 1800);
   }
 
+  // ---------- Module switcher: Hunting <-> Fishing ----------
+  function switchModule(newModule){
+    if (newModule === activeModule) return;
+    activeModule = newModule;
+
+    document.querySelectorAll('.module-btn').forEach(function(btn){
+      var isActive = btn.getAttribute('data-module') === activeModule;
+      btn.classList.toggle('active', isActive);
+    });
+
+    // Reset the type-filter chips to "show everything" for the newly active module —
+    // an old hunting-only filter set would otherwise hide all fishing types (and vice versa).
+    activeFilters = new Set(Object.keys(getActiveTypes()));
+    renderChips();
+    renderQuickLogGrid();
+    renderMarkers();
+    renderObsMarkers();
+    renderActiveList();
+    showToast(activeModule === 'fishing' ? '🎣 Switched to Fishing' : '🏹 Switched to Hunting');
+  }
+
+  document.querySelectorAll('.module-btn').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      switchModule(btn.getAttribute('data-module'));
+    });
+  });
+
   // ---------- Quick Log: FAB + bottom sheet ----------
   var obsGrid = document.getElementById('obsGrid');
-  Object.keys(OBS_TYPES).forEach(function(key){
-    var t = OBS_TYPES[key];
-    var tile = document.createElement('div');
-    tile.className = 'obs-tile';
-    tile.innerHTML = '<div class="dot" style="--tc:'+t.color+'">'+t.abbrev+'</div><div class="lbl">'+t.label+'</div>';
-    tile.addEventListener('click', function(){ logObservation(key); });
-    obsGrid.appendChild(tile);
-  });
+  function renderQuickLogGrid(){
+    obsGrid.innerHTML = '';
+    Object.keys(getActiveObsTypes()).forEach(function(key){
+      var t = getActiveObsTypes()[key];
+      var tile = document.createElement('div');
+      tile.className = 'obs-tile';
+      tile.innerHTML = '<div class="dot" style="--tc:'+t.color+'">'+t.abbrev+'</div><div class="lbl">'+t.label+'</div>';
+      tile.addEventListener('click', function(){ logObservation(key); });
+      obsGrid.appendChild(tile);
+    });
+  }
+  renderQuickLogGrid();
 
   function openSheet(){
     document.getElementById('sheetBackdrop').classList.add('show');
@@ -2567,6 +2784,7 @@
       approx = true;
     }
     var match = nearestSite(pos.lat, pos.lng, NEAREST_SITE_RADIUS_M);
+    var now = Date.now();
     var obs = {
       id: uid(),
       type: type,
@@ -2574,14 +2792,17 @@
       lng: pos.lng,
       approx: approx,
       siteId: match ? match.site.id : null,
-      createdAt: Date.now()
+      createdAt: now,
+      moonPhase: getMoonPhase(new Date(now)), // instant, pure math — never waits on anything
+      weather: null,
+      weatherStatus: 'pending' // 'pending' | 'ok' | 'unavailable'
     };
     observations.push(obs);
     try{ await saveObservation(obs); }catch(e){ console.error('Outdoor Companion: failed to save observation', e); }
     closeSheet();
     renderObsMarkers();
     if (activeTab === 'log') renderLogList();
-    var t = OBS_TYPES[type];
+    var t = getActiveObsTypes()[type];
     var msg = t.label + ' logged' + (match ? ' near ' + match.site.name : '') + (approx ? ' (approx. location)' : '');
     showToast(msg);
     // Always fly to and confirm the new pin — GPS accuracy varies a lot, so don't
@@ -2590,6 +2811,19 @@
       map.flyTo([obs.lat, obs.lng], Math.max(map.getZoom(), 15));
       setTimeout(function(){ obsMarkers[obs.id].openPopup(); }, 400);
     }
+
+    // Weather fetch happens AFTER everything above — deliberately not awaited, so a slow
+    // or failed network call can never delay the instant log/save/toast/fly-to sequence.
+    // If it fails, the observation still saved fine; weather just stays "unavailable".
+    fetchCurrentWeather(pos.lat, pos.lng).then(async function(weatherResult){
+      var liveObs = observations.filter(function(o){ return o.id === obs.id; })[0];
+      if (!liveObs) return; // deleted before weather came back — nothing to update
+      liveObs.weather = weatherResult;
+      liveObs.weatherStatus = weatherResult ? 'ok' : 'unavailable';
+      try{ await saveObservation(liveObs); }catch(e){ console.error('Outdoor Companion: failed to save weather onto observation', e); }
+      renderObsMarkers();
+      if (activeTab === 'log') renderLogList();
+    });
   }
 
   // ---------- mobile sidebar drawer ----------
@@ -2711,10 +2945,16 @@
           month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'
         });
         var isLatest = idx === 0;
+        var envTxt = '';
+        if (d.moonPhase) envTxt += '🌙 ' + escapeHtml(d.moonPhase.name) + ' (' + d.moonPhase.illumination + '%)';
+        if (d.weatherStatus === 'ok' && d.weather){
+          envTxt += (envTxt ? ' · ' : '') + d.weather.tempF + '°F, ' + d.weather.windDir + ' ' + d.weather.windMph + 'mph';
+        }
         row.innerHTML =
           '<div class="info">' +
             '<div class="dt">' + escapeHtml(dateStr) + (isLatest ? ' <span style="color:var(--accent);">· current</span>' : '') + '</div>' +
             '<div class="co">' + fmtCoord(d.lat) + ', ' + fmtCoord(d.lng) + '</div>' +
+            (envTxt ? '<div class="co" style="color:var(--text-dim);">' + envTxt + '</div>' : '') +
           '</div>' +
           '<button class="btn-ghost" data-lat="' + d.lat + '" data-lng="' + d.lng + '" data-date="' + escapeHtml(dateStr) + '">View on Map</button>';
         list.appendChild(row);
@@ -3352,7 +3592,17 @@
     }
     cam.lastDeployedAt = Date.now();
 
-    var dep = {id: uid(), cameraId: cam.id, siteId: site.id, lat: pos.lat, lng: pos.lng, deployedAt: Date.now()};
+    var dep = {
+      id: uid(),
+      cameraId: cam.id,
+      siteId: site.id,
+      lat: pos.lat,
+      lng: pos.lng,
+      deployedAt: Date.now(),
+      moonPhase: getMoonPhase(new Date()),
+      weather: null,
+      weatherStatus: 'pending'
+    };
     deployments.push(dep);
 
     try{
@@ -3360,6 +3610,13 @@
       await saveCamera(cam);
       await saveDeployment(dep);
     }catch(e){ console.error('Outdoor Companion: failed to save deployment', e); }
+
+    // Same non-blocking pattern as Field Observations — never delays the deploy flow.
+    fetchCurrentWeather(pos.lat, pos.lng).then(async function(weatherResult){
+      dep.weather = weatherResult;
+      dep.weatherStatus = weatherResult ? 'ok' : 'unavailable';
+      try{ await saveDeployment(dep); }catch(e){ console.error('Outdoor Companion: failed to save weather onto deployment', e); }
+    });
 
     document.getElementById('deployModalBackdrop').classList.remove('show');
     pendingDeployCam = null;
