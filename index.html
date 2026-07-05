@@ -1192,7 +1192,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 13</div>
+    <div id="buildBadge">BUILD 14</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1295,7 +1295,7 @@
     <div class="oc-modal">
       <h3>Export Data <button class="close-x" id="exportModalClose">&times;</button></h3>
       <p style="font-size:12.5px;color:var(--text-dim);margin:0 0 14px 0;">Exports all Sites and Field Observations/Catches together. Choose a format for the tool you're using:</p>
-      <button class="btn-primary" id="exportBothBtn" style="width:100%;margin-bottom:8px;background:#FF6A13;color:#1A1204;font-weight:700;">📦 Export Both — KMZ + GeoJSON (with Photos)</button>
+      <button class="btn-primary" id="exportBothBtn" style="width:100%;margin-bottom:8px;background:#FF6A13;color:#1A1204;font-weight:700;">📦 Export Both — One Zip (KMZ + GeoJSON, with Photos)</button>
       <button class="btn-primary" id="exportKmlBtn" style="width:100%;margin-bottom:8px;background:#4A9E4F;color:#0A1A0A;">🌍 KMZ — Google Earth (with photos)</button>
       <button class="btn-primary" id="exportCsvBtn" style="width:100%;margin-bottom:8px;background:#3B9EFF;color:#0A1A2E;">📍 CSV — Google Maps ("My Maps")</button>
       <button class="btn-primary" id="exportGpxBtn" style="width:100%;margin-bottom:8px;background:#B8AF9C;color:#1A1204;">🛰 GPX — GPS devices / universal</button>
@@ -3009,9 +3009,16 @@
   document.getElementById('exportBothBtn').addEventListener('click', async function(){
     var records = gatherExportRecords();
     var kmzBlob = await buildKmz(records);
-    downloadBlob('outdoor-companion-export.kmz', kmzBlob);
-    downloadTextFile('outdoor-companion-export.geojson', 'application/geo+json', buildGeoJson(records));
-    showToast('Downloaded both KMZ and GeoJSON');
+    var geojsonText = buildGeoJson(records);
+    // Bundling into ONE zip avoids browsers silently blocking a second automatic
+    // download that fires right after the first — a real, common browser safety
+    // feature, not something we can just "try harder" around in JS.
+    var bundle = new JSZip();
+    bundle.file('outdoor-companion-export.kmz', kmzBlob);
+    bundle.file('outdoor-companion-export.geojson', geojsonText);
+    var bundleBlob = await bundle.generateAsync({type:'blob'});
+    downloadBlob('outdoor-companion-export-bundle.zip', bundleBlob);
+    showToast('Downloaded — unzip to get both the KMZ and GeoJSON files');
     document.getElementById('exportModalBackdrop').classList.remove('show');
   });
   document.getElementById('exportGpxBtn').addEventListener('click', function(){
