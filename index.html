@@ -1241,7 +1241,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 19</div>
+    <div id="buildBadge">BUILD 20</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -3999,6 +3999,22 @@
   // Reads the REAL embedded EXIF capture date from a photo — standard across virtually
   // all cameras, not a guessed/proprietary format. Returns a timestamp, or null if the
   // photo has no EXIF date (caller falls back to file modified date).
+  // Reveal's own exports carry NO EXIF data at all (confirmed against real exported
+  // files) — but their filenames reliably embed an exact capture timestamp:
+  // {cameraSerial}-{n1}-{n2}-MMDDYYYYHHMMSS-{sequentialId}.jpg
+  // Verified against Reveal's own dashboard: a photo's filename timestamp matched its
+  // displayed capture time to the second. Tried first, since it's proven more reliable
+  // for this brand than EXIF, which may simply not be present.
+  function extractRevealFilenameTimestamp(filename){
+    var m = filename.match(/-(\d{2})(\d{2})(\d{4})(\d{2})(\d{2})(\d{2})-/);
+    if (!m) return null;
+    var month = parseInt(m[1], 10), day = parseInt(m[2], 10), year = parseInt(m[3], 10);
+    var hour = parseInt(m[4], 10), min = parseInt(m[5], 10), sec = parseInt(m[6], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || min > 59 || sec > 59) return null;
+    var dt = new Date(year, month - 1, day, hour, min, sec);
+    return isNaN(dt.getTime()) ? null : dt.getTime();
+  }
+
   async function extractExifTimestamp(blob){
     try{
       var buffer = await readFileAsArrayBuffer(blob);
@@ -4072,9 +4088,14 @@
     for (var k=0; k<imageJobs.length; k++){
       progress.textContent = 'Processing ' + (k+1) + ' of ' + imageJobs.length + '…';
       var job = imageJobs[k];
-      var timestamp = await extractExifTimestamp(job.blob);
+      var timestamp = extractRevealFilenameTimestamp(job.name);
+      var timestampSource = timestamp ? 'filename' : null;
+      if (!timestamp){
+        timestamp = await extractExifTimestamp(job.blob);
+        if (timestamp) timestampSource = 'exif';
+      }
       var usedFallback = false;
-      if (!timestamp){ timestamp = job.fallbackDate; usedFallback = true; }
+      if (!timestamp){ timestamp = job.fallbackDate; usedFallback = true; timestampSource = 'file date'; }
       var matchedSite = findSiteForCameraAtTime(cameraId, timestamp);
       var objectUrl = URL.createObjectURL(job.blob);
       var record = {
@@ -4083,6 +4104,7 @@
         filename: job.name,
         timestamp: timestamp,
         usedFallbackDate: usedFallback,
+        timestampSource: timestampSource, // 'filename' | 'exif' | 'file date'
         matchedSiteId: matchedSite ? matchedSite.id : null,
         matchedSiteName: matchedSite ? matchedSite.name : null,
         objectUrl: objectUrl
@@ -4102,7 +4124,7 @@
       card.innerHTML =
         '<img src="' + r.objectUrl + '" alt="' + escapeHtml(r.filename) + '">' +
         '<div class="meta">' +
-          '<div class="dt">' + escapeHtml(dateStr) + (r.usedFallbackDate ? ' <em>(file date)</em>' : '') + '</div>' +
+          '<div class="dt">' + escapeHtml(dateStr) + (r.usedFallbackDate ? ' <em>(file date — unreliable)</em>' : '') + '</div>' +
           '<div class="site' + (r.matchedSiteName ? '' : ' unmatched') + '">' + (r.matchedSiteName ? escapeHtml(r.matchedSiteName) : 'No site match') + '</div>' +
         '</div>';
       grid.appendChild(card);
