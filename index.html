@@ -789,6 +789,14 @@
   }
   #tagHistoryModal{ width:460px; max-width:94vw; }
 
+  .analytics-header{ padding:12px 16px; }
+  .analytics-total{ font-family:'Oswald',sans-serif; font-size:20px; text-transform:uppercase; letter-spacing:0.5px; color:var(--accent); }
+  .analytics-sparse-note{ font-size:11.5px; color:var(--text-dim); margin-top:6px; line-height:1.5; background:rgba(255,224,102,0.1); border:1px solid #FFE066; border-radius:6px; padding:8px 10px; }
+  .analytics-grid{ display:flex; flex-direction:column; gap:16px; padding:0 16px 16px 16px; }
+  .analytics-chart-wrap{ background:var(--panel-alt); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  .analytics-chart-title{ font-size:12px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; }
+  .analytics-chart-wrap canvas{ max-height:220px; }
+
   #solunarModal{ width:420px; max-width:94vw; }
   #solunarDayNav{
     display:flex;
@@ -1200,6 +1208,7 @@
       <button class="tab-btn active" data-tab="sites">Sites</button>
       <button class="tab-btn" data-tab="log">Log</button>
       <button class="tab-btn" data-tab="cameras">Cameras</button>
+      <button class="tab-btn" data-tab="analytics">📊 Analytics</button>
     </div>
 
     <div id="cameraTip">📸 <strong>This is the way in:</strong> point your phone's regular <strong>Camera app</strong> at a printed tag and tap the link that pops up. No need to open anything in this app first.</div>
@@ -1232,7 +1241,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 18</div>
+    <div id="buildBadge">BUILD 19</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1519,6 +1528,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
 <script>
 (function(){
@@ -1835,6 +1845,21 @@
     return absMin + 'min ' + (nearest.mins < 0 ? 'before ' : 'after ') + nearest.label;
   }
 
+  // A categorical sun-phase bucket (Dawn/Sunrise/Daytime/Sunset/Dusk/Night) for Analytics
+  // grouping — distinct from the proximity string above, which is for display, not grouping.
+  function getSunPhaseBucket(eventMs, sunriseISO, sunsetISO){
+    if (!sunriseISO || !sunsetISO) return null;
+    var sunriseMs = new Date(sunriseISO).getTime();
+    var sunsetMs = new Date(sunsetISO).getTime();
+    var windowMs = 30 * 60000; // 30-minute window on either side of sunrise/sunset
+    if (eventMs >= sunriseMs - windowMs && eventMs < sunriseMs) return 'Dawn';
+    if (eventMs >= sunriseMs && eventMs < sunriseMs + windowMs) return 'Sunrise';
+    if (eventMs >= sunsetMs - windowMs && eventMs < sunsetMs) return 'Sunset';
+    if (eventMs >= sunsetMs && eventMs < sunsetMs + windowMs) return 'Dusk';
+    if (eventMs >= sunriseMs + windowMs && eventMs < sunsetMs - windowMs) return 'Daytime';
+    return 'Night';
+  }
+
   async function fetchCurrentWeather(lat, lng){
     try{
       var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lng +
@@ -1861,6 +1886,9 @@
       var sunProximity = (data.daily && data.daily.sunrise && data.daily.sunrise[0])
         ? getSunProximity(Date.now(), data.daily.sunrise[0], data.daily.sunset[0])
         : null;
+      var sunPhase = (data.daily && data.daily.sunrise && data.daily.sunrise[0])
+        ? getSunPhaseBucket(Date.now(), data.daily.sunrise[0], data.daily.sunset[0])
+        : null;
       return {
         tempF: Math.round(data.current.temperature_2m),
         windMph: Math.round(data.current.wind_speed_10m),
@@ -1875,6 +1903,7 @@
         uvIndex: data.current.uv_index != null ? Math.round(data.current.uv_index * 10) / 10 : null,
         visibilityMi: data.current.visibility != null ? Math.round((data.current.visibility / 1609.34) * 10) / 10 : null,
         sunProximity: sunProximity,
+        sunPhase: sunPhase, // 'Dawn' | 'Sunrise' | 'Daytime' | 'Sunset' | 'Dusk' | 'Night' — for Analytics grouping
         fetchedAt: Date.now()
       };
     }catch(e){
@@ -2686,6 +2715,7 @@
     if (activeTab === 'sites') renderList();
     else if (activeTab === 'log') renderLogList();
     else if (activeTab === 'cameras') renderCameraList();
+    else if (activeTab === 'analytics') renderAnalytics();
   }
 
   // ---------- tab switching ----------
@@ -3518,8 +3548,160 @@
 
   // ================= Camera Inventory + QR Deploy =================
 
-  function renderCameraList(){
+  // ---------- Analytics ----------
+  var analyticsChartInstances = [];
+
+  function destroyAnalyticsCharts(){
+    analyticsChartInstances.forEach(function(c){ try{ c.destroy(); }catch(e){} });
+    analyticsChartInstances = [];
+  }
+
+  function groupCount(items, keyFn){
+    var counts = {};
+    items.forEach(function(item){
+      var key = keyFn(item);
+      if (key == null) return;
+      counts[key] = (counts[key] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function tempBucket(tempF){
+    if (tempF == null) return null;
+    if (tempF < 0) return 'Under 0°F';
+    if (tempF < 15) return '0-15°F';
+    if (tempF < 30) return '15-30°F';
+    if (tempF < 45) return '30-45°F';
+    if (tempF < 60) return '45-60°F';
+    if (tempF < 75) return '60-75°F';
+    if (tempF < 90) return '75-90°F';
+    if (tempF < 105) return '90-105°F';
+    return '105°F+';
+  }
+
+  var ANALYTICS_COLORS = ['#FF6A13','#8FA05C','#3B9EFF','#C9A03C','#4A7A6C','#D94A2E','#B08D57','#7A8A94'];
+
+  function makeChartCanvas(container, title, id){
+    var wrap = document.createElement('div');
+    wrap.className = 'analytics-chart-wrap';
+    wrap.innerHTML = '<div class="analytics-chart-title">' + title + '</div><canvas id="' + id + '"></canvas>';
+    container.appendChild(wrap);
+    return document.getElementById(id);
+  }
+
+  function buildBarChart(canvas, labels, data, label){
+    var chart = new Chart(canvas, {
+      type: 'bar',
+      data: { labels: labels, datasets: [{ label: label, data: data, backgroundColor: '#FF6A13' }] },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          y: { beginAtZero: true, ticks: { color: '#B8AF9C', precision: 0 }, grid: { color: 'rgba(255,255,255,0.08)' } },
+          x: { ticks: { color: '#B8AF9C' }, grid: { display: false } }
+        }
+      }
+    });
+    analyticsChartInstances.push(chart);
+  }
+
+  function buildPieChart(canvas, labels, data){
+    var chart = new Chart(canvas, {
+      type: 'pie',
+      data: { labels: labels, datasets: [{ data: data, backgroundColor: ANALYTICS_COLORS }] },
+      options: {
+        responsive: true,
+        plugins: { legend: { position: 'bottom', labels: { color: '#B8AF9C', boxWidth: 12 } } }
+      }
+    });
+    analyticsChartInstances.push(chart);
+  }
+
+  function renderAnalytics(){
+    destroyAnalyticsCharts();
+    var list = document.getElementById('site-list');
+    list.innerHTML = '';
+
+    var relevantObs = observations.filter(function(o){ return typeIsInActiveModule(o.type, true); });
+    var total = relevantObs.length;
+
+    var header = document.createElement('div');
+    header.className = 'analytics-header';
+    header.innerHTML = '<div class="analytics-total">' + total + ' logged ' + (activeModule === 'fishing' ? 'catch' + (total===1?'':'es') : 'sighting' + (total===1?'':'s')) + '</div>';
+    if (total < 15){
+      header.innerHTML += '<div class="analytics-sparse-note">📊 Charts get more meaningful with more data — right now there\'s only ' + total + ' logged, so patterns below may just be noise. Keep logging and check back.</div>';
+    }
+    list.appendChild(header);
+
+    if (total === 0){
+      list.innerHTML += '<div class="empty" style="padding:20px 0;">Nothing logged yet in ' + (activeModule === 'fishing' ? 'Fishing' : 'Hunting') + ' mode — use Quick Log out in the field, then come back here.</div>';
+      return;
+    }
+
+    var chartsGrid = document.createElement('div');
+    chartsGrid.className = 'analytics-grid';
+    list.appendChild(chartsGrid);
+
+    // By Moon Phase
+    var moonCounts = groupCount(relevantObs, function(o){ return o.moonPhase ? o.moonPhase.name : null; });
+    var moonOrder = ['New Moon','Waxing Crescent','First Quarter','Waxing Gibbous','Full Moon','Waning Gibbous','Last Quarter','Waning Crescent'];
+    var moonLabels = moonOrder.filter(function(m){ return moonCounts[m]; });
+    buildBarChart(makeChartCanvas(chartsGrid, '🌙 By Moon Phase', 'chartMoon'), moonLabels, moonLabels.map(function(m){ return moonCounts[m]; }), 'Count');
+
+    // By Wind Direction
+    var windCounts = groupCount(relevantObs, function(o){ return (o.weatherStatus === 'ok' && o.weather) ? o.weather.windDir : null; });
+    var windOrder = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
+    var windLabels = windOrder.filter(function(w){ return windCounts[w]; });
+    if (windLabels.length){
+      buildBarChart(makeChartCanvas(chartsGrid, '💨 By Wind Direction', 'chartWind'), windLabels, windLabels.map(function(w){ return windCounts[w]; }), 'Count');
+    }
+
+    // By Pressure Trend
+    var trendCounts = groupCount(relevantObs, function(o){ return (o.weatherStatus === 'ok' && o.weather) ? o.weather.pressureTrend : null; });
+    var trendLabels = ['Rising','Falling','Steady'].filter(function(t){ return trendCounts[t]; });
+    if (trendLabels.length){
+      buildPieChart(makeChartCanvas(chartsGrid, '📈 By Pressure Trend', 'chartPressure'), trendLabels, trendLabels.map(function(t){ return trendCounts[t]; }));
+    }
+
+    // By Temperature Range
+    var tempCounts = groupCount(relevantObs, function(o){ return (o.weatherStatus === 'ok' && o.weather) ? tempBucket(o.weather.tempF) : null; });
+    var tempOrder = ['Under 0°F','0-15°F','15-30°F','30-45°F','45-60°F','60-75°F','75-90°F','90-105°F','105°F+'];
+    var tempLabels = tempOrder.filter(function(t){ return tempCounts[t]; });
+    if (tempLabels.length){
+      buildBarChart(makeChartCanvas(chartsGrid, '🌡 By Temperature', 'chartTemp'), tempLabels, tempLabels.map(function(t){ return tempCounts[t]; }), 'Count');
+    }
+
+    // By Sun Phase
+    var sunCounts = groupCount(relevantObs, function(o){ return (o.weatherStatus === 'ok' && o.weather) ? o.weather.sunPhase : null; });
+    var sunOrder = ['Dawn','Sunrise','Daytime','Sunset','Dusk','Night'];
+    var sunLabels = sunOrder.filter(function(s){ return sunCounts[s]; });
+    if (sunLabels.length){
+      buildBarChart(makeChartCanvas(chartsGrid, '☀️ By Time of Day', 'chartSun'), sunLabels, sunLabels.map(function(s){ return sunCounts[s]; }), 'Count');
+    }
+
+    // By Solunar Period
+    var solunarCounts = groupCount(relevantObs, function(o){ return o.solunarPeriod || 'Neither'; });
+    var solunarOrder = ['Major Period','Minor Period','Neither'];
+    var solunarLabels = solunarOrder.filter(function(s){ return solunarCounts[s]; });
+    if (solunarLabels.length){
+      buildPieChart(makeChartCanvas(chartsGrid, '⭐ By Solunar Period', 'chartSolunar'), solunarLabels, solunarLabels.map(function(s){ return solunarCounts[s]; }));
+    }
+
+    // By Site — which stand/spot actually produces
+    var siteCounts = groupCount(relevantObs, function(o){
+      if (!o.siteId) return 'Unlinked';
+      var s = sites.filter(function(x){ return x.id === o.siteId; })[0];
+      return s ? s.name : 'Unlinked';
+    });
+    var siteLabels = Object.keys(siteCounts).sort(function(a,b){ return siteCounts[b] - siteCounts[a]; }).slice(0, 10);
+    if (siteLabels.length){
+      buildBarChart(makeChartCanvas(chartsGrid, '📍 By Site (top 10)', 'chartSite'), siteLabels, siteLabels.map(function(s){ return siteCounts[s]; }), 'Count');
+    }
+  }
+
+
     if (activeTab !== 'cameras') return;
+  function renderCameraList(){
     var list = document.getElementById('site-list');
     document.getElementById('siteCount').textContent = cameras.length + (cameras.length===1 ? ' CAMERA' : ' CAMERAS');
     if (cameras.length === 0){
