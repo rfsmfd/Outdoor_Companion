@@ -788,6 +788,45 @@
     border-radius:4px;
   }
   #tagHistoryModal{ width:460px; max-width:94vw; }
+
+  #solunarModal{ width:420px; max-width:94vw; }
+  #solunarDayNav{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:10px;
+  }
+  #solunarDayNav button{
+    background:var(--panel-alt);
+    border:1px solid var(--line);
+    color:var(--text);
+    width:38px;height:38px;
+    border-radius:4px;
+    font-size:14px;
+  }
+  #solunarDateLabel{
+    font-family:'Oswald',sans-serif;
+    font-size:16px;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+    text-align:center;
+    flex:1;
+  }
+  .solunar-row{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    padding:9px 10px;
+    border:1px solid var(--line);
+    border-radius:4px;
+    margin-bottom:6px;
+    background:var(--panel-alt);
+  }
+  .solunar-row.major{ border-color:var(--accent); }
+  .solunar-row .lbl{ font-size:12px; font-weight:600; }
+  .solunar-row .lbl .tag{ font-size:9px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-dim); display:block; }
+  .solunar-row .time{ font-family:'IBM Plex Mono',monospace; font-size:12px; color:var(--moss); }
+
   .tag-catch-row{
     display:flex;
     gap:10px;
@@ -1144,6 +1183,7 @@
       <button class="btn-primary" id="addSiteBtn">+ Add Site</button>
       <button class="btn-primary" id="gpsSiteBtn" style="background:#3B9EFF;color:#0A1A2E;">📍 My Location</button>
       <button class="btn-ghost" id="exportBtn">Export</button>
+      <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
     </div>
 
     <div id="propertyRow">
@@ -1192,7 +1232,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 15</div>
+    <div id="buildBadge">BUILD 18</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1357,6 +1397,21 @@
     </div>
   </div>
 
+  <!-- Solunar Table: Major/Minor feeding-activity periods, browsable day by day -->
+  <div class="oc-modal-backdrop" id="solunarModalBackdrop">
+    <div class="oc-modal" id="solunarModal">
+      <h3>⭐ Solunar Table <button class="close-x" id="solunarModalClose">&times;</button></h3>
+      <div id="solunarDayNav">
+        <button id="solunarPrevDay">◀</button>
+        <div id="solunarDateLabel">—</div>
+        <button id="solunarNextDay">▶</button>
+      </div>
+      <button class="btn-ghost" id="solunarTodayBtn" style="width:100%;margin-bottom:12px;">Jump to Today</button>
+      <div id="solunarContent"></div>
+      <p style="font-size:10.5px;color:var(--text-dim);margin-top:12px;">Calculated for your current location. Major periods (~2 hrs) center on the moon being directly overhead or underfoot; Minor periods (~1 hr) center on moonrise/moonset.</p>
+    </div>
+  </div>
+
   <!-- Tag History: track a specific tagged fish across every time it's been caught -->
   <div class="oc-modal-backdrop" id="tagHistoryModalBackdrop">
     <div class="oc-modal" id="tagHistoryModal">
@@ -1464,6 +1519,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
 <script>
 (function(){
 
@@ -1630,19 +1686,162 @@
     return {name: name, illumination: illumination};
   }
 
+  // ---------- Solunar Table: Major/Minor feeding-activity periods ----------
+  // Built on SunCalc (matches U.S. Naval Observatory accuracy, based on Meeus's
+  // Astronomical Algorithms) rather than a hand-rolled lunar position formula — the
+  // underlying moon-position math is trusted/well-tested; what's built on top here
+  // (finding transit times, classifying an event) is straightforward and independently
+  // verified against a known synthetic altitude curve before shipping.
+  //
+  // Major periods (~2 hrs each): centered on moon transit (directly overhead) and
+  // antitransit (directly underfoot) — found numerically by sampling altitude across
+  // the day and locating the peak and trough, since SunCalc doesn't return transit time
+  // directly.
+  // Minor periods (~1 hr each): centered on moonrise and moonset, from SunCalc directly.
+  function findMoonTransitTimes(date, lat, lng){
+    var dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0);
+    var samples = [];
+    for (var m = 0; m <= 24*60; m += 10){
+      var t = new Date(dayStart.getTime() + m*60000);
+      var pos = SunCalc.getMoonPosition(t, lat, lng);
+      samples.push({time: t, altitude: pos.altitude});
+    }
+    var transitSample = samples.reduce(function(a,b){ return b.altitude > a.altitude ? b : a; });
+    var antitransitSample = samples.reduce(function(a,b){ return b.altitude < a.altitude ? b : a; });
+    return {transit: transitSample.time, antitransit: antitransitSample.time};
+  }
+
+  function centeredWindow(centerDate, halfWidthMinutes){
+    return {
+      start: new Date(centerDate.getTime() - halfWidthMinutes*60000),
+      end: new Date(centerDate.getTime() + halfWidthMinutes*60000)
+    };
+  }
+
+  function getSolunarPeriodsForDay(date, lat, lng){
+    var transits = findMoonTransitTimes(date, lat, lng);
+    var moonTimes = SunCalc.getMoonTimes(date, lat, lng);
+    var sunTimes = SunCalc.getTimes(date, lat, lng);
+    var periods = {
+      major1: centeredWindow(transits.transit, 60),
+      major2: centeredWindow(transits.antitransit, 60),
+      minor1: moonTimes.rise ? centeredWindow(moonTimes.rise, 30) : null,
+      minor2: moonTimes.set ? centeredWindow(moonTimes.set, 30) : null,
+      moonrise: moonTimes.rise || null,
+      moonset: moonTimes.set || null,
+      moonAlwaysUp: !!moonTimes.alwaysUp,
+      moonAlwaysDown: !!moonTimes.alwaysDown,
+      sunrise: sunTimes.sunrise || null,
+      sunset: sunTimes.sunset || null
+    };
+    return periods;
+  }
+
+  // Given a real logged event's exact timestamp and location, determines whether it
+  // fell within a Major period, a Minor period, or neither. Used to tag Field
+  // Observations/Catches after the fact.
+  function classifyEventSolunarPeriod(eventDate, lat, lng){
+    var periods = getSolunarPeriodsForDay(eventDate, lat, lng);
+    var t = eventDate.getTime();
+    function within(window){ return window && t >= window.start.getTime() && t <= window.end.getTime(); }
+    if (within(periods.major1) || within(periods.major2)) return 'Major Period';
+    if (within(periods.minor1) || within(periods.minor2)) return 'Minor Period';
+    return null;
+  }
+
   function degreesToCompass(deg){
     if (deg == null) return null;
     var dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
     return dirs[Math.round(deg / 22.5) % 16];
   }
 
-  // Fetches CURRENT conditions for a live event (e.g. a Quick Log sighting happening now).
-  // Deliberately has a short timeout and never throws past the caller — a failure here must
-  // never block or break whatever triggered it. Returns null on any failure.
+  // Shared formatter for the COMPACT view (Quick Log popups, Log list) — only the
+  // headline, in-the-moment-actionable stats: temp, wind+shift, pressure+trend.
+  // Deliberately excludes cloud cover/humidity/UV/visibility/sunrise-sunset — those are
+  // real signal but belong in the deeper views (Tag/Deployment History, exports) instead
+  // of crowding out the photo/weight/length/notes in a small popup.
+  function formatWeatherLine(w){
+    if (!w) return '';
+    var arrow = w.pressureTrend === 'Rising' ? ' ↑' : w.pressureTrend === 'Falling' ? ' ↓' : w.pressureTrend === 'Steady' ? ' →' : '';
+    return w.tempF + '°F, ' + (w.windDirDisplay || w.windDir) + ' ' + w.windMph + 'mph, ' + w.pressureInHg + ' inHg' + arrow;
+  }
+
+  // The FULL detail line for Tag History, Deployment History, and GIS exports — adds
+  // cloud cover, humidity, UV, visibility, and sunrise/sunset proximity on top of the
+  // compact line above.
+  function formatWeatherDetailLine(w){
+    if (!w) return '';
+    var parts = [formatWeatherLine(w)];
+    if (w.cloudCoverPct != null) parts.push(w.cloudCoverPct + '% clouds');
+    if (w.humidityPct != null) parts.push(w.humidityPct + '% humidity');
+    if (w.uvIndex != null) parts.push('UV ' + w.uvIndex);
+    if (w.visibilityMi != null) parts.push(w.visibilityMi + 'mi visibility');
+    if (w.sunProximity) parts.push(w.sunProximity);
+    return parts.join(', ');
+  }
+
+  function hpaToInHg(hpa){ return Math.round((hpa / 33.8639) * 100) / 100; }
+
+  // Compares current pressure to the reading from ~3 hours ago (a standard meteorological
+  // window for classifying rising/falling/steady) using the hourly series Open-Meteo
+  // returns alongside the current conditions in the same request.
+  function getPressureTrend(currentHpa, hourlyTimes, hourlyPressures){
+    if (!hourlyTimes || !hourlyPressures || hourlyTimes.length === 0) return null;
+    var threeHoursAgoMs = Date.now() - 3*60*60*1000;
+    var closestIdx = -1, closestDiff = Infinity;
+    for (var i=0; i<hourlyTimes.length; i++){
+      var diff = Math.abs(new Date(hourlyTimes[i]).getTime() - threeHoursAgoMs);
+      if (diff < closestDiff){ closestDiff = diff; closestIdx = i; }
+    }
+    if (closestIdx === -1 || hourlyPressures[closestIdx] == null) return null;
+    var change = currentHpa - hourlyPressures[closestIdx];
+    if (change > 1) return 'Rising';
+    if (change < -1) return 'Falling';
+    return 'Steady';
+  }
+
+  // Detects a meaningful wind direction shift vs. ~3 hours ago — actionable in the same
+  // way as pressure trend (a shifting wind can put your scent somewhere new, or signal a
+  // front moving through). 30° threshold filters normal measurement noise between
+  // adjacent compass points (each 22.5° apart) from a genuine shift.
+  function getWindShift(currentDeg, hourlyTimes, hourlyDirs, currentCompass){
+    if (!hourlyTimes || !hourlyDirs || hourlyTimes.length === 0 || currentDeg == null) return currentCompass;
+    var threeHoursAgoMs = Date.now() - 3*60*60*1000;
+    var closestIdx = -1, closestDiff = Infinity;
+    for (var i=0; i<hourlyTimes.length; i++){
+      var diff = Math.abs(new Date(hourlyTimes[i]).getTime() - threeHoursAgoMs);
+      if (diff < closestDiff){ closestDiff = diff; closestIdx = i; }
+    }
+    if (closestIdx === -1 || hourlyDirs[closestIdx] == null) return currentCompass;
+    var pastDeg = hourlyDirs[closestIdx];
+    var angleDiff = ((currentDeg - pastDeg + 540) % 360) - 180;
+    if (Math.abs(angleDiff) < 30) return currentCompass;
+    var pastCompass = degreesToCompass(pastDeg);
+    return currentCompass + ' (shifting from ' + pastCompass + ')';
+  }
+
+  // How close a timestamp is to today's sunrise/sunset — useful for correlating sightings
+  // with dawn/dusk clustering without doing the math yourself each time.
+  function getSunProximity(eventMs, sunriseISO, sunsetISO){
+    if (!sunriseISO || !sunsetISO) return null;
+    var sunriseMs = new Date(sunriseISO).getTime();
+    var sunsetMs = new Date(sunsetISO).getTime();
+    var toSunrise = (eventMs - sunriseMs) / 60000; // minutes, +after/-before
+    var toSunset = (eventMs - sunsetMs) / 60000;
+    var nearest = Math.abs(toSunrise) < Math.abs(toSunset)
+      ? {label:'sunrise', mins: toSunrise}
+      : {label:'sunset', mins: toSunset};
+    var absMin = Math.round(Math.abs(nearest.mins));
+    return absMin + 'min ' + (nearest.mins < 0 ? 'before ' : 'after ') + nearest.label;
+  }
+
   async function fetchCurrentWeather(lat, lng){
     try{
       var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lng +
-        '&current=temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto';
+        '&current=temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation,cloud_cover,relative_humidity_2m,uv_index,visibility' +
+        '&hourly=surface_pressure,wind_direction_10m&past_days=1' +
+        '&daily=sunrise,sunset' +
+        '&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto';
       var controller = new AbortController();
       var timeoutId = setTimeout(function(){ controller.abort(); }, 8000);
       var res = await fetch(url, {signal: controller.signal});
@@ -1650,12 +1849,32 @@
       if (!res.ok) return null;
       var data = await res.json();
       if (!data || !data.current) return null;
+      var pressureHpa = Math.round(data.current.surface_pressure);
+      var pressureTrend = (data.hourly && data.hourly.time)
+        ? getPressureTrend(data.current.surface_pressure, data.hourly.time, data.hourly.surface_pressure)
+        : null;
+      var windDirDeg = data.current.wind_direction_10m;
+      var windDirCompass = degreesToCompass(windDirDeg);
+      var windDirDisplay = (data.hourly && data.hourly.time)
+        ? getWindShift(windDirDeg, data.hourly.time, data.hourly.wind_direction_10m, windDirCompass)
+        : windDirCompass;
+      var sunProximity = (data.daily && data.daily.sunrise && data.daily.sunrise[0])
+        ? getSunProximity(Date.now(), data.daily.sunrise[0], data.daily.sunset[0])
+        : null;
       return {
         tempF: Math.round(data.current.temperature_2m),
         windMph: Math.round(data.current.wind_speed_10m),
-        windDir: degreesToCompass(data.current.wind_direction_10m),
-        pressureHpa: Math.round(data.current.surface_pressure),
+        windDir: windDirCompass,
+        windDirDisplay: windDirDisplay, // includes "(shifting from X)" when meaningful
+        pressureHpa: pressureHpa,
+        pressureInHg: hpaToInHg(data.current.surface_pressure),
+        pressureTrend: pressureTrend,
         precipitation: data.current.precipitation,
+        cloudCoverPct: data.current.cloud_cover != null ? Math.round(data.current.cloud_cover) : null,
+        humidityPct: data.current.relative_humidity_2m != null ? Math.round(data.current.relative_humidity_2m) : null,
+        uvIndex: data.current.uv_index != null ? Math.round(data.current.uv_index * 10) / 10 : null,
+        visibilityMi: data.current.visibility != null ? Math.round((data.current.visibility / 1609.34) * 10) / 10 : null,
+        sunProximity: sunProximity,
         fetchedAt: Date.now()
       };
     }catch(e){
@@ -2272,8 +2491,11 @@
     if (o.moonPhase){
       envLine += '🌙 ' + escapeHtml(o.moonPhase.name) + ' (' + o.moonPhase.illumination + '%)';
     }
+    if (o.solunarPeriod){
+      envLine += (envLine ? ' · ' : '') + '<strong style="color:var(--accent);">⭐ ' + o.solunarPeriod + '</strong>';
+    }
     if (o.weatherStatus === 'ok' && o.weather){
-      envLine += (envLine ? ' · ' : '') + o.weather.tempF + '°F, ' + o.weather.windDir + ' ' + o.weather.windMph + 'mph, ' + o.weather.pressureHpa + 'hPa';
+      envLine += (envLine ? ' · ' : '') + formatWeatherLine(o.weather);
     } else if (o.weatherStatus === 'pending'){
       envLine += (envLine ? ' · ' : '') + '<em style="color:var(--text-dim);">fetching weather…</em>';
     } else if (o.weatherStatus === 'unavailable'){
@@ -2446,7 +2668,7 @@
       row.className = 'obs-row';
       var envTxt = '';
       if (o.weatherStatus === 'ok' && o.weather){
-        envTxt = ' · ' + o.weather.tempF + '°F ' + o.weather.windDir + ' ' + o.weather.windMph + 'mph';
+        envTxt = ' · ' + formatWeatherLine(o.weather);
       }
       row.innerHTML =
         '<div class="obs-badge" style="--mc:'+t.color+'"><div class="inner">'+t.abbrev+'</div></div>' +
@@ -2879,7 +3101,7 @@
         kind:'observation', id:o.id, name:t.label, type:o.type, notes:o.notes||'',
         lat:o.lat, lng:o.lng, createdAt:o.createdAt, siteId:o.siteId||null, approx:!!o.approx, count:o.count||1,
         photoThumb: o.photoThumb || null, weight: o.weight || null, length: o.length || null, tagNumber: o.tagNumber || null,
-        moonPhase: o.moonPhase || null, weather: (o.weatherStatus === 'ok' ? o.weather : null)
+        moonPhase: o.moonPhase || null, solunarPeriod: o.solunarPeriod || null, weather: (o.weatherStatus === 'ok' ? o.weather : null)
       });
     });
     return records;
@@ -2915,11 +3137,19 @@
       if (r.length) props.lengthIn = r.length;
       if (r.tagNumber) props.tagNumber = r.tagNumber;
       if (r.moonPhase){ props.moonPhase = r.moonPhase.name; props.moonIllumination = r.moonPhase.illumination; }
+      if (r.solunarPeriod) props.solunarPeriod = r.solunarPeriod;
       if (r.weather){
         props.tempF = r.weather.tempF;
         props.windDir = r.weather.windDir;
         props.windMph = r.weather.windMph;
-        props.pressureHpa = r.weather.pressureHpa;
+        props.pressureInHg = r.weather.pressureInHg;
+        if (r.weather.pressureTrend) props.pressureTrend = r.weather.pressureTrend;
+        if (r.weather.windDirDisplay && r.weather.windDirDisplay !== r.weather.windDir) props.windShift = r.weather.windDirDisplay;
+        if (r.weather.cloudCoverPct != null) props.cloudCoverPct = r.weather.cloudCoverPct;
+        if (r.weather.humidityPct != null) props.humidityPct = r.weather.humidityPct;
+        if (r.weather.uvIndex != null) props.uvIndex = r.weather.uvIndex;
+        if (r.weather.visibilityMi != null) props.visibilityMi = r.weather.visibilityMi;
+        if (r.weather.sunProximity) props.sunProximity = r.weather.sunProximity;
       }
       if (r.photoThumb) props.photoBase64 = r.photoThumb; // self-contained — the image travels with the file
       return {
@@ -2939,7 +3169,8 @@
       if (r.weight) descParts.push(r.weight + ' lbs');
       if (r.length) descParts.push(r.length + ' in');
       if (r.moonPhase) descParts.push('🌙 ' + r.moonPhase.name + ' (' + r.moonPhase.illumination + '%)');
-      if (r.weather) descParts.push(r.weather.tempF + '°F, ' + r.weather.windDir + ' ' + r.weather.windMph + 'mph, ' + r.weather.pressureHpa + 'hPa');
+      if (r.solunarPeriod) descParts.push('⭐ ' + r.solunarPeriod);
+      if (r.weather) descParts.push(formatWeatherDetailLine(r.weather));
       if (r.notes) descParts.push(r.notes);
       if (r.approx) descParts.push('(approximate location)');
       descParts.push(new Date(r.createdAt).toLocaleString());
@@ -3152,6 +3383,7 @@
       siteId: match ? match.site.id : null,
       createdAt: now,
       moonPhase: getMoonPhase(new Date(now)), // instant, pure math — never waits on anything
+      solunarPeriod: classifyEventSolunarPeriod(new Date(now), lat, lng), // 'Major Period' | 'Minor Period' | null
       weather: null,
       weatherStatus: 'pending' // 'pending' | 'ok' | 'unavailable'
     };
@@ -3359,6 +3591,68 @@
     if (e.target === this) this.classList.remove('show');
   });
 
+  // ---------- Solunar Table: browsable Major/Minor period viewer ----------
+  var solunarViewDate = new Date();
+
+  function getSolunarViewLocation(){
+    if (lastKnownPos) return {lat: lastKnownPos.lat, lng: lastKnownPos.lng};
+    var c = map.getCenter();
+    return {lat: c.lat, lng: c.lng};
+  }
+
+  function fmtClockTime(d){
+    if (!d) return '—';
+    return d.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+  }
+
+  function renderSolunarTable(){
+    var pos = getSolunarViewLocation();
+    var periods = getSolunarPeriodsForDay(solunarViewDate, pos.lat, pos.lng);
+    var moon = getMoonPhase(solunarViewDate);
+
+    document.getElementById('solunarDateLabel').textContent = solunarViewDate.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
+
+    var html = '';
+    html += '<div class="solunar-row"><div class="lbl">🌙 Moon Phase<span class="tag">'+moon.illumination+'% illuminated</span></div><div class="time">'+escapeHtml(moon.name)+'</div></div>';
+    html += '<div class="solunar-row major"><div class="lbl">⭐ Major Period 1<span class="tag">overhead</span></div><div class="time">'+fmtClockTime(periods.major1.start)+' – '+fmtClockTime(periods.major1.end)+'</div></div>';
+    html += '<div class="solunar-row major"><div class="lbl">⭐ Major Period 2<span class="tag">underfoot</span></div><div class="time">'+fmtClockTime(periods.major2.start)+' – '+fmtClockTime(periods.major2.end)+'</div></div>';
+    if (periods.minor1){
+      html += '<div class="solunar-row"><div class="lbl">Minor Period 1<span class="tag">moonrise</span></div><div class="time">'+fmtClockTime(periods.minor1.start)+' – '+fmtClockTime(periods.minor1.end)+'</div></div>';
+    }
+    if (periods.minor2){
+      html += '<div class="solunar-row"><div class="lbl">Minor Period 2<span class="tag">moonset</span></div><div class="time">'+fmtClockTime(periods.minor2.start)+' – '+fmtClockTime(periods.minor2.end)+'</div></div>';
+    }
+    html += '<div class="solunar-row"><div class="lbl">Sunrise / Sunset</div><div class="time">'+fmtClockTime(periods.sunrise)+' / '+fmtClockTime(periods.sunset)+'</div></div>';
+    html += '<div class="solunar-row"><div class="lbl">Moonrise / Moonset</div><div class="time">'+fmtClockTime(periods.moonrise)+' / '+fmtClockTime(periods.moonset)+'</div></div>';
+
+    document.getElementById('solunarContent').innerHTML = html;
+  }
+
+  document.getElementById('solunarBtn').addEventListener('click', function(){
+    solunarViewDate = new Date();
+    closeAllModals();
+    document.getElementById('solunarModalBackdrop').classList.add('show');
+    renderSolunarTable();
+  });
+  document.getElementById('solunarModalClose').addEventListener('click', function(){
+    document.getElementById('solunarModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('solunarModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('show');
+  });
+  document.getElementById('solunarPrevDay').addEventListener('click', function(){
+    solunarViewDate = new Date(solunarViewDate.getTime() - 86400000);
+    renderSolunarTable();
+  });
+  document.getElementById('solunarNextDay').addEventListener('click', function(){
+    solunarViewDate = new Date(solunarViewDate.getTime() + 86400000);
+    renderSolunarTable();
+  });
+  document.getElementById('solunarTodayBtn').addEventListener('click', function(){
+    solunarViewDate = new Date();
+    renderSolunarTable();
+  });
+
   // ---------- Tag History: track a specific tagged fish across every catch ----------
   document.getElementById('tagHistoryBtn').addEventListener('click', function(){
     document.getElementById('tagHistorySearchInput').value = '';
@@ -3396,7 +3690,8 @@
       if (o.length) statsParts.push(o.length + ' in');
       var envParts = [];
       if (o.moonPhase) envParts.push('🌙 ' + o.moonPhase.name);
-      if (o.weatherStatus === 'ok' && o.weather) envParts.push(o.weather.tempF + '°F, ' + o.weather.windDir + ' ' + o.weather.windMph + 'mph');
+      if (o.solunarPeriod) envParts.push('⭐ ' + o.solunarPeriod);
+      if (o.weatherStatus === 'ok' && o.weather) envParts.push(formatWeatherDetailLine(o.weather));
       var row = document.createElement('div');
       row.className = 'tag-catch-row';
       row.innerHTML =
@@ -3434,8 +3729,9 @@
         var isLatest = idx === 0;
         var envTxt = '';
         if (d.moonPhase) envTxt += '🌙 ' + escapeHtml(d.moonPhase.name) + ' (' + d.moonPhase.illumination + '%)';
+        if (d.solunarPeriod) envTxt += (envTxt ? ' · ' : '') + '⭐ ' + escapeHtml(d.solunarPeriod);
         if (d.weatherStatus === 'ok' && d.weather){
-          envTxt += (envTxt ? ' · ' : '') + d.weather.tempF + '°F, ' + d.weather.windDir + ' ' + d.weather.windMph + 'mph';
+          envTxt += (envTxt ? ' · ' : '') + formatWeatherDetailLine(d.weather);
         }
         row.innerHTML =
           '<div class="info">' +
@@ -4087,6 +4383,7 @@
       lng: pos.lng,
       deployedAt: Date.now(),
       moonPhase: getMoonPhase(new Date()),
+      solunarPeriod: classifyEventSolunarPeriod(new Date(), pos.lat, pos.lng),
       weather: null,
       weatherStatus: 'pending'
     };
