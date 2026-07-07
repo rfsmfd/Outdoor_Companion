@@ -104,6 +104,7 @@
     }
     #quickLogFab .fab-label{ top:80px; }
     #buildBadge{ top:165px; font-size:12px; padding:5px 10px; }
+    #huntBar{ top:64px; }
     #layerSwitch{ bottom:24px; }
     .layer-btn{ font-size:16px; padding:13px 18px; }
     #followMeBtn{ bottom:78px; width:50px; height:50px; font-size:22px; }
@@ -478,6 +479,47 @@
     letter-spacing:0.3px;
   }
 
+  #huntBar{
+    position:fixed;
+    top:14px; left:50%;
+    transform:translateX(-50%);
+    z-index:2400;
+    max-width:92vw;
+  }
+  #huntStartBtn{
+    background:var(--panel);
+    border:1px solid var(--accent);
+    color:var(--accent);
+    font-size:12.5px;
+    font-weight:700;
+    padding:8px 16px;
+    border-radius:20px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.5);
+    white-space:nowrap;
+  }
+  #huntActiveInfo{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    background:#8B2500;
+    border:1px solid #FF6A13;
+    color:#FFF3E0;
+    font-size:12px;
+    font-weight:600;
+    padding:8px 10px 8px 16px;
+    border-radius:20px;
+    box-shadow:0 2px 10px rgba(0,0,0,0.6);
+    white-space:nowrap;
+  }
+  #huntEndBtn{
+    background:#FF6A13;
+    color:#1A1204;
+    font-size:11.5px;
+    font-weight:700;
+    padding:6px 14px;
+    border-radius:16px;
+  }
+
   .site-marker{
     width:28px;height:28px;border-radius:50%;
     background:var(--mc);
@@ -774,6 +816,7 @@
   }
 
   #historyModal{ width:420px; max-width:92vw; }
+  #huntLogModal{ width:460px; max-width:92vw; }
 
   #tagHistoryBtn{
     margin:0 16px 10px 16px;
@@ -1207,6 +1250,7 @@
       <button class="btn-primary" id="gpsSiteBtn" style="background:#3B9EFF;color:#0A1A2E;">📍 My Location</button>
       <button class="btn-ghost" id="exportBtn">Export</button>
       <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
+      <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Log</button>
     </div>
 
     <div id="propertyRow">
@@ -1256,7 +1300,14 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 23</div>
+    <div id="buildBadge">BUILD 24</div>
+    <div id="huntBar">
+      <button id="huntStartBtn">🏹 Start Hunt</button>
+      <div id="huntActiveInfo" style="display:none;">
+        <span id="huntActiveLabel">🏹 Hunting · North Fence · 0m</span>
+        <button id="huntEndBtn">End Hunt</button>
+      </div>
+    </div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1450,6 +1501,15 @@
     </div>
   </div>
 
+  <!-- Hunt Log: every past Hunt Event / Fishing Trip, with full stats -->
+  <div class="oc-modal-backdrop" id="huntLogModalBackdrop">
+    <div class="oc-modal" id="huntLogModal">
+      <h3><span id="huntLogTitle">Hunt Log</span> <button class="close-x" id="huntLogModalClose">&times;</button></h3>
+      <div id="huntLogSummary" style="margin-bottom:14px;"></div>
+      <div id="huntLogList"></div>
+    </div>
+  </div>
+
   <!-- Deployment History: every past deployment for a camera, permanently preserved -->
   <div class="oc-modal-backdrop" id="historyModalBackdrop">
     <div class="oc-modal" id="historyModal">
@@ -1636,6 +1696,8 @@
 
   var cameras = [];      // {id, name, createdAt, currentSiteId, lastDeployedAt}
   var properties = [];   // {id, name, notes, createdAt}
+  var huntEvents = [];   // {id, module, siteId, lat, lng, checkInAt, checkOutAt, weather, weatherStatus, moonPhase, observationIds}
+  var activeHuntId = null; // the currently in-progress hunt/trip, or null if none active
   var activePropertyId = null; // null = "All Properties"
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
   var QR_PREFIX = 'OC-CAM:'; // legacy format, still recognized by the in-page scanner as a fallback
@@ -2105,6 +2167,39 @@
   var CAM_LS_KEY = 'outdoor_companion_cameras';
   var DEP_LS_KEY = 'outdoor_companion_deployments';
   var PROP_LS_KEY = 'outdoor_companion_properties';
+  var HUNT_LS_KEY = 'outdoor_companion_hunt_events';
+
+  function huntLocalLoadAll(){
+    try{ var raw = window.localStorage.getItem(HUNT_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
+  }
+  function huntLocalSaveAll(list){
+    try{ window.localStorage.setItem(HUNT_LS_KEY, JSON.stringify(list)); }catch(e){}
+  }
+  async function loadHuntEvents(){
+    if (hasChatStorage){
+      try{
+        var res = await window.storage.list('hunt:', false);
+        var keys = (res && res.keys) ? res.keys : [];
+        var loaded = [];
+        for (var i=0;i<keys.length;i++){
+          try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
+        }
+        huntEvents = loaded;
+      }catch(e){ huntEvents = []; }
+    } else {
+      huntEvents = huntLocalLoadAll();
+    }
+  }
+  async function saveHuntEvent(hunt){
+    if (hasChatStorage){
+      await window.storage.set('hunt:'+hunt.id, JSON.stringify(hunt), false);
+    } else {
+      var all = huntLocalLoadAll();
+      var idx = all.findIndex(function(h){ return h.id === hunt.id; });
+      if (idx >= 0) all[idx] = hunt; else all.push(hunt);
+      huntLocalSaveAll(all);
+    }
+  }
 
   function camLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(CAM_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
@@ -3015,6 +3110,156 @@
     }
   });
 
+  // ---------- Hunt Events / Fishing Trips ----------
+  var huntBarTimer = null;
+
+  function fmtHuntDuration(startMs, endMs){
+    var mins = Math.round((endMs - startMs) / 60000);
+    if (mins < 60) return mins + 'm';
+    var hrs = Math.floor(mins / 60);
+    var rem = mins % 60;
+    return hrs + 'h ' + rem + 'm';
+  }
+
+  function updateActiveHuntBar(){
+    var startBtn = document.getElementById('huntStartBtn');
+    var activeInfo = document.getElementById('huntActiveInfo');
+    var label = document.getElementById('huntActiveLabel');
+    var hunt = activeHuntId ? huntEvents.filter(function(h){ return h.id === activeHuntId; })[0] : null;
+
+    if (huntBarTimer){ clearInterval(huntBarTimer); huntBarTimer = null; }
+
+    if (!hunt){
+      startBtn.style.display = 'block';
+      activeInfo.style.display = 'none';
+      startBtn.textContent = activeModule === 'fishing' ? '🎣 Start Trip' : '🏹 Start Hunt';
+      return;
+    }
+
+    startBtn.style.display = 'none';
+    activeInfo.style.display = 'flex';
+    var site = hunt.siteId ? sites.filter(function(s){ return s.id === hunt.siteId; })[0] : null;
+    var verb = activeModule === 'fishing' ? '🎣 Fishing' : '🏹 Hunting';
+    function refreshLabel(){
+      var elapsed = fmtHuntDuration(hunt.checkInAt, Date.now());
+      label.textContent = verb + (site ? ' · ' + site.name : '') + ' · ' + elapsed + ' · ' + hunt.observationIds.length + ' sighting' + (hunt.observationIds.length===1?'':'s');
+    }
+    refreshLabel();
+    huntBarTimer = setInterval(refreshLabel, 30000); // updates the elapsed time every 30s
+  }
+
+  document.getElementById('huntStartBtn').addEventListener('click', async function(){
+    if (activeHuntId){ return; } // already active — the button is hidden in this state anyway, but guard regardless
+    var pos = lastKnownPos;
+    var lat, lng;
+    if (pos){ lat = pos.lat; lng = pos.lng; }
+    else { var c = map.getCenter(); lat = c.lat; lng = c.lng; }
+
+    var match = nearestSite(lat, lng, NEAREST_SITE_RADIUS_M);
+    var now = Date.now();
+    var hunt = {
+      id: uid(),
+      module: activeModule,
+      siteId: match ? match.site.id : null,
+      lat: lat,
+      lng: lng,
+      checkInAt: now,
+      checkOutAt: null,
+      moonPhase: getMoonPhase(new Date(now)),
+      weather: null,
+      weatherStatus: 'pending',
+      observationIds: []
+    };
+    huntEvents.push(hunt);
+    try{ await saveHuntEvent(hunt); }catch(e){ console.error('Outdoor Companion: failed to save hunt event', e); }
+    activeHuntId = hunt.id;
+    updateActiveHuntBar();
+    showToast((activeModule === 'fishing' ? 'Trip' : 'Hunt') + ' started' + (match ? ' at ' + match.site.name : ''));
+
+    fetchCurrentWeather(lat, lng).then(async function(weatherResult){
+      var liveHunt = huntEvents.filter(function(h){ return h.id === hunt.id; })[0];
+      if (!liveHunt) return;
+      liveHunt.weather = weatherResult;
+      liveHunt.weatherStatus = weatherResult ? 'ok' : 'unavailable';
+      try{ await saveHuntEvent(liveHunt); }catch(e){ console.error('Outdoor Companion: failed to save weather onto hunt event', e); }
+    });
+  });
+
+  document.getElementById('huntEndBtn').addEventListener('click', async function(){
+    if (!activeHuntId) return;
+    var hunt = huntEvents.filter(function(h){ return h.id === activeHuntId; })[0];
+    if (!hunt) { activeHuntId = null; updateActiveHuntBar(); return; }
+    hunt.checkOutAt = Date.now();
+    try{ await saveHuntEvent(hunt); }catch(e){ console.error('Outdoor Companion: failed to save hunt checkout', e); }
+    var duration = fmtHuntDuration(hunt.checkInAt, hunt.checkOutAt);
+    activeHuntId = null;
+    updateActiveHuntBar();
+    showToast((activeModule === 'fishing' ? 'Trip' : 'Hunt') + ' ended · ' + duration + ' · ' + hunt.observationIds.length + ' sighting' + (hunt.observationIds.length===1?'':'s'));
+  });
+
+  function renderHuntLog(){
+    var relevantHunts = huntEvents.filter(function(h){ return h.module === activeModule; })
+      .sort(function(a,b){ return b.checkInAt - a.checkInAt; });
+    var noun = activeModule === 'fishing' ? 'Trip' : 'Hunt';
+    document.getElementById('huntLogTitle').textContent = noun + ' Log';
+
+    var summaryEl = document.getElementById('huntLogSummary');
+    var listEl = document.getElementById('huntLogList');
+
+    if (relevantHunts.length === 0){
+      summaryEl.innerHTML = '';
+      listEl.innerHTML = '<div class="empty" style="padding:20px 0;">No ' + noun.toLowerCase() + 's logged yet. Tap "' + (activeModule === 'fishing' ? '🎣 Start Trip' : '🏹 Start Hunt') + '" on the map to begin.</div>';
+      return;
+    }
+
+    // Summary stats — the exact queries described: total count, total hours, average
+    // sightings per session. Only completed sessions count toward duration/averages;
+    // an in-progress one is shown in the list but doesn't skew the stats yet.
+    var completed = relevantHunts.filter(function(h){ return h.checkOutAt; });
+    var totalMs = completed.reduce(function(sum, h){ return sum + (h.checkOutAt - h.checkInAt); }, 0);
+    var totalHours = Math.round((totalMs / 3600000) * 10) / 10;
+    var totalSightings = relevantHunts.reduce(function(sum, h){ return sum + h.observationIds.length; }, 0);
+    var avgSightings = relevantHunts.length ? Math.round((totalSightings / relevantHunts.length) * 10) / 10 : 0;
+
+    summaryEl.innerHTML =
+      '<div class="analytics-grid" style="padding:0;">' +
+        '<div class="analytics-chart-wrap"><div class="analytics-chart-title">Total ' + noun + 's</div><div style="font-size:22px;font-weight:700;color:var(--accent);">' + relevantHunts.length + '</div></div>' +
+        '<div class="analytics-chart-wrap"><div class="analytics-chart-title">Total Hours (completed)</div><div style="font-size:22px;font-weight:700;color:var(--accent);">' + totalHours + '</div></div>' +
+        '<div class="analytics-chart-wrap"><div class="analytics-chart-title">Avg Sightings / ' + noun + '</div><div style="font-size:22px;font-weight:700;color:var(--accent);">' + avgSightings + '</div></div>' +
+      '</div>';
+
+    listEl.innerHTML = '';
+    relevantHunts.forEach(function(h){
+      var site = h.siteId ? sites.filter(function(s){ return s.id === h.siteId; })[0] : null;
+      var dateStr = new Date(h.checkInAt).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
+      var durationStr = h.checkOutAt ? fmtHuntDuration(h.checkInAt, h.checkOutAt) : 'In progress';
+      var envParts = [];
+      if (h.moonPhase) envParts.push('🌙 ' + h.moonPhase.name);
+      if (h.weatherStatus === 'ok' && h.weather) envParts.push(formatWeatherLine(h.weather));
+      var row = document.createElement('div');
+      row.className = 'history-row';
+      row.innerHTML =
+        '<div class="info">' +
+          '<div class="dt">' + escapeHtml(dateStr) + (site ? ' · ' + escapeHtml(site.name) : '') + (h.checkOutAt ? '' : ' <span style="color:var(--accent);">· active</span>') + '</div>' +
+          '<div class="co">' + durationStr + ' · ' + h.observationIds.length + ' sighting' + (h.observationIds.length===1?'':'s') + '</div>' +
+          (envParts.length ? '<div class="co" style="color:var(--text-dim);">' + envParts.join(' · ') + '</div>' : '') +
+        '</div>';
+      listEl.appendChild(row);
+    });
+  }
+
+  document.getElementById('huntLogBtn').addEventListener('click', function(){
+    renderHuntLog();
+    closeAllModals();
+    document.getElementById('huntLogModalBackdrop').classList.add('show');
+  });
+  document.getElementById('huntLogModalClose').addEventListener('click', function(){
+    document.getElementById('huntLogModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('huntLogModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('show');
+  });
+
 
   // "My Location" button — grabs a fresh GPS fix and opens the save form right there,
   // matching the Deploy flow: GPS auto-captured, no manual tap needed.
@@ -3372,6 +3617,7 @@
     renderObsMarkers();
     renderActiveList();
     updateTagHistoryButtonVisibility();
+    updateActiveHuntBar();
     showToast(activeModule === 'fishing' ? '🎣 Switched to Fishing' : '🏹 Switched to Hunting');
   }
 
@@ -3437,6 +3683,19 @@
     };
     observations.push(obs);
     try{ await saveObservation(obs); }catch(e){ console.error('Outdoor Companion: failed to save observation', e); }
+
+    // Dual-linking: this observation keeps its own real map location (set above,
+    // independent of the hunter's position) AND separately gets tagged to whichever
+    // Hunt Event is currently active, if any — a sighting far from the stand still
+    // belongs to that hunt session.
+    if (activeHuntId){
+      var activeHunt = huntEvents.filter(function(h){ return h.id === activeHuntId; })[0];
+      if (activeHunt){
+        activeHunt.observationIds.push(obs.id);
+        try{ await saveHuntEvent(activeHunt); }catch(e){ console.error('Outdoor Companion: failed to link observation to active hunt', e); }
+      }
+    }
+
     closeSheet();
     renderObsMarkers();
     if (activeTab === 'log') renderLogList();
@@ -3561,6 +3820,12 @@
     await loadCameras();
     await loadDeployments();
     await loadProperties();
+    await loadHuntEvents();
+    // If a hunt was left active from a previous session (app closed without tapping End
+    // Hunt), pick that state back up rather than silently losing track of it.
+    var stillActive = huntEvents.filter(function(h){ return !h.checkOutAt; })[0];
+    if (stillActive){ activeHuntId = stillActive.id; }
+    updateActiveHuntBar();
     handleCameraUrlParam();
   })();
 
