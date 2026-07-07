@@ -851,6 +851,22 @@
   .tag-catch-row .env{ font-size:10.5px; color:var(--text-dim); }
 
   #importPhotosModal{ width:600px; max-width:95vw; }
+  #importPhotosFixedClose{
+    position:fixed;
+    top:20px; right:20px;
+    z-index:3100;
+    background:var(--accent);
+    color:#1A1204;
+    border:none;
+    width:44px;height:44px;
+    border-radius:50%;
+    font-size:24px;
+    font-weight:700;
+    line-height:1;
+    box-shadow:0 2px 10px rgba(0,0,0,0.6);
+    display:none;
+  }
+  #importPhotosFixedClose.show{ display:flex; align-items:center; justify-content:center; }
   #importPreviewNotice{
     background:rgba(255,224,102,0.12);
     border:1px solid #FFE066;
@@ -1241,7 +1257,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 21</div>
+    <div id="buildBadge">BUILD 22</div>
     <div id="map"></div>
 
     <div id="toast"></div>
@@ -1373,6 +1389,7 @@
   </div>
 
   <!-- Import Photos (Preview): matches photos to the site a camera was at, by real EXIF timestamp -->
+  <button id="importPhotosFixedClose" title="Close">&times;</button>
   <div class="oc-modal-backdrop" id="importPhotosModalBackdrop">
     <div class="oc-modal" id="importPhotosModal">
       <h3>Import Photos <button class="close-x" id="importPhotosClose">&times;</button></h3>
@@ -1919,6 +1936,8 @@
     document.querySelectorAll('.oc-modal-backdrop').forEach(function(el){
       el.classList.remove('show');
     });
+    var fixedClose = document.getElementById('importPhotosFixedClose');
+    if (fixedClose) fixedClose.classList.remove('show');
   }
 
   function markerIcon(type){
@@ -3978,12 +3997,16 @@
     }
     closeAllModals();
     document.getElementById('importPhotosModalBackdrop').classList.add('show');
+    document.getElementById('importPhotosFixedClose').classList.add('show');
   });
-  document.getElementById('importPhotosClose').addEventListener('click', function(){
+  function closeImportPhotosModal(){
     document.getElementById('importPhotosModalBackdrop').classList.remove('show');
-  });
+    document.getElementById('importPhotosFixedClose').classList.remove('show');
+  }
+  document.getElementById('importPhotosClose').addEventListener('click', closeImportPhotosModal);
+  document.getElementById('importPhotosFixedClose').addEventListener('click', closeImportPhotosModal);
   document.getElementById('importPhotosModalBackdrop').addEventListener('click', function(e){
-    if (e.target === this) this.classList.remove('show');
+    if (e.target === this) closeImportPhotosModal();
   });
 
   function readFileAsArrayBuffer(file){
