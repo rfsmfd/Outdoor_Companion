@@ -817,6 +817,8 @@
 
   #historyModal{ width:420px; max-width:92vw; }
   #huntLogModal{ width:460px; max-width:92vw; }
+  #propDisambigModal{ width:360px; max-width:90vw; }
+  #newSpotModal{ width:380px; max-width:90vw; }
 
   #tagHistoryBtn{
     margin:0 16px 10px 16px;
@@ -1250,7 +1252,7 @@
       <button class="btn-primary" id="gpsSiteBtn" style="background:#3B9EFF;color:#0A1A2E;">📍 My Location</button>
       <button class="btn-ghost" id="exportBtn">Export</button>
       <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
-      <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Log</button>
+      <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
     </div>
 
     <div id="propertyRow">
@@ -1300,7 +1302,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 24</div>
+    <div id="buildBadge">BUILD 29</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1498,6 +1500,29 @@
         <button class="btn-primary" id="tagHistorySearchBtn">Search</button>
       </div>
       <div id="tagHistoryResults"></div>
+    </div>
+  </div>
+
+  <!-- New Spot: focused, in-the-moment Property/Lake creation when Hunt Start recognizes no existing one here -->
+  <div class="oc-modal-backdrop" id="newSpotModalBackdrop">
+    <div class="oc-modal" id="newSpotModal">
+      <h3><span id="newSpotTitle">New Spot</span></h3>
+      <p style="font-size:12px;color:var(--text-dim);margin:0 0 12px 0;">No saved spot recognized here. Want to save this area for next time?</p>
+      <p style="font-size:11px;color:var(--accent);margin:0 0 8px 0;">📍 Pan/zoom the map (behind this window) to frame the whole area first, then name it.</p>
+      <input type="text" id="newSpotName" placeholder="e.g. Eddie's Farm" />
+      <div class="row" style="margin-top:10px;">
+        <button class="btn-primary" id="newSpotSaveBtn" style="flex:1 1 auto;">Save & Start</button>
+        <button class="btn-ghost" id="newSpotSkipBtn">Skip for now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Property/Lake disambiguation: shown only when a location falls inside 2+ overlapping properties -->
+  <div class="oc-modal-backdrop" id="propDisambigModalBackdrop">
+    <div class="oc-modal" id="propDisambigModal">
+      <h3><span id="propDisambigTitle">Which Property?</span></h3>
+      <p style="font-size:12.5px;color:var(--text-dim);margin:0 0 14px 0;">This spot falls within more than one — pick the right one so it's not counted twice.</p>
+      <div id="propDisambigList"></div>
     </div>
   </div>
 
@@ -2045,6 +2070,97 @@
     return null;
   }
 
+  // ---------- Universal Property/Lake attribution (no double-counting) ----------
+  // Every location-based record (Hunt Events, individual sightings/catches, Site
+  // creation) uses this SAME function. Rule: exactly one match auto-attributes; zero
+  // matches means no attribution; two-or-more matches ALWAYS stops and asks which one —
+  // never silently guesses or attributes to both. Prevents one real event from being
+  // double-counted across overlapping properties, which would corrupt per-property
+  // analytics totals.
+  function findPropertiesContaining(lat, lng, module){
+    return properties.filter(function(p){
+      if (p.module !== module || !p.bounds) return false;
+      return lat >= p.bounds.south && lat <= p.bounds.north && lng >= p.bounds.west && lng <= p.bounds.east;
+    });
+  }
+
+  // Returns a Promise resolving to a single property (or null). Shows a disambiguation
+  // picker automatically if the location falls inside more than one property at once.
+  function resolvePropertyForLocation(lat, lng){
+    return new Promise(function(resolve){
+      var matches = findPropertiesContaining(lat, lng, activeModule);
+      if (matches.length === 0){ resolve(null); return; }
+      if (matches.length === 1){ resolve(matches[0]); return; }
+      showPropertyDisambiguationPicker(matches, resolve);
+    });
+  }
+
+  function showPropertyDisambiguationPicker(matches, resolve){
+    var backdrop = document.getElementById('propDisambigModalBackdrop');
+    var list = document.getElementById('propDisambigList');
+    var noun = activeModule === 'fishing' ? 'Lake' : 'Property';
+    document.getElementById('propDisambigTitle').textContent = 'Which ' + noun + '?';
+    list.innerHTML = '';
+    matches.forEach(function(p){
+      var btn = document.createElement('button');
+      btn.className = 'btn-primary';
+      btn.style.cssText = 'width:100%;margin-bottom:8px;';
+      btn.textContent = p.name;
+      btn.addEventListener('click', function(){
+        backdrop.classList.remove('show');
+        resolve(p);
+      });
+      list.appendChild(btn);
+    });
+    closeAllModals();
+    backdrop.classList.add('show');
+  }
+
+  // In-the-moment Property/Lake creation, offered when Hunt Start recognizes nothing at
+  // the current location. Resolves to the newly created property, or null if skipped.
+  // Reuses createPropertyFromCurrentMapView — same save logic as Manage Properties.
+  function promptNewSpot(){
+    return new Promise(function(resolve){
+      var noun = activeModule === 'fishing' ? 'Lake' : 'Property';
+      document.getElementById('newSpotTitle').textContent = 'New ' + noun;
+      var nameInput = document.getElementById('newSpotName');
+      nameInput.value = '';
+      var backdrop = document.getElementById('newSpotModalBackdrop');
+      var saveBtn = document.getElementById('newSpotSaveBtn');
+      var skipBtn = document.getElementById('newSpotSkipBtn');
+
+      function cleanup(){
+        saveBtn.removeEventListener('click', onSave);
+        skipBtn.removeEventListener('click', onSkip);
+        backdrop.removeEventListener('click', onBackdropClick);
+      }
+      async function onSave(){
+        var name = nameInput.value.trim();
+        if (!name) return; // require a name before saving
+        var prop = await createPropertyFromCurrentMapView(name);
+        renderPropertySelect();
+        renderPropertiesManageList();
+        backdrop.classList.remove('show');
+        cleanup();
+        resolve(prop);
+      }
+      function onSkip(){
+        backdrop.classList.remove('show');
+        cleanup();
+        resolve(null);
+      }
+      function onBackdropClick(e){
+        if (e.target === backdrop) onSkip();
+      }
+      saveBtn.addEventListener('click', onSave);
+      skipBtn.addEventListener('click', onSkip);
+      backdrop.addEventListener('click', onBackdropClick);
+
+      closeAllModals();
+      backdrop.classList.add('show');
+    });
+  }
+
   function fmtCoord(n){ return n.toFixed(5); }
 
   // ---------- storage (works both inside chat preview and as a standalone file) ----------
@@ -2419,11 +2535,11 @@
     });
   }
 
-  document.getElementById('addPropertyBtn').addEventListener('click', async function(){
-    var nameInput = document.getElementById('newPropertyName');
-    var name = nameInput.value.trim();
-    if (!name) return;
+  // Shared by the Manage Properties flow AND the in-the-moment "new spot" prompt at
+  // Hunt Start — one save function, two entry points, no duplicated logic.
+  async function createPropertyFromCurrentMapView(name){
     var center = map.getCenter();
+    var bounds = map.getBounds();
     var prop = {
       id: uid(),
       name: name,
@@ -2431,14 +2547,57 @@
       createdAt: Date.now(),
       centerLat: center.lat,
       centerLng: center.lng,
-      zoom: map.getZoom()
+      zoom: map.getZoom(),
+      module: activeModule,
+      bounds: { north: bounds.getNorth(), south: bounds.getSouth(), east: bounds.getEast(), west: bounds.getWest() }
     };
     properties.push(prop);
     try{ await saveProperty(prop); }catch(e){ console.error('Outdoor Companion: failed to save property', e); }
+    await offerBackfillForNewProperty(prop);
+    return prop;
+  }
+
+  // Whenever ANY new Property/Lake gets created — through Manage Properties or the
+  // in-the-moment New Spot prompt — check for past Hunt Events and observations that
+  // were left unattributed (propertyId: null) but fall inside this new boundary, and
+  // offer to reconnect them. Prevents permanently orphaning the exact records (like a
+  // hunt where someone skipped creating the property at the time) that this new
+  // property was meant to cover all along.
+  async function offerBackfillForNewProperty(prop){
+    var inBounds = function(lat, lng){
+      return lat >= prop.bounds.south && lat <= prop.bounds.north && lng >= prop.bounds.west && lng <= prop.bounds.east;
+    };
+    var orphanedHunts = huntEvents.filter(function(h){
+      return h.module === prop.module && !h.propertyId && inBounds(h.lat, h.lng);
+    });
+    var orphanedObs = observations.filter(function(o){
+      return !o.propertyId && o.lat != null && o.lng != null && typeIsInActiveModule(o.type, true) && inBounds(o.lat, o.lng);
+    });
+    var total = orphanedHunts.length + orphanedObs.length;
+    if (total === 0) return;
+    var noun = prop.module === 'fishing' ? 'lake' : 'property';
+    var confirmed = window.confirm('Found ' + total + ' earlier record' + (total===1?'':'s') + ' that fall inside this new ' + noun + ' — attach them now?');
+    if (!confirmed) return;
+    for (var i=0; i<orphanedHunts.length; i++){
+      orphanedHunts[i].propertyId = prop.id;
+      try{ await saveHuntEvent(orphanedHunts[i]); }catch(e){ console.error('Outdoor Companion: failed to backfill hunt event', e); }
+    }
+    for (var j=0; j<orphanedObs.length; j++){
+      orphanedObs[j].propertyId = prop.id;
+      try{ await saveObservation(orphanedObs[j]); }catch(e){ console.error('Outdoor Companion: failed to backfill observation', e); }
+    }
+    showToast(total + ' record' + (total===1?'':'s') + ' reconnected to ' + prop.name);
+  }
+
+  document.getElementById('addPropertyBtn').addEventListener('click', async function(){
+    var nameInput = document.getElementById('newPropertyName');
+    var name = nameInput.value.trim();
+    if (!name) return;
+    await createPropertyFromCurrentMapView(name);
     nameInput.value = '';
     renderPropertySelect();
     renderPropertiesManageList();
-    showToast('Property "' + name + '" saved — this map view will be remembered');
+    showToast((activeModule === 'fishing' ? 'Lake' : 'Property') + ' "' + name + '" saved — this map view will be remembered');
   });
 
   var activeDateFilter = null; // null = All Time, otherwise {from, to, label}
@@ -2652,6 +2811,10 @@
         '</div>' +
         '<label>Tag #</label>' +
         '<input type="text" id="o_tag" value="'+escapeHtml(o.tagNumber || '')+'" placeholder="e.g. 47 (leave blank if untagged)" />' +
+        '<div class="row" style="gap:8px;">' +
+          '<div style="flex:1;"><label>Lure</label><input type="text" id="o_lure" value="'+escapeHtml(o.lure || '')+'" placeholder="e.g. spinnerbait" /></div>' +
+          '<div style="flex:1;"><label>Color</label><input type="text" id="o_lureColor" value="'+escapeHtml(o.lureColor || '')+'" placeholder="e.g. chartreuse" /></div>' +
+        '</div>' +
         '<label>Photo</label>' +
         (o.photoThumb ?
           '<img src="'+o.photoThumb+'" style="width:100%;max-height:140px;object-fit:cover;border-radius:6px;margin-bottom:8px;" />' : '') +
@@ -2707,6 +2870,8 @@
     var weightEl = node.querySelector('#o_weight');
     var lengthEl = node.querySelector('#o_length');
     var tagEl = node.querySelector('#o_tag');
+    var lureEl = node.querySelector('#o_lure');
+    var lureColorEl = node.querySelector('#o_lureColor');
     if (weightEl) weightEl.addEventListener('change', function(){
       autoSaveField(function(o){ o.weight = weightEl.value ? parseFloat(weightEl.value) : null; });
     });
@@ -2715,6 +2880,12 @@
     });
     if (tagEl) tagEl.addEventListener('blur', function(){
       autoSaveField(function(o){ o.tagNumber = tagEl.value.trim() || null; });
+    });
+    if (lureEl) lureEl.addEventListener('blur', function(){
+      autoSaveField(function(o){ o.lure = lureEl.value.trim() || null; });
+    });
+    if (lureColorEl) lureColorEl.addEventListener('blur', function(){
+      autoSaveField(function(o){ o.lureColor = lureColorEl.value.trim() || null; });
     });
 
     var photoBtn = node.querySelector('#o_photo_btn');
@@ -3156,11 +3327,29 @@
     else { var c = map.getCenter(); lat = c.lat; lng = c.lng; }
 
     var match = nearestSite(lat, lng, NEAREST_SITE_RADIUS_M);
+    var noun = activeModule === 'fishing' ? 'Lake' : 'Property';
+
+    // Resolve which Property/Lake (if any) this location falls inside — handles the
+    // disambiguation prompt automatically if it's inside more than one at once.
+    var resolvedProperty = await resolvePropertyForLocation(lat, lng);
+    var propertyId = null;
+    if (resolvedProperty){
+      var confirmed = window.confirm('Looks like you\'re at ' + resolvedProperty.name + ' — start here?');
+      propertyId = confirmed ? resolvedProperty.id : null;
+    } else {
+      // Nothing recognized here — offer to create it right now, so this very hunt (the
+      // first one at a brand-new spot, often the most interesting one) isn't left
+      // permanently unattributed. Skipping just proceeds without a property, same as before.
+      var newProp = await promptNewSpot();
+      propertyId = newProp ? newProp.id : null;
+    }
+
     var now = Date.now();
     var hunt = {
       id: uid(),
       module: activeModule,
       siteId: match ? match.site.id : null,
+      propertyId: propertyId,
       lat: lat,
       lng: lng,
       checkInAt: now,
@@ -3201,7 +3390,7 @@
     var relevantHunts = huntEvents.filter(function(h){ return h.module === activeModule; })
       .sort(function(a,b){ return b.checkInAt - a.checkInAt; });
     var noun = activeModule === 'fishing' ? 'Trip' : 'Hunt';
-    document.getElementById('huntLogTitle').textContent = noun + ' Log';
+    document.getElementById('huntLogTitle').textContent = noun + ' Journal';
 
     var summaryEl = document.getElementById('huntLogSummary');
     var listEl = document.getElementById('huntLogList');
@@ -3229,7 +3418,40 @@
       '</div>';
 
     listEl.innerHTML = '';
+
+    // Group by calendar day (local date), most recent day first — this is the core of
+    // the Journal view: each day shows its own subtotal, with every session that day
+    // listed underneath using the exact same row rendering as before.
+    var dayGroups = {}; // dateKey -> {label, hunts:[]}
     relevantHunts.forEach(function(h){
+      var d = new Date(h.checkInAt);
+      var dateKey = d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate();
+      if (!dayGroups[dateKey]){
+        dayGroups[dateKey] = {
+          label: d.toLocaleDateString(undefined, {weekday:'long', month:'short', day:'numeric', year:'numeric'}),
+          sortMs: new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(),
+          hunts: []
+        };
+      }
+      dayGroups[dateKey].hunts.push(h);
+    });
+    var orderedDayKeys = Object.keys(dayGroups).sort(function(a,b){ return dayGroups[b].sortMs - dayGroups[a].sortMs; });
+
+    orderedDayKeys.forEach(function(dayKey){
+      var group = dayGroups[dayKey];
+      var dayCompleted = group.hunts.filter(function(h){ return h.checkOutAt; });
+      var dayTotalMs = dayCompleted.reduce(function(sum, h){ return sum + (h.checkOutAt - h.checkInAt); }, 0);
+      var dayTotalHours = Math.round((dayTotalMs / 3600000) * 10) / 10;
+      var daySightings = group.hunts.reduce(function(sum, h){ return sum + h.observationIds.length; }, 0);
+
+      var dayHeader = document.createElement('div');
+      dayHeader.style.cssText = 'padding:10px 4px 6px 4px;border-bottom:1px solid var(--line);margin-bottom:8px;margin-top:14px;';
+      dayHeader.innerHTML =
+        '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;letter-spacing:0.3px;color:var(--accent);text-transform:uppercase;">' + escapeHtml(group.label) + '</div>' +
+        '<div style="font-size:11px;color:var(--text-dim);margin-top:2px;">' + group.hunts.length + ' ' + noun.toLowerCase() + (group.hunts.length===1?'':'s') + ' · ' + dayTotalHours + ' combined hrs · ' + daySightings + ' sighting' + (daySightings===1?'':'s') + '</div>';
+      listEl.appendChild(dayHeader);
+
+      group.hunts.forEach(function(h){
       var site = h.siteId ? sites.filter(function(s){ return s.id === h.siteId; })[0] : null;
       var dateStr = new Date(h.checkInAt).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
       var durationStr = h.checkOutAt ? fmtHuntDuration(h.checkInAt, h.checkOutAt) : 'In progress';
@@ -3240,12 +3462,75 @@
       row.className = 'history-row';
       row.innerHTML =
         '<div class="info">' +
-          '<div class="dt">' + escapeHtml(dateStr) + (site ? ' · ' + escapeHtml(site.name) : '') + (h.checkOutAt ? '' : ' <span style="color:var(--accent);">· active</span>') + '</div>' +
+          '<div class="dt">' + escapeHtml(dateStr) + (site ? ' · ' + escapeHtml(site.name) : '') + (h.checkOutAt ? '' : ' <span style="color:var(--accent);">· active</span>') +
+            ' <a href="#" class="fix-checkin-link" style="font-size:10.5px;color:var(--text-dim);text-decoration:underline;">fix start time</a></div>' +
           '<div class="co">' + durationStr + ' · ' + h.observationIds.length + ' sighting' + (h.observationIds.length===1?'':'s') + '</div>' +
           (envParts.length ? '<div class="co" style="color:var(--text-dim);">' + envParts.join(' · ') + '</div>' : '') +
         '</div>';
+
+      // Fix a forgotten Start Hunt — realized late, correct the actual arrival time.
+      // Hidden behind a small toggle link so it doesn't clutter every row by default.
+      var checkinFixRow = document.createElement('div');
+      checkinFixRow.style.cssText = 'display:none;gap:6px;margin-top:6px;align-items:center;';
+      var checkinInput = document.createElement('input');
+      checkinInput.type = 'datetime-local';
+      checkinInput.style.cssText = 'flex:1;font-size:11.5px;padding:6px;';
+      var checkinSetBtn = document.createElement('button');
+      checkinSetBtn.className = 'btn-ghost';
+      checkinSetBtn.style.cssText = 'font-size:11px;padding:6px 10px;white-space:nowrap;';
+      checkinSetBtn.textContent = 'Set Start Time';
+      checkinSetBtn.addEventListener('click', async function(){
+        if (!checkinInput.value) return;
+        var chosenMs = new Date(checkinInput.value).getTime();
+        if (isNaN(chosenMs) || (h.checkOutAt && chosenMs > h.checkOutAt)){
+          showToast('Start time must be before check-out');
+          return;
+        }
+        h.checkInAt = chosenMs;
+        try{ await saveHuntEvent(h); }catch(e){ console.error('Outdoor Companion: failed to set retroactive check-in', e); }
+        renderHuntLog();
+        showToast('Start time updated');
+      });
+      checkinFixRow.appendChild(checkinInput);
+      checkinFixRow.appendChild(checkinSetBtn);
+      row.querySelector('.info').appendChild(checkinFixRow);
+      row.querySelector('.fix-checkin-link').addEventListener('click', function(e){
+        e.preventDefault();
+        checkinFixRow.style.display = checkinFixRow.style.display === 'none' ? 'flex' : 'none';
+      });
+
+      if (!h.checkOutAt){
+        // Retroactive fix for a forgotten End Hunt — lets a person set the real end
+        // time later, rather than the record staying "in progress" forever.
+        var fixRow = document.createElement('div');
+        fixRow.style.cssText = 'display:flex;gap:6px;margin-top:6px;align-items:center;';
+        var dtInput = document.createElement('input');
+        dtInput.type = 'datetime-local';
+        dtInput.style.cssText = 'flex:1;font-size:11.5px;padding:6px;';
+        var setBtn = document.createElement('button');
+        setBtn.className = 'btn-ghost';
+        setBtn.style.cssText = 'font-size:11px;padding:6px 10px;white-space:nowrap;';
+        setBtn.textContent = 'Set End Time';
+        setBtn.addEventListener('click', async function(){
+          if (!dtInput.value) return;
+          var chosenMs = new Date(dtInput.value).getTime();
+          if (isNaN(chosenMs) || chosenMs < h.checkInAt){
+            showToast('End time must be after check-in');
+            return;
+          }
+          h.checkOutAt = chosenMs;
+          try{ await saveHuntEvent(h); }catch(e){ console.error('Outdoor Companion: failed to set retroactive checkout', e); }
+          if (activeHuntId === h.id){ activeHuntId = null; updateActiveHuntBar(); }
+          renderHuntLog();
+          showToast('End time set');
+        });
+        fixRow.appendChild(dtInput);
+        fixRow.appendChild(setBtn);
+        row.querySelector('.info').appendChild(fixRow);
+      }
       listEl.appendChild(row);
-    });
+      }); // end group.hunts.forEach
+    }); // end orderedDayKeys.forEach
   }
 
   document.getElementById('huntLogBtn').addEventListener('click', function(){
@@ -3394,6 +3679,7 @@
         kind:'observation', id:o.id, name:t.label, type:o.type, notes:o.notes||'',
         lat:o.lat, lng:o.lng, createdAt:o.createdAt, siteId:o.siteId||null, approx:!!o.approx, count:o.count||1,
         photoThumb: o.photoThumb || null, weight: o.weight || null, length: o.length || null, tagNumber: o.tagNumber || null,
+        lure: o.lure || null, lureColor: o.lureColor || null,
         moonPhase: o.moonPhase || null, solunarPeriod: o.solunarPeriod || null, weather: (o.weatherStatus === 'ok' ? o.weather : null)
       });
     });
@@ -3429,6 +3715,8 @@
       if (r.weight) props.weightLbs = r.weight;
       if (r.length) props.lengthIn = r.length;
       if (r.tagNumber) props.tagNumber = r.tagNumber;
+      if (r.lure) props.lure = r.lure;
+      if (r.lureColor) props.lureColor = r.lureColor;
       if (r.moonPhase){ props.moonPhase = r.moonPhase.name; props.moonIllumination = r.moonPhase.illumination; }
       if (r.solunarPeriod) props.solunarPeriod = r.solunarPeriod;
       if (r.weather){
@@ -3459,6 +3747,7 @@
       var label = (r.kind === 'observation' ? r.name + (r.count > 1 ? ' ×' + r.count : '') : r.name);
       var descParts = [];
       if (r.tagNumber) descParts.push('Tag #' + r.tagNumber);
+      if (r.lure) descParts.push('Lure: ' + r.lure + (r.lureColor ? ' (' + r.lureColor + ')' : ''));
       if (r.weight) descParts.push(r.weight + ' lbs');
       if (r.length) descParts.push(r.length + ' in');
       if (r.moonPhase) descParts.push('🌙 ' + r.moonPhase.name + ' (' + r.moonPhase.illumination + '%)');
@@ -3618,6 +3907,7 @@
     renderActiveList();
     updateTagHistoryButtonVisibility();
     updateActiveHuntBar();
+    document.getElementById('huntLogBtn').textContent = '📋 ' + (activeModule === 'fishing' ? 'Fish' : 'Hunt') + ' Journal';
     showToast(activeModule === 'fishing' ? '🎣 Switched to Fishing' : '🏹 Switched to Hunting');
   }
 
@@ -3667,6 +3957,10 @@
   // from the fast "use my location now" path or after a crosshair location correction.
   async function createAndSaveObservation(type, lat, lng, approx){
     var match = nearestSite(lat, lng, NEAREST_SITE_RADIUS_M);
+    // Same universal rule as Hunt Start, but without the extra confirm step — a single
+    // match auto-attributes silently to preserve fast field logging; only a genuine
+    // 2+ overlap (rare) stops to ask, since that's the actual double-counting risk.
+    var resolvedProperty = await resolvePropertyForLocation(lat, lng);
     var now = Date.now();
     var obs = {
       id: uid(),
@@ -3675,6 +3969,7 @@
       lng: lng,
       approx: !!approx,
       siteId: match ? match.site.id : null,
+      propertyId: resolvedProperty ? resolvedProperty.id : null,
       createdAt: now,
       moonPhase: getMoonPhase(new Date(now)), // instant, pure math — never waits on anything
       solunarPeriod: classifyEventSolunarPeriod(new Date(now), lat, lng), // 'Major Period' | 'Minor Period' | null
@@ -4152,6 +4447,7 @@
       var statsParts = [];
       if (o.weight) statsParts.push(o.weight + ' lbs');
       if (o.length) statsParts.push(o.length + ' in');
+      if (o.lure) statsParts.push(o.lure + (o.lureColor ? ' (' + o.lureColor + ')' : ''));
       var envParts = [];
       if (o.moonPhase) envParts.push('🌙 ' + o.moonPhase.name);
       if (o.solunarPeriod) envParts.push('⭐ ' + o.solunarPeriod);
