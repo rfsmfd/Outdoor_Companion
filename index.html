@@ -1343,7 +1343,7 @@
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
-    <div id="buildBadge">BUILD 35</div>
+    <div id="buildBadge">BUILD 36</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3755,19 +3755,22 @@
       if (h.moonPhase) envParts.push('🌙 ' + h.moonPhase.name + ' (' + h.moonPhase.illumination + '%)');
       if (h.weatherStatus === 'ok' && h.weather) envParts.push(formatWeatherLine(h.weather));
       var eventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
+      var hasEvents = h.observationIds.length > 0;
       var row = document.createElement('div');
       row.className = 'history-row';
+      if (hasEvents) row.style.cursor = 'pointer';
       row.innerHTML =
         '<div class="info">' +
           '<div class="dt">' + escapeHtml(dateStr) + (site ? ' · ' + escapeHtml(site.name) : '') + (h.checkOutAt ? '' : ' <span style="color:var(--accent);">· active</span>') +
             ' <a href="#" class="fix-checkin-link" style="font-size:10.5px;color:var(--text-dim);text-decoration:underline;">fix start time</a></div>' +
-          '<div class="co">' + durationStr + ' · ' +
-            (h.observationIds.length ? '<a href="#" class="view-details-link" style="color:var(--accent);text-decoration:underline;">' + h.observationIds.length + ' ' + pluralizeEventNoun(h.observationIds.length, eventNoun) + '</a>' : '0 ' + pluralizeEventNoun(0, eventNoun)) +
+          '<div class="co" style="display:flex;align-items:center;justify-content:space-between;">' +
+            '<span>' + durationStr + ' · ' + h.observationIds.length + ' ' + pluralizeEventNoun(h.observationIds.length, eventNoun) + '</span>' +
+            (hasEvents ? '<span class="detail-chevron" style="color:var(--accent);font-size:14px;">▸</span>' : '') +
           '</div>' +
           (envParts.length ? '<div class="co" style="color:var(--text-dim);">' + envParts.join(' · ') + '</div>' : '') +
         '</div>';
 
-      if (h.observationIds.length){
+      if (hasEvents){
         var detailWrap = document.createElement('div');
         detailWrap.style.display = 'none';
         var detailHtml = '';
@@ -3777,9 +3780,11 @@
         });
         detailWrap.innerHTML = detailHtml;
         row.querySelector('.info').appendChild(detailWrap);
-        row.querySelector('.view-details-link').addEventListener('click', function(e){
-          e.preventDefault();
-          detailWrap.style.display = detailWrap.style.display === 'none' ? 'block' : 'none';
+        var chevron = row.querySelector('.detail-chevron');
+        row.addEventListener('click', function(){
+          var opening = detailWrap.style.display === 'none';
+          detailWrap.style.display = opening ? 'block' : 'none';
+          chevron.textContent = opening ? '▾' : '▸';
         });
       }
 
@@ -3794,7 +3799,8 @@
       checkinSetBtn.className = 'btn-ghost';
       checkinSetBtn.style.cssText = 'font-size:11px;padding:6px 10px;white-space:nowrap;';
       checkinSetBtn.textContent = 'Set Start Time';
-      checkinSetBtn.addEventListener('click', async function(){
+      checkinSetBtn.addEventListener('click', async function(e){
+        e.stopPropagation(); // don't also trigger the row's expand/collapse toggle
         if (!checkinInput.value) return;
         var chosenMs = new Date(checkinInput.value).getTime();
         if (isNaN(chosenMs) || (h.checkOutAt && chosenMs > h.checkOutAt)){
@@ -3811,6 +3817,7 @@
       row.querySelector('.info').appendChild(checkinFixRow);
       row.querySelector('.fix-checkin-link').addEventListener('click', function(e){
         e.preventDefault();
+        e.stopPropagation(); // don't also trigger the row's expand/collapse toggle
         checkinFixRow.style.display = checkinFixRow.style.display === 'none' ? 'flex' : 'none';
       });
 
@@ -3826,7 +3833,8 @@
         setBtn.className = 'btn-ghost';
         setBtn.style.cssText = 'font-size:11px;padding:6px 10px;white-space:nowrap;';
         setBtn.textContent = 'Set End Time';
-        setBtn.addEventListener('click', async function(){
+        setBtn.addEventListener('click', async function(e){
+          e.stopPropagation(); // don't also trigger the row's expand/collapse toggle
           if (!dtInput.value) return;
           var chosenMs = new Date(dtInput.value).getTime();
           if (isNaN(chosenMs) || chosenMs < h.checkInAt){
