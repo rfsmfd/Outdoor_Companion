@@ -345,6 +345,7 @@
   }
   .chip .dot{width:7px;height:7px;border-radius:50%;}
   .chip.off{opacity:0.35;}
+  .chip.active{background:var(--accent);color:#1A1204;border-color:var(--accent);font-weight:600;}
   .chip:hover{color:var(--text);}
 
   #site-list{
@@ -461,6 +462,44 @@
     background:#3B9EFF;
     color:#0A1A2E;
     border-color:#3B9EFF;
+  }
+
+  #windToggleBtn{
+    position:absolute;
+    bottom:70px;right:14px;
+    z-index:1000;
+    width:42px;height:42px;
+    border-radius:50%;
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text-dim);
+    font-size:17px;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+  }
+  #windToggleBtn.active{
+    background:#E85D4A;
+    color:#fff;
+    border-color:#E85D4A;
+  }
+  #windInfoLabel{
+    position:absolute;
+    bottom:78px;right:64px;
+    z-index:1000;
+    background:rgba(20,26,20,0.85);
+    color:#fff;
+    font-size:11px;
+    padding:5px 9px;
+    border-radius:6px;
+    white-space:nowrap;
+    display:none;
+  }
+  .wind-arrow-icon{
+    color:#E85D4A;
+    font-size:26px;
+    text-shadow:0 0 3px rgba(0,0,0,0.9), 0 0 6px rgba(0,0,0,0.6);
+    line-height:1;
+    pointer-events:none;
   }
 
   #buildBadge{
@@ -1302,7 +1341,9 @@
       <button class="layer-btn" data-layer="street">Street</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <div id="buildBadge">BUILD 29</div>
+    <button id="windToggleBtn" title="Show wind direction">💨</button>
+    <div id="windInfoLabel"></div>
+    <div id="buildBadge">BUILD 35</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1504,6 +1545,30 @@
   </div>
 
   <!-- New Spot: focused, in-the-moment Property/Lake creation when Hunt Start recognizes no existing one here -->
+  <!-- Generic Confirm/Prompt modals — replace native browser confirm()/prompt() dialogs,
+       which can be silently and permanently suppressed by a browser checkbox a person can
+       trigger by accident, with zero error message when it happens. -->
+  <div class="oc-modal-backdrop" id="genericConfirmModalBackdrop">
+    <div class="oc-modal" id="genericConfirmModal" style="width:340px;max-width:88vw;">
+      <p id="genericConfirmMessage" style="font-size:13.5px;margin:0 0 16px 0;"></p>
+      <div class="row">
+        <button class="btn-ghost" id="genericConfirmCancelBtn" style="flex:1;">Cancel</button>
+        <button class="btn-primary" id="genericConfirmOkBtn" style="flex:1;">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="oc-modal-backdrop" id="genericPromptModalBackdrop">
+    <div class="oc-modal" id="genericPromptModal" style="width:340px;max-width:88vw;">
+      <p id="genericPromptMessage" style="font-size:13.5px;margin:0 0 10px 0;"></p>
+      <input type="text" id="genericPromptInput" />
+      <div class="row" style="margin-top:12px;">
+        <button class="btn-ghost" id="genericPromptCancelBtn" style="flex:1;">Cancel</button>
+        <button class="btn-primary" id="genericPromptOkBtn" style="flex:1;">OK</button>
+      </div>
+    </div>
+  </div>
+
   <div class="oc-modal-backdrop" id="newSpotModalBackdrop">
     <div class="oc-modal" id="newSpotModal">
       <h3><span id="newSpotTitle">New Spot</span></h3>
@@ -1530,6 +1595,16 @@
   <div class="oc-modal-backdrop" id="huntLogModalBackdrop">
     <div class="oc-modal" id="huntLogModal">
       <h3><span id="huntLogTitle">Hunt Log</span> <button class="close-x" id="huntLogModalClose">&times;</button></h3>
+      <div class="chips" id="journalFilterChips" style="margin-bottom:10px;">
+        <button class="chip active" data-range="all">All Time</button>
+        <button class="chip" data-range="week">This Week</button>
+        <button class="chip" data-range="month">This Month</button>
+        <button class="chip" data-range="custom">Custom Range</button>
+      </div>
+      <div id="journalCustomRangeRow" style="display:none;gap:8px;margin-bottom:10px;" class="row">
+        <input type="date" id="journalRangeStart" style="flex:1;" />
+        <input type="date" id="journalRangeEnd" style="flex:1;" />
+      </div>
       <div id="huntLogSummary" style="margin-bottom:14px;"></div>
       <div id="huntLogList"></div>
     </div>
@@ -1723,6 +1798,7 @@
   var properties = [];   // {id, name, notes, createdAt}
   var huntEvents = [];   // {id, module, siteId, lat, lng, checkInAt, checkOutAt, weather, weatherStatus, moonPhase, observationIds}
   var activeHuntId = null; // the currently in-progress hunt/trip, or null if none active
+  var journalFilterRange = 'all'; // 'all' | 'week' | 'month' | 'custom' — Journal totals time filter
   var activePropertyId = null; // null = "All Properties"
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
   var QR_PREFIX = 'OC-CAM:'; // legacy format, still recognized by the in-page scanner as a fallback
@@ -1780,13 +1856,25 @@
   // ---------- Environmental data: moon phase (pure math, no API) + weather (Open-Meteo) ----------
   // Moon phase validated against real astronomical data (multiple confirmed 2026 full/new
   // moon dates) — accurate within 1-3% illumination, exact on full/new moon peak moments.
+  // Moon phase name uses a simple, independently-verified day-count formula (matches real
+  // 2026 astronomical data). Illumination % now comes from SunCalc's own getMoonIllumination
+  // — the same trusted library already used for the Solunar Table — rather than a hand-rolled
+  // cosine approximation, for more accurate real-world luminosity.
+  // Naive "+s" pluralization breaks for "catch" (needs "catches", not "catchs"). This
+  // covers the actual event nouns used in this app; add more cases if new ones are added.
+  function pluralizeEventNoun(count, noun){
+    if (count === 1) return noun;
+    if (noun === 'catch') return 'catches';
+    return noun + 's';
+  }
+
   function getMoonPhase(date){
     var lunarCycle = 29.530588861;
     var knownNewMoon = Date.UTC(2000, 0, 6, 18, 14, 0); // Jan 6, 2000 18:14 UTC - a known new moon
     var daysSince = (date.getTime() - knownNewMoon) / 86400000;
     var phase = (daysSince % lunarCycle) / lunarCycle;
     if (phase < 0) phase += 1;
-    var illumination = Math.round((1 - Math.cos(phase * 2 * Math.PI)) / 2 * 100);
+    var illumination = Math.round(SunCalc.getMoonIllumination(date).fraction * 100);
     var name;
     if (phase < 0.02 || phase >= 0.98) name = 'New Moon';
     else if (phase < 0.24) name = 'Waxing Crescent';
@@ -1798,6 +1886,97 @@
     else name = 'Waning Crescent';
     return {name: name, illumination: illumination};
   }
+
+  // ---------- Wind Direction Arrows ----------
+  // Wind is arguably the single most important weather factor for hunting — animals
+  // detect human scent carried on the wind, so what matters isn't which way the wind is
+  // FROM (the standard compass reading shown everywhere else in this app), but which way
+  // it's blowing TOWARD, since that's the direction scent actually travels.
+  // Open-Meteo's wind_direction_10m follows standard meteorological convention: degrees
+  // measuring the direction wind is blowing FROM. The arrows drawn here intentionally
+  // point the opposite way (+180°) — the "blowing toward" / scent-direction bearing —
+  // while the text label alongside them keeps the traditional "from" compass reading, to
+  // stay consistent with how wind is reported everywhere else in the app and avoid any
+  // mismatch/confusion between the two.
+  var windArrowMarkers = [];
+  var windArrowsActive = false;
+
+  // The arrows point the same "blowing toward" direction in both modules — what changes
+  // is WHY it matters: scent direction for hunting, versus where wind pushes baitfish and
+  // surface current for fishing (often concentrating gamefish along the downwind shore,
+  // and the direction a drifting boat naturally moves).
+  function updateWindButtonTitle(){
+    document.getElementById('windToggleBtn').title = activeModule === 'fishing'
+      ? 'Show wind direction (current/drift & baitfish)'
+      : 'Show wind direction (scent)';
+  }
+  updateWindButtonTitle();
+
+  function buildWindArrowIcon(bearingDeg){
+    return L.divIcon({
+      className: '',
+      html: '<div class="wind-arrow-icon" style="transform:rotate(' + bearingDeg + 'deg);">↑</div>',
+      iconSize: [26, 26],
+      iconAnchor: [13, 13]
+    });
+  }
+
+  function clearWindArrows(){
+    windArrowMarkers.forEach(function(m){ map.removeLayer(m); });
+    windArrowMarkers = [];
+  }
+
+  function drawWindArrows(windDirFromDeg, windMph, windCompass){
+    clearWindArrows();
+    var towardBearing = (windDirFromDeg + 180) % 360; // scent/travel direction, not the "from" reading
+    var bounds = map.getBounds();
+    var north = bounds.getNorth(), south = bounds.getSouth(), east = bounds.getEast(), west = bounds.getWest();
+    // 3x3 grid across the current view, inset from the edges so arrows aren't cut off
+    var latStep = (north - south) * 0.22;
+    var lngStep = (east - west) * 0.22;
+    for (var row = -1; row <= 1; row++){
+      for (var col = -1; col <= 1; col++){
+        var lat = (north + south) / 2 + row * latStep;
+        var lng = (east + west) / 2 + col * lngStep;
+        var marker = L.marker([lat, lng], {icon: buildWindArrowIcon(towardBearing), interactive: false, keyboard: false});
+        marker.addTo(map);
+        windArrowMarkers.push(marker);
+      }
+    }
+    var label = document.getElementById('windInfoLabel');
+    label.textContent = '💨 ' + windMph + ' mph from ' + windCompass;
+    label.style.display = 'block';
+  }
+
+  document.getElementById('windToggleBtn').addEventListener('click', async function(){
+    var btn = this;
+    if (windArrowsActive){
+      clearWindArrows();
+      document.getElementById('windInfoLabel').style.display = 'none';
+      windArrowsActive = false;
+      btn.classList.remove('active');
+      return;
+    }
+    btn.classList.add('active');
+    windArrowsActive = true;
+    var center = map.getCenter();
+    var weather = await fetchCurrentWeather(center.lat, center.lng);
+    if (!windArrowsActive) return; // toggled off again before the fetch finished
+    if (!weather || weather.windMph == null){
+      showToast('Wind data unavailable right now');
+      windArrowsActive = false;
+      btn.classList.remove('active');
+      return;
+    }
+    // Re-derive the raw "from" degrees from the compass label via the same lookup used
+    // everywhere else, since fetchCurrentWeather only returns the compass string, not
+    // the raw degrees — avoids adding a second, possibly-inconsistent code path.
+    var compassToDeg = {N:0,NNE:22.5,NE:45,ENE:67.5,E:90,ESE:112.5,SE:135,SSE:157.5,S:180,SSW:202.5,SW:225,WSW:247.5,W:270,WNW:292.5,NW:315,NNW:337.5};
+    var fromDeg = compassToDeg[weather.windDir];
+    if (fromDeg == null) fromDeg = 0;
+    drawWindArrows(fromDeg, weather.windMph, weather.windDir);
+  });
+
 
   // ---------- Solunar Table: Major/Minor feeding-activity periods ----------
   // Built on SunCalc (matches U.S. Naval Observatory accuracy, based on Meeus's
@@ -2119,6 +2298,61 @@
   // In-the-moment Property/Lake creation, offered when Hunt Start recognizes nothing at
   // the current location. Resolves to the newly created property, or null if skipped.
   // Reuses createPropertyFromCurrentMapView — same save logic as Manage Properties.
+  // Replaces window.confirm() — same OK/Cancel behavior, but as a modal that can't be
+  // silently suppressed by a browser setting a person can trigger by accident.
+  function showConfirm(message){
+    return new Promise(function(resolve){
+      document.getElementById('genericConfirmMessage').textContent = message;
+      var backdrop = document.getElementById('genericConfirmModalBackdrop');
+      var okBtn = document.getElementById('genericConfirmOkBtn');
+      var cancelBtn = document.getElementById('genericConfirmCancelBtn');
+      function cleanup(){
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        backdrop.removeEventListener('click', onBackdropClick);
+      }
+      function onOk(){ backdrop.classList.remove('show'); cleanup(); resolve(true); }
+      function onCancel(){ backdrop.classList.remove('show'); cleanup(); resolve(false); }
+      function onBackdropClick(e){ if (e.target === backdrop) onCancel(); }
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+      backdrop.addEventListener('click', onBackdropClick);
+      closeAllModals();
+      backdrop.classList.add('show');
+    });
+  }
+
+  // Replaces prompt() — resolves to the entered string, or null if cancelled/left blank.
+  function showPrompt(message, defaultValue){
+    return new Promise(function(resolve){
+      document.getElementById('genericPromptMessage').textContent = message;
+      var input = document.getElementById('genericPromptInput');
+      input.value = defaultValue || '';
+      var backdrop = document.getElementById('genericPromptModalBackdrop');
+      var okBtn = document.getElementById('genericPromptOkBtn');
+      var cancelBtn = document.getElementById('genericPromptCancelBtn');
+      function cleanup(){
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        backdrop.removeEventListener('click', onBackdropClick);
+      }
+      function onOk(){
+        var val = input.value.trim();
+        backdrop.classList.remove('show');
+        cleanup();
+        resolve(val || null);
+      }
+      function onCancel(){ backdrop.classList.remove('show'); cleanup(); resolve(null); }
+      function onBackdropClick(e){ if (e.target === backdrop) onCancel(); }
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+      backdrop.addEventListener('click', onBackdropClick);
+      closeAllModals();
+      backdrop.classList.add('show');
+      setTimeout(function(){ input.focus(); input.select(); }, 50);
+    });
+  }
+
   function promptNewSpot(){
     return new Promise(function(resolve){
       var noun = activeModule === 'fishing' ? 'Lake' : 'Property';
@@ -2576,7 +2810,7 @@
     var total = orphanedHunts.length + orphanedObs.length;
     if (total === 0) return;
     var noun = prop.module === 'fishing' ? 'lake' : 'property';
-    var confirmed = window.confirm('Found ' + total + ' earlier record' + (total===1?'':'s') + ' that fall inside this new ' + noun + ' — attach them now?');
+    var confirmed = await showConfirm('Found ' + total + ' earlier record' + (total===1?'':'s') + ' that fall inside this new ' + noun + ' — attach them now?');
     if (!confirmed) return;
     for (var i=0; i<orphanedHunts.length; i++){
       orphanedHunts[i].propertyId = prop.id;
@@ -2818,8 +3052,8 @@
         '<label>Photo</label>' +
         (o.photoThumb ?
           '<img src="'+o.photoThumb+'" style="width:100%;max-height:140px;object-fit:cover;border-radius:6px;margin-bottom:8px;" />' : '') +
-        '<input type="file" accept="image/*" capture="environment" id="o_photo_input" style="display:none;" />' +
-        '<button class="btn-ghost" id="o_photo_btn" type="button" style="width:100%;margin-bottom:10px;">' + (o.photoThumb ? '📷 Retake Photo' : '📷 Add Photo') + '</button>';
+        '<input type="file" accept="image/*" id="o_photo_input" style="display:none;" />' +
+        '<button class="btn-ghost" id="o_photo_btn" type="button" style="width:100%;margin-bottom:10px;">' + (o.photoThumb ? '📷 Retake / Choose Photo' : '📷 Take / Choose Photo') + '</button>';
     }
     return '' +
       '<div class="pop form-pop">' +
@@ -3309,11 +3543,13 @@
 
     startBtn.style.display = 'none';
     activeInfo.style.display = 'flex';
+    document.getElementById('huntEndBtn').textContent = activeModule === 'fishing' ? 'End Trip' : 'End Hunt';
     var site = hunt.siteId ? sites.filter(function(s){ return s.id === hunt.siteId; })[0] : null;
     var verb = activeModule === 'fishing' ? '🎣 Fishing' : '🏹 Hunting';
+    var eventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
     function refreshLabel(){
       var elapsed = fmtHuntDuration(hunt.checkInAt, Date.now());
-      label.textContent = verb + (site ? ' · ' + site.name : '') + ' · ' + elapsed + ' · ' + hunt.observationIds.length + ' sighting' + (hunt.observationIds.length===1?'':'s');
+      label.textContent = verb + (site ? ' · ' + site.name : '') + ' · ' + elapsed + ' · ' + hunt.observationIds.length + ' ' + pluralizeEventNoun(hunt.observationIds.length, eventNoun);
     }
     refreshLabel();
     huntBarTimer = setInterval(refreshLabel, 30000); // updates the elapsed time every 30s
@@ -3334,7 +3570,7 @@
     var resolvedProperty = await resolvePropertyForLocation(lat, lng);
     var propertyId = null;
     if (resolvedProperty){
-      var confirmed = window.confirm('Looks like you\'re at ' + resolvedProperty.name + ' — start here?');
+      var confirmed = await showConfirm('Looks like you\'re at ' + resolvedProperty.name + ' — start here?');
       propertyId = confirmed ? resolvedProperty.id : null;
     } else {
       // Nothing recognized here — offer to create it right now, so this very hunt (the
@@ -3383,11 +3619,58 @@
     var duration = fmtHuntDuration(hunt.checkInAt, hunt.checkOutAt);
     activeHuntId = null;
     updateActiveHuntBar();
-    showToast((activeModule === 'fishing' ? 'Trip' : 'Hunt') + ' ended · ' + duration + ' · ' + hunt.observationIds.length + ' sighting' + (hunt.observationIds.length===1?'':'s'));
+    var endEventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
+    showToast((activeModule === 'fishing' ? 'Trip' : 'Hunt') + ' ended · ' + duration + ' · ' + hunt.observationIds.length + ' ' + pluralizeEventNoun(hunt.observationIds.length, endEventNoun));
   });
 
+  // Returns {start, end} timestamps for the currently selected Journal filter, or null for
+  // "all time" (no filtering). Week/Month are calendar-based (start of week/month through
+  // now), matching how people naturally think about "this week" or "this month."
+  function getJournalFilterBounds(){
+    var now = new Date();
+    if (journalFilterRange === 'week'){
+      var start = new Date(now);
+      start.setDate(now.getDate() - now.getDay()); // back to Sunday
+      start.setHours(0,0,0,0);
+      return {start: start.getTime(), end: Date.now()};
+    }
+    if (journalFilterRange === 'month'){
+      var start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0);
+      return {start: start.getTime(), end: Date.now()};
+    }
+    if (journalFilterRange === 'custom'){
+      var startInput = document.getElementById('journalRangeStart').value;
+      var endInput = document.getElementById('journalRangeEnd').value;
+      if (!startInput && !endInput) return null;
+      var startMs = startInput ? new Date(startInput + 'T00:00:00').getTime() : -Infinity;
+      var endMs = endInput ? new Date(endInput + 'T23:59:59').getTime() : Infinity;
+      return {start: startMs, end: endMs};
+    }
+    return null; // 'all'
+  }
+
+  // Renders full detail for one observation/catch — reused by the Journal's per-trip
+  // detail expansion. Fishing shows weight/length/lure/tag/photo; hunting shows type/notes.
+  function renderJournalObservationDetail(o){
+    var t = getActiveObsTypes()[o.type] || getFallbackTypeEntry(true);
+    var timeStr = new Date(o.createdAt).toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+    var parts = [];
+    if (o.weight) parts.push(o.weight + ' lbs');
+    if (o.length) parts.push(o.length + ' in');
+    if (o.lure) parts.push(o.lure + (o.lureColor ? ' (' + o.lureColor + ')' : ''));
+    if (o.tagNumber) parts.push('Tag #' + o.tagNumber);
+    var html = '<div style="display:flex;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:flex-start;">';
+    if (o.photoThumb) html += '<img src="'+o.photoThumb+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;flex-shrink:0;" />';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-size:12px;font-weight:600;color:'+t.color+';">' + escapeHtml(t.label) + ' <span style="font-weight:400;color:var(--text-dim);">· ' + timeStr + '</span></div>';
+    if (parts.length) html += '<div style="font-size:11.5px;color:var(--text-dim);">' + escapeHtml(parts.join(' · ')) + '</div>';
+    if (o.notes) html += '<div style="font-size:11.5px;color:var(--text-dim);font-style:italic;">' + escapeHtml(o.notes) + '</div>';
+    html += '</div></div>';
+    return html;
+  }
+
   function renderHuntLog(){
-    var relevantHunts = huntEvents.filter(function(h){ return h.module === activeModule; })
+    var allHunts = huntEvents.filter(function(h){ return h.module === activeModule; })
       .sort(function(a,b){ return b.checkInAt - a.checkInAt; });
     var noun = activeModule === 'fishing' ? 'Trip' : 'Hunt';
     document.getElementById('huntLogTitle').textContent = noun + ' Journal';
@@ -3395,9 +3678,18 @@
     var summaryEl = document.getElementById('huntLogSummary');
     var listEl = document.getElementById('huntLogList');
 
-    if (relevantHunts.length === 0){
+    if (allHunts.length === 0){
       summaryEl.innerHTML = '';
       listEl.innerHTML = '<div class="empty" style="padding:20px 0;">No ' + noun.toLowerCase() + 's logged yet. Tap "' + (activeModule === 'fishing' ? '🎣 Start Trip' : '🏹 Start Hunt') + '" on the map to begin.</div>';
+      return;
+    }
+
+    var bounds = getJournalFilterBounds();
+    var relevantHunts = bounds ? allHunts.filter(function(h){ return h.checkInAt >= bounds.start && h.checkInAt <= bounds.end; }) : allHunts;
+
+    if (relevantHunts.length === 0){
+      summaryEl.innerHTML = '';
+      listEl.innerHTML = '<div class="empty" style="padding:20px 0;">No ' + noun.toLowerCase() + 's in this range.</div>';
       return;
     }
 
@@ -3409,12 +3701,15 @@
     var totalHours = Math.round((totalMs / 3600000) * 10) / 10;
     var totalSightings = relevantHunts.reduce(function(sum, h){ return sum + h.observationIds.length; }, 0);
     var avgSightings = relevantHunts.length ? Math.round((totalSightings / relevantHunts.length) * 10) / 10 : 0;
+    var summaryEventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
+    var summaryEventLabel = pluralizeEventNoun(2, summaryEventNoun); // always plural in this label ("Avg Catches / Trip")
+    summaryEventLabel = summaryEventLabel.charAt(0).toUpperCase() + summaryEventLabel.slice(1);
 
     summaryEl.innerHTML =
       '<div class="analytics-grid" style="padding:0;">' +
         '<div class="analytics-chart-wrap"><div class="analytics-chart-title">Total ' + noun + 's</div><div style="font-size:22px;font-weight:700;color:var(--accent);">' + relevantHunts.length + '</div></div>' +
         '<div class="analytics-chart-wrap"><div class="analytics-chart-title">Total Hours (completed)</div><div style="font-size:22px;font-weight:700;color:var(--accent);">' + totalHours + '</div></div>' +
-        '<div class="analytics-chart-wrap"><div class="analytics-chart-title">Avg Sightings / ' + noun + '</div><div style="font-size:22px;font-weight:700;color:var(--accent);">' + avgSightings + '</div></div>' +
+        '<div class="analytics-chart-wrap"><div class="analytics-chart-title">Avg ' + summaryEventLabel + ' / ' + noun + '</div><div style="font-size:22px;font-weight:700;color:var(--accent);">' + avgSightings + '</div></div>' +
       '</div>';
 
     listEl.innerHTML = '';
@@ -3443,12 +3738,13 @@
       var dayTotalMs = dayCompleted.reduce(function(sum, h){ return sum + (h.checkOutAt - h.checkInAt); }, 0);
       var dayTotalHours = Math.round((dayTotalMs / 3600000) * 10) / 10;
       var daySightings = group.hunts.reduce(function(sum, h){ return sum + h.observationIds.length; }, 0);
+      var dayEventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
 
       var dayHeader = document.createElement('div');
       dayHeader.style.cssText = 'padding:10px 4px 6px 4px;border-bottom:1px solid var(--line);margin-bottom:8px;margin-top:14px;';
       dayHeader.innerHTML =
         '<div style="font-family:\'Oswald\',sans-serif;font-size:14px;letter-spacing:0.3px;color:var(--accent);text-transform:uppercase;">' + escapeHtml(group.label) + '</div>' +
-        '<div style="font-size:11px;color:var(--text-dim);margin-top:2px;">' + group.hunts.length + ' ' + noun.toLowerCase() + (group.hunts.length===1?'':'s') + ' · ' + dayTotalHours + ' combined hrs · ' + daySightings + ' sighting' + (daySightings===1?'':'s') + '</div>';
+        '<div style="font-size:11px;color:var(--text-dim);margin-top:2px;">' + group.hunts.length + ' ' + noun.toLowerCase() + (group.hunts.length===1?'':'s') + ' · ' + dayTotalHours + ' combined hrs · ' + daySightings + ' ' + pluralizeEventNoun(daySightings, dayEventNoun) + '</div>';
       listEl.appendChild(dayHeader);
 
       group.hunts.forEach(function(h){
@@ -3456,17 +3752,36 @@
       var dateStr = new Date(h.checkInAt).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
       var durationStr = h.checkOutAt ? fmtHuntDuration(h.checkInAt, h.checkOutAt) : 'In progress';
       var envParts = [];
-      if (h.moonPhase) envParts.push('🌙 ' + h.moonPhase.name);
+      if (h.moonPhase) envParts.push('🌙 ' + h.moonPhase.name + ' (' + h.moonPhase.illumination + '%)');
       if (h.weatherStatus === 'ok' && h.weather) envParts.push(formatWeatherLine(h.weather));
+      var eventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
       var row = document.createElement('div');
       row.className = 'history-row';
       row.innerHTML =
         '<div class="info">' +
           '<div class="dt">' + escapeHtml(dateStr) + (site ? ' · ' + escapeHtml(site.name) : '') + (h.checkOutAt ? '' : ' <span style="color:var(--accent);">· active</span>') +
             ' <a href="#" class="fix-checkin-link" style="font-size:10.5px;color:var(--text-dim);text-decoration:underline;">fix start time</a></div>' +
-          '<div class="co">' + durationStr + ' · ' + h.observationIds.length + ' sighting' + (h.observationIds.length===1?'':'s') + '</div>' +
+          '<div class="co">' + durationStr + ' · ' +
+            (h.observationIds.length ? '<a href="#" class="view-details-link" style="color:var(--accent);text-decoration:underline;">' + h.observationIds.length + ' ' + pluralizeEventNoun(h.observationIds.length, eventNoun) + '</a>' : '0 ' + pluralizeEventNoun(0, eventNoun)) +
+          '</div>' +
           (envParts.length ? '<div class="co" style="color:var(--text-dim);">' + envParts.join(' · ') + '</div>' : '') +
         '</div>';
+
+      if (h.observationIds.length){
+        var detailWrap = document.createElement('div');
+        detailWrap.style.display = 'none';
+        var detailHtml = '';
+        h.observationIds.forEach(function(obsId){
+          var obs = observations.filter(function(o){ return o.id === obsId; })[0];
+          if (obs) detailHtml += renderJournalObservationDetail(obs);
+        });
+        detailWrap.innerHTML = detailHtml;
+        row.querySelector('.info').appendChild(detailWrap);
+        row.querySelector('.view-details-link').addEventListener('click', function(e){
+          e.preventDefault();
+          detailWrap.style.display = detailWrap.style.display === 'none' ? 'block' : 'none';
+        });
+      }
 
       // Fix a forgotten Start Hunt — realized late, correct the actual arrival time.
       // Hidden behind a small toggle link so it doesn't clutter every row by default.
@@ -3544,6 +3859,18 @@
   document.getElementById('huntLogModalBackdrop').addEventListener('click', function(e){
     if (e.target === this) this.classList.remove('show');
   });
+
+  document.querySelectorAll('#journalFilterChips .chip').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      document.querySelectorAll('#journalFilterChips .chip').forEach(function(c){ c.classList.remove('active'); });
+      chip.classList.add('active');
+      journalFilterRange = chip.getAttribute('data-range');
+      document.getElementById('journalCustomRangeRow').style.display = journalFilterRange === 'custom' ? 'flex' : 'none';
+      renderHuntLog();
+    });
+  });
+  document.getElementById('journalRangeStart').addEventListener('change', function(){ if (journalFilterRange === 'custom') renderHuntLog(); });
+  document.getElementById('journalRangeEnd').addEventListener('change', function(){ if (journalFilterRange === 'custom') renderHuntLog(); });
 
 
   // "My Location" button — grabs a fresh GPS fix and opens the save form right there,
@@ -3908,6 +4235,7 @@
     updateTagHistoryButtonVisibility();
     updateActiveHuntBar();
     document.getElementById('huntLogBtn').textContent = '📋 ' + (activeModule === 'fishing' ? 'Fish' : 'Hunt') + ' Journal';
+    updateWindButtonTitle();
     showToast(activeModule === 'fishing' ? '🎣 Switched to Fishing' : '🏹 Switched to Hunting');
   }
 
@@ -4449,7 +4777,7 @@
       if (o.length) statsParts.push(o.length + ' in');
       if (o.lure) statsParts.push(o.lure + (o.lureColor ? ' (' + o.lureColor + ')' : ''));
       var envParts = [];
-      if (o.moonPhase) envParts.push('🌙 ' + o.moonPhase.name);
+      if (o.moonPhase) envParts.push('🌙 ' + o.moonPhase.name + ' (' + o.moonPhase.illumination + '%)');
       if (o.solunarPeriod) envParts.push('⭐ ' + o.solunarPeriod);
       if (o.weatherStatus === 'ok' && o.weather) envParts.push(formatWeatherDetailLine(o.weather));
       var row = document.createElement('div');
@@ -4597,6 +4925,32 @@
     return isNaN(dt.getTime()) ? null : dt.getTime();
   }
 
+  // WiseEye's own web export also carries NO EXIF data at all (confirmed against a real
+  // exported ZIP), but has a different filename structure than Reveal — the timestamp sits
+  // at the very START of the filename, not surrounded by hyphens:
+  // MMDDYYYYHHMMSS-{optional TH/DC tag}-{sequentialId}.jpg
+  // Cross-checked against the burned-in timestamp visible on the photo itself — matched
+  // exactly. Separate parser from Reveal's since the two formats don't overlap.
+  function extractWiseeyeFilenameTimestamp(filename){
+    var m = filename.match(/^(\d{2})(\d{2})(\d{4})(\d{2})(\d{2})(\d{2})-/);
+    if (!m) return null;
+    var month = parseInt(m[1], 10), day = parseInt(m[2], 10), year = parseInt(m[3], 10);
+    var hour = parseInt(m[4], 10), min = parseInt(m[5], 10), sec = parseInt(m[6], 10);
+    if (month < 1 || month > 12 || day < 1 || day > 31 || hour > 23 || min > 59 || sec > 59) return null;
+    var dt = new Date(year, month - 1, day, hour, min, sec);
+    return isNaN(dt.getTime()) ? null : dt.getTime();
+  }
+
+  // WiseEye exports a separate low-resolution "TH" (thumbnail) copy alongside many full
+  // photos — confirmed via real export: TH files are consistently 848x480 vs 1920x1080 for
+  // the full version, with matching timestamps and adjacent sequence numbers. Importing
+  // both would double-count a single real trigger event as two sightings. Other prefixes
+  // (e.g. "DC", cause unconfirmed) are NOT skipped — only TH has clear evidence of being a
+  // duplicate; anything else is kept rather than risk silently discarding real data.
+  function isWiseeyeThumbnail(filename){
+    return /^\d{14}-TH-/.test(filename);
+  }
+
   async function extractExifTimestamp(blob){
     try{
       var buffer = await readFileAsArrayBuffer(blob);
@@ -4670,8 +5024,13 @@
     for (var k=0; k<imageJobs.length; k++){
       progress.textContent = 'Processing ' + (k+1) + ' of ' + imageJobs.length + '…';
       var job = imageJobs[k];
+      if (isWiseeyeThumbnail(job.name)) continue; // skip duplicate low-res thumbnail, keep only the full photo
       var timestamp = extractRevealFilenameTimestamp(job.name);
       var timestampSource = timestamp ? 'filename' : null;
+      if (!timestamp){
+        timestamp = extractWiseeyeFilenameTimestamp(job.name);
+        if (timestamp) timestampSource = 'filename';
+      }
       if (!timestamp){
         timestamp = await extractExifTimestamp(job.blob);
         if (timestamp) timestampSource = 'exif';
@@ -4754,11 +5113,11 @@
 
   // ---------- Batch camera generation ----------
   document.getElementById('batchAddBtn').addEventListener('click', async function(){
-    var countStr = prompt('How many cameras do you want to generate QR codes for?', '30');
+    var countStr = await showPrompt('How many cameras do you want to generate QR codes for?', '30');
     if (!countStr) return;
     var count = Math.min(100, Math.max(1, parseInt(countStr, 10) || 0));
     if (!count) return;
-    var prefix = prompt('Name prefix for these cameras (e.g. "Cam"):', 'Cam');
+    var prefix = await showPrompt('Name prefix for these cameras (e.g. "Cam"):', 'Cam');
     if (prefix === null) return;
     prefix = prefix.trim() || 'Cam';
     var padWidth = String(count).length;
