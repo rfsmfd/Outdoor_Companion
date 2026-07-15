@@ -1343,7 +1343,7 @@
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
-    <div id="buildBadge">BUILD 40</div>
+    <div id="buildBadge">BUILD 41</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1819,7 +1819,7 @@
     return base + '?cam=' + encodeURIComponent(camId);
   }
 
-  var map = L.map('map', {zoomControl:true}).setView([39.5, -98.35], 5);
+  var map = L.map('map', {zoomControl:true, zoomSnap:0.25, zoomDelta:0.25}).setView([39.5, -98.35], 5);
 
   // Tracks whether ANY marker popup is currently open. renderObsMarkers()/renderMarkers()
   // destroy and recreate every marker (including whatever popup is open), which would
@@ -4477,7 +4477,9 @@
       scrollWheelZoom:true,
       doubleClickZoom:false,
       boxZoom:false,
-      keyboard:false
+      keyboard:false,
+      zoomSnap:0.25,
+      zoomDelta:0.25
     });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom:19
@@ -5578,7 +5580,9 @@
       scrollWheelZoom:true,
       doubleClickZoom:false,
       boxZoom:false,
-      keyboard:false
+      keyboard:false,
+      zoomSnap:0.25,
+      zoomDelta:0.25
     });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom:19
