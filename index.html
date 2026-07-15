@@ -425,6 +425,8 @@
     bottom:24px;left:14px;
     z-index:1000;
     display:flex;
+    flex-wrap:wrap;
+    max-width:calc(100vw - 28px);
     background:var(--panel);
     border:1px solid var(--line);
     border-radius:4px;
@@ -1339,11 +1341,13 @@
     <div id="layerSwitch">
       <button class="layer-btn active" data-layer="aerial">Aerial</button>
       <button class="layer-btn" data-layer="street">Street</button>
+      <button class="layer-btn" data-layer="usgstopo" title="USGS Topo — official U.S. government topographic data">USGS</button>
+      <button class="layer-btn" data-layer="opentopo" title="OpenTopoMap — worldwide contour/trail topo">Topo</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
-    <div id="buildBadge">BUILD 41</div>
+    <div id="buildBadge">BUILD 42</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1846,6 +1850,23 @@
     aerial: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
       attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
+    }),
+    // USGS Topo — official U.S. government topographic data (The National Map), public
+    // domain, no API key or attribution legally required (shown anyway as good practice).
+    // Native tiles only go to zoom 16; maxNativeZoom lets Leaflet upscale the last real
+    // tile past that instead of showing blank tiles at closer zoom.
+    usgstopo: L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      maxNativeZoom: 16,
+      attribution: 'USGS The National Map'
+    }),
+    // OpenTopoMap — worldwide contour/trail-style topo, community-maintained (new server
+    // as of Jan 2026), CC-BY-SA, attribution required. Native tiles only go to zoom 17.
+    opentopo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      maxNativeZoom: 17,
+      subdomains: 'abc',
+      attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map display: &copy; OpenTopoMap (CC-BY-SA)'
     })
   };
 
