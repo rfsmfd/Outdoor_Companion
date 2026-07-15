@@ -1343,7 +1343,7 @@
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
-    <div id="buildBadge">BUILD 39</div>
+    <div id="buildBadge">BUILD 40</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1573,7 +1573,7 @@
        Note: the stored photo itself is a compressed 500px copy (no separate full-res
        original is retained), so this shows the same image larger/clearer, not
        additional detail beyond what's already stored. -->
-  <div class="oc-modal-backdrop" id="photoLightboxBackdrop" style="background:rgba(0,0,0,0.88);">
+  <div class="oc-modal-backdrop" id="photoLightboxBackdrop" style="background:rgba(0,0,0,0.88);z-index:3500;">
     <img id="photoLightboxImg" src="" style="max-width:92vw;max-height:85vh;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.6);" />
     <button class="close-x" id="photoLightboxClose" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;">&times;</button>
   </div>
@@ -2226,33 +2226,46 @@
   // "show" class. This means it automatically covers every current modal, and any future
   // one too, as long as that same id/class convention is followed.
   //
-  // The model: every modal open pushes one history entry; every modal close — whether
-  // triggered by tapping X/Cancel/OK, tapping the backdrop, or pressing the back button
-  // itself — consumes exactly one history entry, keeping the two in sync. A flag guards
-  // against double-handling when a close was already triggered by the back button.
+  // Modals can genuinely nest — the photo lightbox opens on top of the Journal without
+  // closing it, for exactly this reason. So this maintains a real ordered stack, not just
+  // "is anything open": every modal open pushes its element onto the stack and a history
+  // entry; every close (via X/Cancel/OK/backdrop tap, or the back button itself) pops
+  // exactly that one element back off, closing only the topmost modal and correctly
+  // leaving whatever was open underneath still visible.
+  var modalStack = [];
   var suppressBackForModalClose = false;
 
   window.addEventListener('popstate', function(){
-    var openModals = document.querySelectorAll('[id$="Backdrop"].show');
-    if (openModals.length === 0) return; // no modal open - let normal back navigation happen
+    if (modalStack.length === 0) return; // nothing open - let normal back navigation happen
     suppressBackForModalClose = true;
-    openModals.forEach(function(el){ el.classList.remove('show'); });
-    var fixedClose = document.getElementById('importPhotosFixedClose');
-    if (fixedClose) fixedClose.classList.remove('show');
+    var topModal = modalStack.pop();
+    topModal.classList.remove('show');
+    if (topModal.id === 'importPhotosModalBackdrop'){
+      var fixedClose = document.getElementById('importPhotosFixedClose');
+      if (fixedClose) fixedClose.classList.remove('show');
+    }
     // Let the MutationObserver callback below (a microtask) see the flag before it clears.
     Promise.resolve().then(function(){ suppressBackForModalClose = false; });
   });
 
   var modalHistoryObserver = new MutationObserver(function(mutations){
+    var processed = new Set();
     mutations.forEach(function(m){
       var el = m.target;
-      if (!el.id || el.id.indexOf('Backdrop') === -1 || el.id.slice(-8) !== 'Backdrop') return;
+      if (processed.has(el)) return; // a single open/close can produce multiple mutation records
+      processed.add(el);
+      if (!el.id || el.id.slice(-8) !== 'Backdrop') return;
       var isShown = el.classList.contains('show');
       var wasShown = (m.oldValue || '').split(' ').indexOf('show') >= 0;
       if (isShown && !wasShown){
+        modalStack.push(el);
         window.history.pushState({ocModal: true}, '');
-      } else if (!isShown && wasShown && !suppressBackForModalClose){
-        window.history.back(); // consume the now-stale pushed state
+      } else if (!isShown && wasShown){
+        var idx = modalStack.indexOf(el);
+        if (idx >= 0) modalStack.splice(idx, 1);
+        if (!suppressBackForModalClose){
+          window.history.back(); // consume the now-stale pushed state
+        }
       }
     });
   });
@@ -2381,7 +2394,10 @@
   // this shows the same image larger, not additional detail beyond what's stored.
   function showPhotoLightbox(src){
     document.getElementById('photoLightboxImg').src = src;
-    closeAllModals();
+    // Deliberately does NOT call closeAllModals() — the lightbox should layer on top of
+    // whatever's already open (e.g. the Journal), not replace it, so that closing the
+    // lightbox correctly reveals what was open underneath rather than dumping back to
+    // the map.
     document.getElementById('photoLightboxBackdrop').classList.add('show');
   }
   document.getElementById('photoLightboxClose').addEventListener('click', function(){
