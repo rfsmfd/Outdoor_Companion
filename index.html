@@ -471,18 +471,27 @@
     z-index:1000;
     width:42px;height:42px;
     border-radius:50%;
-    background:var(--panel);
-    border:1px solid var(--line);
+    background:#fff;
+    border:2px solid #1A1204;
     color:var(--text-dim);
     font-size:17px;
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 8px rgba(0,0,0,0.4);
   }
-  #recordTrailBtn.active{
+  #recordTrailBtn .record-dot{
+    width:18px;height:18px;
+    border-radius:50%;
     background:#D94A2E;
+    border:2px solid #1A1204;
+  }
+  #recordTrailBtn.active{
+    background:#fff;
     color:#fff;
-    border-color:#D94A2E;
+    border-color:#1A1204;
     animation: recordPulse 2s ease-in-out infinite;
+  }
+  #recordTrailBtn.active .record-dot{
+    border-radius:4px; /* stop-square, matching the standard record-button convention */
   }
   @keyframes recordPulse{
     0%, 100% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 0 rgba(217,74,46,0.5); }
@@ -1399,12 +1408,12 @@
       <button class="layer-btn" data-layer="opentopo" title="OpenTopoMap — worldwide contour/trail topo">Topo</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
-    <button id="recordTrailBtn" title="Record a trail">⚫</button>
+    <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
     <div id="recordTrailInfoLabel"></div>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 45</div>
+    <div id="buildBadge">BUILD 46</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2621,6 +2630,15 @@
     });
     var fixedClose = document.getElementById('importPhotosFixedClose');
     if (fixedClose) fixedClose.classList.remove('show');
+    // The mobile sidebar drawer has its own separate darkening overlay, independent of
+    // .oc-modal-backdrop — without this, opening any modal from a button inside the open
+    // sidebar (e.g. Trails, Hunt Journal) leaves the sidebar's own backdrop stuck open
+    // underneath once that modal closes, still dimming the map with nothing visible to
+    // interact with. Closing every modal now also closes the sidebar drawer on mobile,
+    // so the map is always reachable again once nothing is open.
+    if (window.innerWidth <= 820 && document.getElementById('sidebar').classList.contains('open')){
+      closeSidebar();
+    }
   }
 
   // ---------- Universal Back-Button Support for Every Modal ----------
@@ -2663,7 +2681,7 @@
       var el = m.target;
       if (processed.has(el)) return; // a single open/close can produce multiple mutation records
       processed.add(el);
-      if (!el.id || el.id.slice(-8) !== 'Backdrop') return;
+      if (!el.id || el.id.slice(-8) !== 'Backdrop' || el.id === 'sidebarBackdrop') return;
       var isShown = el.classList.contains('show');
       var wasShown = (m.oldValue || '').split(' ').indexOf('show') >= 0;
       if (isShown && !wasShown){
