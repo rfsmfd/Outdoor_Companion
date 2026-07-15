@@ -1366,7 +1366,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 43</div>
+    <div id="buildBadge">BUILD 44</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1950,7 +1950,10 @@
   function getParcelLayer(){
     if (!parcelLayer){
       parcelLayer = L.esri.featureLayer({
-        url: 'https://gismaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0',
+        // NOTE: VGIN migrated their ArcGIS Server from gismaps.vdem.virginia.gov to
+        // vginmaps.vdem.virginia.gov in Sept 2024 — the old domain is being actively
+        // decommissioned. Confirmed directly against VGIN's own migration documentation.
+        url: 'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0',
         style: function(){
           return { color: '#D4B24C', weight: 1.5, fillOpacity: 0, opacity: 0.85 };
         },
