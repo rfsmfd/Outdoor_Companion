@@ -1413,7 +1413,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 47</div>
+    <div id="buildBadge">BUILD 48</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2677,11 +2677,19 @@
   // one too, as long as that same id/class convention is followed.
   //
   // Modals can genuinely nest — the photo lightbox opens on top of the Journal without
-  // closing it, for exactly this reason. So this maintains a real ordered stack, not just
-  // "is anything open": every modal open pushes its element onto the stack and a history
-  // entry; every close (via X/Cancel/OK/backdrop tap, or the back button itself) pops
-  // exactly that one element back off, closing only the topmost modal and correctly
-  // leaving whatever was open underneath still visible.
+  // closing it — so this maintains a real ordered stack, not just "is anything open."
+  //
+  // Critical design detail, added after a real bug: many places in the app close one
+  // modal and immediately open another in the same synchronous action (e.g. the camera
+  // "Found" chooser closing itself before opening the Register form). Handling each
+  // mutation independently — pop-and-back() for the close, push() for the open — created
+  // a race: back() resolves asynchronously, so by the time its popstate event actually
+  // arrived, the NEW modal was now "on top," and got incorrectly closed by it moments
+  // after opening. Fixed by processing each MutationObserver callback as a full batch:
+  // multiple synchronous class changes are naturally delivered together in one callback,
+  // so the NET change (opens minus closes) is computed first. A matched close+open in the
+  // same batch (a "replace") nets to zero and never touches history at all — only a
+  // genuine net change in how many modals are open triggers a push or a back().
   var modalStack = [];
   var suppressBackForModalClose = false;
 
@@ -2700,6 +2708,8 @@
 
   var modalHistoryObserver = new MutationObserver(function(mutations){
     var processed = new Set();
+    var opened = [];
+    var closed = [];
     mutations.forEach(function(m){
       var el = m.target;
       if (processed.has(el)) return; // a single open/close can produce multiple mutation records
@@ -2707,17 +2717,25 @@
       if (!el.id || el.id.slice(-8) !== 'Backdrop' || el.id === 'sidebarBackdrop') return;
       var isShown = el.classList.contains('show');
       var wasShown = (m.oldValue || '').split(' ').indexOf('show') >= 0;
-      if (isShown && !wasShown){
-        modalStack.push(el);
-        window.history.pushState({ocModal: true}, '');
-      } else if (!isShown && wasShown){
-        var idx = modalStack.indexOf(el);
-        if (idx >= 0) modalStack.splice(idx, 1);
-        if (!suppressBackForModalClose){
-          window.history.back(); // consume the now-stale pushed state
-        }
-      }
+      if (isShown && !wasShown) opened.push(el);
+      else if (!isShown && wasShown) closed.push(el);
     });
+    if (opened.length === 0 && closed.length === 0) return;
+
+    closed.forEach(function(el){
+      var idx = modalStack.indexOf(el);
+      if (idx >= 0) modalStack.splice(idx, 1);
+    });
+    opened.forEach(function(el){ modalStack.push(el); });
+
+    var netChange = opened.length - closed.length;
+    if (netChange > 0){
+      for (var i=0; i<netChange; i++) window.history.pushState({ocModal: true}, '');
+    } else if (netChange < 0 && !suppressBackForModalClose){
+      for (var j=0; j<-netChange; j++) window.history.back();
+    }
+    // netChange === 0 (a same-batch replace, e.g. close A + open B together) —
+    // deliberately does not touch history at all; this is the fix.
   });
   modalHistoryObserver.observe(document.body, {subtree:true, attributes:true, attributeFilter:['class'], attributeOldValue:true});
 
@@ -5955,11 +5973,17 @@
     }
     var camId = data.slice(QR_PREFIX.length);
     var cam = cameras.filter(function(c){ return c.id === camId; })[0];
-    stopScanner();
     if (!cam){
-      alert('This QR tag isn\'t recognized. Use "Batch Generate QR Codes" first to create tags, print them, then scan one to register or deploy it.');
+      // Same shape of problem as an unrecognized QR format — a garbled read, a stale or
+      // duplicate tag, scanning the wrong sheet — the fix is the same: keep scanning
+      // instead of dead-ending. Previously this called stopScanner() unconditionally and
+      // showed a blocking alert, which meant a bad read required leaving the scanner
+      // entirely and restarting the whole flow from the Register Camera button.
+      setScanStatus('QR not recognized in your inventory — keep scanning…');
+      scannerRAF = requestAnimationFrame(scanFrame);
       return;
     }
+    stopScanner();
     if (scanMode === 'register'){
       openEditCameraModal(cam);
     } else {
