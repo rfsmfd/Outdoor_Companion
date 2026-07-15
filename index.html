@@ -1343,7 +1343,7 @@
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
-    <div id="buildBadge">BUILD 38</div>
+    <div id="buildBadge">BUILD 39</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2213,6 +2213,50 @@
     var fixedClose = document.getElementById('importPhotosFixedClose');
     if (fixedClose) fixedClose.classList.remove('show');
   }
+
+  // ---------- Universal Back-Button Support for Every Modal ----------
+  // Without this, the phone's back button doesn't close an open modal — it navigates
+  // away from the page entirely, which is confusing (most noticeable with the photo
+  // lightbox, but true of every modal in the app, since none of them were integrated
+  // with browser history before this).
+  //
+  // Rather than touching every individual modal's open/close call site (dozens of them,
+  // real risk of missing one), this watches for the shared convention already used by
+  // every modal in the app: an element whose id ends in "Backdrop" gaining or losing the
+  // "show" class. This means it automatically covers every current modal, and any future
+  // one too, as long as that same id/class convention is followed.
+  //
+  // The model: every modal open pushes one history entry; every modal close — whether
+  // triggered by tapping X/Cancel/OK, tapping the backdrop, or pressing the back button
+  // itself — consumes exactly one history entry, keeping the two in sync. A flag guards
+  // against double-handling when a close was already triggered by the back button.
+  var suppressBackForModalClose = false;
+
+  window.addEventListener('popstate', function(){
+    var openModals = document.querySelectorAll('[id$="Backdrop"].show');
+    if (openModals.length === 0) return; // no modal open - let normal back navigation happen
+    suppressBackForModalClose = true;
+    openModals.forEach(function(el){ el.classList.remove('show'); });
+    var fixedClose = document.getElementById('importPhotosFixedClose');
+    if (fixedClose) fixedClose.classList.remove('show');
+    // Let the MutationObserver callback below (a microtask) see the flag before it clears.
+    Promise.resolve().then(function(){ suppressBackForModalClose = false; });
+  });
+
+  var modalHistoryObserver = new MutationObserver(function(mutations){
+    mutations.forEach(function(m){
+      var el = m.target;
+      if (!el.id || el.id.indexOf('Backdrop') === -1 || el.id.slice(-8) !== 'Backdrop') return;
+      var isShown = el.classList.contains('show');
+      var wasShown = (m.oldValue || '').split(' ').indexOf('show') >= 0;
+      if (isShown && !wasShown){
+        window.history.pushState({ocModal: true}, '');
+      } else if (!isShown && wasShown && !suppressBackForModalClose){
+        window.history.back(); // consume the now-stale pushed state
+      }
+    });
+  });
+  modalHistoryObserver.observe(document.body, {subtree:true, attributes:true, attributeFilter:['class'], attributeOldValue:true});
 
   function markerIcon(type){
     var t = getActiveTypes()[type] || getFallbackTypeEntry(false);
