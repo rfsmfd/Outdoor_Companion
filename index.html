@@ -465,6 +465,41 @@
     color:#0A1A2E;
     border-color:#3B9EFF;
   }
+  #recordTrailBtn{
+    position:absolute;
+    bottom:122px;left:14px;
+    z-index:1000;
+    width:42px;height:42px;
+    border-radius:50%;
+    background:var(--panel);
+    border:1px solid var(--line);
+    color:var(--text-dim);
+    font-size:17px;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+  }
+  #recordTrailBtn.active{
+    background:#D94A2E;
+    color:#fff;
+    border-color:#D94A2E;
+    animation: recordPulse 2s ease-in-out infinite;
+  }
+  @keyframes recordPulse{
+    0%, 100% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 0 rgba(217,74,46,0.5); }
+    50% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 6px rgba(217,74,46,0); }
+  }
+  #recordTrailInfoLabel{
+    position:absolute;
+    bottom:130px;left:64px;
+    z-index:1000;
+    background:rgba(20,26,20,0.85);
+    color:#fff;
+    font-size:11px;
+    padding:5px 9px;
+    border-radius:6px;
+    white-space:nowrap;
+    display:none;
+  }
 
   #windToggleBtn{
     position:absolute;
@@ -1312,6 +1347,7 @@
       <button class="btn-ghost" id="exportBtn">Export</button>
       <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
       <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
+      <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
     </div>
 
     <div id="propertyRow">
@@ -1363,10 +1399,12 @@
       <button class="layer-btn" data-layer="opentopo" title="OpenTopoMap — worldwide contour/trail topo">Topo</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
+    <button id="recordTrailBtn" title="Record a trail">⚫</button>
+    <div id="recordTrailInfoLabel"></div>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 44</div>
+    <div id="buildBadge">BUILD 45</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1536,6 +1574,46 @@
         <input type="text" id="newPropertyName" placeholder="e.g. Home Farm, North Lease" />
         <button class="btn-primary" id="addPropertyBtn" style="width:100%;margin-top:8px;">+ Save This Map View as a Property</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Save/Edit Trail — shared by "just finished recording" and "editing an existing
+       saved trail later" (Discard button only shown in the former case). -->
+  <div class="oc-modal-backdrop" id="saveTrailModalBackdrop">
+    <div class="oc-modal">
+      <h3 id="saveTrailTitle">Save Trail <button class="close-x" id="saveTrailClose">&times;</button></h3>
+      <div class="form-pop">
+        <label>Name</label>
+        <input type="text" id="trailNameInput" placeholder="e.g. Trail to North Stand" />
+        <label style="margin-top:10px;">Type</label>
+        <div class="chips" id="trailTypeChips">
+          <button class="chip" data-type="access">Access Trail</button>
+          <button class="chip" data-type="boat">Boat Route</button>
+          <button class="chip" data-type="game">Game Trail</button>
+          <button class="chip" data-type="custom">Custom</button>
+        </div>
+        <label style="margin-top:10px;">Color</label>
+        <div id="trailColorSwatches" style="display:flex;gap:8px;margin-bottom:4px;"></div>
+        <label style="margin-top:10px;">Line Style</label>
+        <div class="chips" id="trailStyleChips">
+          <button class="chip" data-style="solid">Solid</button>
+          <button class="chip" data-style="dashed">Dashed</button>
+          <button class="chip" data-style="dotted">Dotted</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn-ghost" id="discardTrailBtn" style="flex:1;">Discard</button>
+        <button class="btn-primary" id="confirmSaveTrailBtn" style="flex:1;">Save Trail</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Manage Trails — list of all saved trails for the active module -->
+  <div class="oc-modal-backdrop" id="manageTrailsModalBackdrop">
+    <div class="oc-modal">
+      <h3>Trails <button class="close-x" id="manageTrailsClose">&times;</button></h3>
+      <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Every trail you've recorded and saved. Tap the visibility toggle to show/hide one on the map, or Edit to rename/restyle it.</p>
+      <div id="trailsList"></div>
     </div>
   </div>
 
@@ -1829,6 +1907,7 @@
 
   var cameras = [];      // {id, name, createdAt, currentSiteId, lastDeployedAt}
   var properties = [];   // {id, name, notes, createdAt}
+  var trails = [];       // {id, name, type, module, points, color, lineStyle, createdAt, notes}
   var huntEvents = [];   // {id, module, siteId, lat, lng, checkInAt, checkOutAt, weather, weatherStatus, moonPhase, observationIds}
   var activeHuntId = null; // the currently in-progress hunt/trip, or null if none active
   var journalFilterRange = 'all'; // 'all' | 'week' | 'month' | 'custom' — Journal totals time filter
@@ -1980,6 +2059,250 @@
       parcelLayerActive = true;
       btn.classList.add('active');
     }
+  });
+
+  // ---------- Trail Recording (breadcrumbs) ----------
+  // Works completely standalone — no Hunt/Trip session required — for scouting, marking
+  // access trails, boat routes, or game trails anytime. Reuses the existing continuous
+  // GPS watch (sampleTrailPoint is called from within it) rather than running a second,
+  // separate watchPosition — one GPS stream, not two, for battery and simplicity.
+  var trailRecordingActive = false;
+  var currentTrailPoints = []; // {lat, lng, timestamp}
+  var liveTrailPolyline = null;
+  var savedTrailPolylines = {}; // trailId -> L.polyline
+  var TRAIL_MIN_POINT_DISTANCE_M = 8; // only record a new point once you've moved at least this far — avoids cluttering the trail with redundant points while standing still
+  var TRAIL_COLORS = ['#D94A2E', '#3B9EFF', '#4CAF50', '#D4B24C', '#9B59B6', '#FF8C42'];
+  var savingTrailEditId = null; // null = saving a fresh recording; otherwise the id of an existing trail being renamed/restyled
+  var selectedTrailColor = TRAIL_COLORS[0];
+  var selectedTrailStyle = 'solid';
+  var selectedTrailType = 'access';
+
+  function trailTypeLabel(type){
+    var labels = {access: 'Access Trail', boat: 'Boat Route', game: 'Game Trail', custom: 'Custom'};
+    return labels[type] || 'Custom';
+  }
+  function lineStyleToDashArray(style){
+    if (style === 'dashed') return '10, 8';
+    if (style === 'dotted') return '2, 6';
+    return null; // solid
+  }
+  function trailTotalMiles(trail){
+    var totalM = 0;
+    for (var i=1;i<trail.points.length;i++){
+      totalM += distMeters(trail.points[i-1].lat, trail.points[i-1].lng, trail.points[i].lat, trail.points[i].lng);
+    }
+    return (totalM / 1609.34).toFixed(2);
+  }
+
+  function sampleTrailPoint(lat, lng){
+    if (!trailRecordingActive) return;
+    var last = currentTrailPoints[currentTrailPoints.length - 1];
+    if (last && distMeters(last.lat, last.lng, lat, lng) < TRAIL_MIN_POINT_DISTANCE_M) return;
+    currentTrailPoints.push({lat: lat, lng: lng, timestamp: Date.now()});
+    if (!liveTrailPolyline){
+      liveTrailPolyline = L.polyline([[lat,lng]], {color: '#D94A2E', weight: 4, opacity: 0.9}).addTo(map);
+    } else {
+      liveTrailPolyline.addLatLng([lat, lng]);
+    }
+    updateRecordTrailInfoLabel();
+  }
+
+  function updateRecordTrailInfoLabel(){
+    var label = document.getElementById('recordTrailInfoLabel');
+    if (!trailRecordingActive || currentTrailPoints.length === 0){ label.style.display = 'none'; return; }
+    var totalM = 0;
+    for (var i=1;i<currentTrailPoints.length;i++){
+      totalM += distMeters(currentTrailPoints[i-1].lat, currentTrailPoints[i-1].lng, currentTrailPoints[i].lat, currentTrailPoints[i].lng);
+    }
+    var miles = (totalM / 1609.34).toFixed(2);
+    var elapsed = fmtHuntDuration(currentTrailPoints[0].timestamp, Date.now());
+    label.textContent = '🥾 ' + miles + ' mi · ' + elapsed;
+    label.style.display = 'block';
+  }
+
+  document.getElementById('recordTrailBtn').addEventListener('click', function(){
+    var btn = this;
+    if (trailRecordingActive){
+      trailRecordingActive = false;
+      btn.classList.remove('active');
+      if (currentTrailPoints.length < 2){
+        if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
+        currentTrailPoints = [];
+        document.getElementById('recordTrailInfoLabel').style.display = 'none';
+        showToast('Trail too short to save');
+        return;
+      }
+      openSaveTrailModal(false, null);
+    } else {
+      trailRecordingActive = true;
+      btn.classList.add('active');
+      currentTrailPoints = [];
+      if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
+      if (lastKnownPos) sampleTrailPoint(lastKnownPos.lat, lastKnownPos.lng);
+    }
+  });
+
+  function renderTrailColorSwatches(){
+    var container = document.getElementById('trailColorSwatches');
+    container.innerHTML = '';
+    TRAIL_COLORS.forEach(function(color){
+      var swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.style.cssText = 'width:32px;height:32px;border-radius:50%;background:'+color+';border:3px solid '+(color===selectedTrailColor?'#fff':'transparent')+';cursor:pointer;padding:0;';
+      swatch.addEventListener('click', function(){
+        selectedTrailColor = color;
+        renderTrailColorSwatches();
+      });
+      container.appendChild(swatch);
+    });
+  }
+
+  function openSaveTrailModal(isEditing, existingTrail){
+    savingTrailEditId = isEditing ? existingTrail.id : null;
+    document.getElementById('saveTrailTitle').textContent = isEditing ? 'Edit Trail' : 'Save Trail';
+    document.getElementById('discardTrailBtn').style.display = isEditing ? 'none' : 'block';
+    document.getElementById('trailNameInput').value = isEditing ? existingTrail.name : '';
+    selectedTrailType = isEditing ? existingTrail.type : 'access';
+    selectedTrailColor = isEditing ? existingTrail.color : TRAIL_COLORS[0];
+    selectedTrailStyle = isEditing ? existingTrail.lineStyle : 'solid';
+    document.querySelectorAll('#trailTypeChips .chip').forEach(function(c){ c.classList.toggle('active', c.getAttribute('data-type') === selectedTrailType); });
+    document.querySelectorAll('#trailStyleChips .chip').forEach(function(c){ c.classList.toggle('active', c.getAttribute('data-style') === selectedTrailStyle); });
+    renderTrailColorSwatches();
+    closeAllModals();
+    document.getElementById('saveTrailModalBackdrop').classList.add('show');
+  }
+
+  document.querySelectorAll('#trailTypeChips .chip').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      selectedTrailType = chip.getAttribute('data-type');
+      document.querySelectorAll('#trailTypeChips .chip').forEach(function(c){ c.classList.toggle('active', c === chip); });
+    });
+  });
+  document.querySelectorAll('#trailStyleChips .chip').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      selectedTrailStyle = chip.getAttribute('data-style');
+      document.querySelectorAll('#trailStyleChips .chip').forEach(function(c){ c.classList.toggle('active', c === chip); });
+    });
+  });
+
+  function renderSavedTrailOnMap(trail){
+    if (savedTrailPolylines[trail.id]){
+      map.removeLayer(savedTrailPolylines[trail.id]);
+      delete savedTrailPolylines[trail.id];
+    }
+    if (trail.module !== activeModule || trail.hidden) return;
+    var latlngs = trail.points.map(function(p){ return [p.lat, p.lng]; });
+    var poly = L.polyline(latlngs, {
+      color: trail.color, weight: 4, opacity: 0.85, dashArray: lineStyleToDashArray(trail.lineStyle)
+    }).addTo(map);
+    poly.bindPopup('<strong>' + escapeHtml(trail.name) + '</strong><br>' + trailTypeLabel(trail.type) + ' · ' + trailTotalMiles(trail) + ' mi');
+    savedTrailPolylines[trail.id] = poly;
+  }
+
+  function renderAllSavedTrails(){
+    Object.keys(savedTrailPolylines).forEach(function(id){ map.removeLayer(savedTrailPolylines[id]); });
+    savedTrailPolylines = {};
+    trails.forEach(function(trail){ renderSavedTrailOnMap(trail); });
+  }
+
+  document.getElementById('confirmSaveTrailBtn').addEventListener('click', async function(){
+    var name = document.getElementById('trailNameInput').value.trim();
+    if (!name){ showToast('Please enter a name'); return; }
+    if (savingTrailEditId){
+      var trail = trails.filter(function(t){ return t.id === savingTrailEditId; })[0];
+      if (trail){
+        trail.name = name; trail.type = selectedTrailType; trail.color = selectedTrailColor; trail.lineStyle = selectedTrailStyle;
+        try{ await saveTrail(trail); }catch(e){ console.error('Outdoor Companion: failed to save trail edits', e); }
+        renderSavedTrailOnMap(trail);
+        renderTrailsList();
+        showToast('Trail updated');
+      }
+    } else {
+      var newTrail = {
+        id: uid(), name: name, type: selectedTrailType, module: activeModule,
+        points: currentTrailPoints.slice(), color: selectedTrailColor, lineStyle: selectedTrailStyle,
+        createdAt: Date.now(), notes: '', hidden: false
+      };
+      trails.push(newTrail);
+      try{ await saveTrail(newTrail); }catch(e){ console.error('Outdoor Companion: failed to save new trail', e); }
+      if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
+      currentTrailPoints = [];
+      document.getElementById('recordTrailInfoLabel').style.display = 'none';
+      renderSavedTrailOnMap(newTrail);
+      showToast('Trail saved');
+    }
+    document.getElementById('saveTrailModalBackdrop').classList.remove('show');
+  });
+
+  document.getElementById('discardTrailBtn').addEventListener('click', function(){
+    if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
+    currentTrailPoints = [];
+    document.getElementById('recordTrailInfoLabel').style.display = 'none';
+    document.getElementById('saveTrailModalBackdrop').classList.remove('show');
+  });
+
+  function renderTrailsList(){
+    var listEl = document.getElementById('trailsList');
+    var relevantTrails = trails.filter(function(t){ return t.module === activeModule; });
+    if (relevantTrails.length === 0){
+      listEl.innerHTML = '<div class="empty" style="padding:16px 0;">No trails recorded yet. Tap the ⚫ record button on the map to start one.</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    relevantTrails.forEach(function(trail){
+      var row = document.createElement('div');
+      row.className = 'history-row';
+      row.innerHTML =
+        '<div class="info">' +
+          '<div class="dt"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+trail.color+';margin-right:6px;"></span>' + escapeHtml(trail.name) + '</div>' +
+          '<div class="co">' + trailTypeLabel(trail.type) + ' · ' + trailTotalMiles(trail) + ' mi</div>' +
+        '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:4px;">' +
+          '<button class="btn-ghost" data-act="toggle-trail-visibility" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;">'+(trail.hidden?'Show':'Hide')+'</button>' +
+          '<button class="btn-ghost" data-act="edit-trail" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;">Edit</button>' +
+          '<button class="btn-ghost" data-act="delete-trail" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;color:#D94A2E;">Delete</button>' +
+        '</div>';
+      listEl.appendChild(row);
+    });
+    listEl.querySelectorAll('[data-act="toggle-trail-visibility"]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var trail = trails.filter(function(t){ return t.id === btn.getAttribute('data-id'); })[0];
+        if (!trail) return;
+        trail.hidden = !trail.hidden;
+        try{ await saveTrail(trail); }catch(e){ console.error('Outdoor Companion: failed to save trail visibility', e); }
+        renderSavedTrailOnMap(trail);
+        renderTrailsList();
+      });
+    });
+    listEl.querySelectorAll('[data-act="edit-trail"]').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var trail = trails.filter(function(t){ return t.id === btn.getAttribute('data-id'); })[0];
+        if (trail) openSaveTrailModal(true, trail);
+      });
+    });
+    listEl.querySelectorAll('[data-act="delete-trail"]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        var confirmed = await showConfirm('Delete this trail? This cannot be undone.');
+        if (!confirmed) return;
+        var id = btn.getAttribute('data-id');
+        if (savedTrailPolylines[id]){ map.removeLayer(savedTrailPolylines[id]); delete savedTrailPolylines[id]; }
+        trails = trails.filter(function(t){ return t.id !== id; });
+        try{ await deleteTrailStorage(id); }catch(e){ console.error('Outdoor Companion: failed to delete trail', e); }
+        renderTrailsList();
+      });
+    });
+  }
+
+  document.getElementById('manageTrailsBtn').addEventListener('click', function(){
+    renderTrailsList();
+    closeAllModals();
+    document.getElementById('manageTrailsModalBackdrop').classList.add('show');
+  });
+  document.getElementById('manageTrailsClose').addEventListener('click', function(){
+    document.getElementById('manageTrailsModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('saveTrailClose').addEventListener('click', function(){
+    document.getElementById('discardTrailBtn').click();
   });
 
   // ---------- Wind Direction Arrows ----------
@@ -2688,6 +3011,47 @@
   var DEP_LS_KEY = 'outdoor_companion_deployments';
   var PROP_LS_KEY = 'outdoor_companion_properties';
   var HUNT_LS_KEY = 'outdoor_companion_hunt_events';
+  var TRAIL_LS_KEY = 'outdoor_companion_trails';
+
+  function trailLocalLoadAll(){
+    try{ var raw = window.localStorage.getItem(TRAIL_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
+  }
+  function trailLocalSaveAll(list){
+    try{ window.localStorage.setItem(TRAIL_LS_KEY, JSON.stringify(list)); }catch(e){}
+  }
+  async function loadTrails(){
+    if (hasChatStorage){
+      try{
+        var res = await window.storage.list('trail:', false);
+        var keys = (res && res.keys) ? res.keys : [];
+        var loaded = [];
+        for (var i=0;i<keys.length;i++){
+          try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
+        }
+        trails = loaded;
+      }catch(e){ trails = []; }
+    } else {
+      trails = trailLocalLoadAll();
+    }
+  }
+  async function saveTrail(trail){
+    if (hasChatStorage){
+      await window.storage.set('trail:'+trail.id, JSON.stringify(trail), false);
+    } else {
+      var all = trailLocalLoadAll();
+      var idx = all.findIndex(function(t){ return t.id === trail.id; });
+      if (idx >= 0) all[idx] = trail; else all.push(trail);
+      trailLocalSaveAll(all);
+    }
+  }
+  async function deleteTrailStorage(id){
+    if (hasChatStorage){
+      try{ await window.storage.delete('trail:'+id, false); }catch(e){}
+    } else {
+      var all = trailLocalLoadAll().filter(function(t){ return t.id !== id; });
+      trailLocalSaveAll(all);
+    }
+  }
 
   function huntLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(HUNT_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
@@ -3654,6 +4018,7 @@
     navigator.geolocation.watchPosition(function(pos){
       lastKnownPos = {lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy};
       showMeMarker(lastKnownPos.lat, lastKnownPos.lng);
+      sampleTrailPoint(lastKnownPos.lat, lastKnownPos.lng);
       var acc = Math.round(lastKnownPos.accuracy);
       if (lastKnownPos.accuracy <= AUTO_CENTER_ACCURACY_M){
         setGpsStatus('located · accuracy ~' + acc + 'm', 'ok');
@@ -4426,6 +4791,7 @@
     updateActiveHuntBar();
     document.getElementById('huntLogBtn').textContent = '📋 ' + (activeModule === 'fishing' ? 'Fish' : 'Hunt') + ' Journal';
     updateWindButtonTitle();
+    renderAllSavedTrails();
     showToast(activeModule === 'fishing' ? '🎣 Switched to Fishing' : '🏹 Switched to Hunting');
   }
 
@@ -4636,6 +5002,8 @@
     await loadDeployments();
     await loadProperties();
     await loadHuntEvents();
+    await loadTrails();
+    renderAllSavedTrails();
     // If a hunt was left active from a previous session (app closed without tapping End
     // Hunt), pick that state back up rather than silently losing track of it.
     var stillActive = huntEvents.filter(function(h){ return !h.checkOutAt; })[0];
