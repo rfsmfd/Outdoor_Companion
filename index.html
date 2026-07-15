@@ -1413,7 +1413,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 46</div>
+    <div id="buildBadge">BUILD 47</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2056,6 +2056,14 @@
     return parcelLayer;
   }
 
+  // Parcels load in a grid of on-demand queries scoped to the current map view — real,
+  // confirmed behavior, not the whole state at once. But zoomed out far enough, "the
+  // current view" still covers enough parcels to bog down or silently stall, which is
+  // almost certainly the real cause of "doesn't always work." Gating on zoom level here
+  // directly, rather than relying on esri-leaflet's own minZoom option (documented as
+  // unreliable across versions), gives full, predictable control over this.
+  var PARCEL_MIN_ZOOM = 14;
+
   document.getElementById('parcelToggleBtn').addEventListener('click', function(){
     var btn = this;
     var layer = getParcelLayer();
@@ -2064,9 +2072,24 @@
       parcelLayerActive = false;
       btn.classList.remove('active');
     } else {
+      if (map.getZoom() < PARCEL_MIN_ZOOM){
+        showToast('Zoom in closer to load property lines (helps them load reliably)');
+        return;
+      }
       layer.addTo(map);
       parcelLayerActive = true;
       btn.classList.add('active');
+    }
+  });
+
+  // If the user zooms back out while parcels are active, turn them off automatically
+  // rather than let the same slow/stalled-query problem recur silently.
+  map.on('zoomend', function(){
+    if (parcelLayerActive && map.getZoom() < PARCEL_MIN_ZOOM){
+      map.removeLayer(getParcelLayer());
+      parcelLayerActive = false;
+      document.getElementById('parcelToggleBtn').classList.remove('active');
+      showToast('Property lines turned off — zoomed out too far to load them reliably');
     }
   });
 
