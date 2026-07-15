@@ -1343,7 +1343,7 @@
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
-    <div id="buildBadge">BUILD 36</div>
+    <div id="buildBadge">BUILD 38</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1567,6 +1567,15 @@
         <button class="btn-primary" id="genericPromptOkBtn" style="flex:1;">OK</button>
       </div>
     </div>
+  </div>
+
+  <!-- Photo Lightbox — expands a catch/sighting thumbnail to a larger, clearer view.
+       Note: the stored photo itself is a compressed 500px copy (no separate full-res
+       original is retained), so this shows the same image larger/clearer, not
+       additional detail beyond what's already stored. -->
+  <div class="oc-modal-backdrop" id="photoLightboxBackdrop" style="background:rgba(0,0,0,0.88);">
+    <img id="photoLightboxImg" src="" style="max-width:92vw;max-height:85vh;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.6);" />
+    <button class="close-x" id="photoLightboxClose" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;">&times;</button>
   </div>
 
   <div class="oc-modal-backdrop" id="newSpotModalBackdrop">
@@ -2323,6 +2332,21 @@
   }
 
   // Replaces prompt() — resolves to the entered string, or null if cancelled/left blank.
+  // Expands a catch/sighting photo to a larger, clearer view. Note: the stored photo is
+  // already a compressed ~500px copy (no separate full-resolution original is kept), so
+  // this shows the same image larger, not additional detail beyond what's stored.
+  function showPhotoLightbox(src){
+    document.getElementById('photoLightboxImg').src = src;
+    closeAllModals();
+    document.getElementById('photoLightboxBackdrop').classList.add('show');
+  }
+  document.getElementById('photoLightboxClose').addEventListener('click', function(){
+    document.getElementById('photoLightboxBackdrop').classList.remove('show');
+  });
+  document.getElementById('photoLightboxBackdrop').addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('show');
+  });
+
   function showPrompt(message, defaultValue){
     return new Promise(function(resolve){
       document.getElementById('genericPromptMessage').textContent = message;
@@ -3660,7 +3684,7 @@
     if (o.lure) parts.push(o.lure + (o.lureColor ? ' (' + o.lureColor + ')' : ''));
     if (o.tagNumber) parts.push('Tag #' + o.tagNumber);
     var html = '<div style="display:flex;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:flex-start;">';
-    if (o.photoThumb) html += '<img src="'+o.photoThumb+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;flex-shrink:0;" />';
+    if (o.photoThumb) html += '<img src="'+o.photoThumb+'" class="journal-photo-thumb" style="width:44px;height:44px;object-fit:cover;border-radius:5px;flex-shrink:0;cursor:pointer;" />';
     html += '<div style="flex:1;min-width:0;">';
     html += '<div style="font-size:12px;font-weight:600;color:'+t.color+';">' + escapeHtml(t.label) + ' <span style="font-weight:400;color:var(--text-dim);">· ' + timeStr + '</span></div>';
     if (parts.length) html += '<div style="font-size:11.5px;color:var(--text-dim);">' + escapeHtml(parts.join(' · ')) + '</div>';
@@ -3756,6 +3780,10 @@
       if (h.weatherStatus === 'ok' && h.weather) envParts.push(formatWeatherLine(h.weather));
       var eventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
       var hasEvents = h.observationIds.length > 0;
+      // Find the first photo among this trip's catches/sightings (in order logged) for a
+      // quick visual preview on the collapsed row, before expanding into full detail.
+      var tripObs = h.observationIds.map(function(id){ return observations.filter(function(o){ return o.id === id; })[0]; }).filter(Boolean);
+      var previewPhoto = tripObs.filter(function(o){ return o.photoThumb; })[0];
       var row = document.createElement('div');
       row.className = 'history-row';
       if (hasEvents) row.style.cursor = 'pointer';
@@ -3768,15 +3796,15 @@
             (hasEvents ? '<span class="detail-chevron" style="color:var(--accent);font-size:14px;">▸</span>' : '') +
           '</div>' +
           (envParts.length ? '<div class="co" style="color:var(--text-dim);">' + envParts.join(' · ') + '</div>' : '') +
-        '</div>';
+        '</div>' +
+        (previewPhoto ? '<img src="'+previewPhoto.photoThumb+'" class="journal-photo-thumb journal-preview-thumb" style="width:40px;height:40px;object-fit:cover;border-radius:5px;flex-shrink:0;cursor:pointer;" />' : '');
 
       if (hasEvents){
         var detailWrap = document.createElement('div');
         detailWrap.style.display = 'none';
         var detailHtml = '';
-        h.observationIds.forEach(function(obsId){
-          var obs = observations.filter(function(o){ return o.id === obsId; })[0];
-          if (obs) detailHtml += renderJournalObservationDetail(obs);
+        tripObs.forEach(function(obs){
+          detailHtml += renderJournalObservationDetail(obs);
         });
         detailWrap.innerHTML = detailHtml;
         row.querySelector('.info').appendChild(detailWrap);
@@ -3785,6 +3813,14 @@
           var opening = detailWrap.style.display === 'none';
           detailWrap.style.display = opening ? 'block' : 'none';
           chevron.textContent = opening ? '▾' : '▸';
+        });
+        // Any photo thumbnail (the row-level preview, or one inside the expanded detail)
+        // opens the lightbox instead of toggling the row's expand/collapse.
+        row.querySelectorAll('.journal-photo-thumb').forEach(function(img){
+          img.addEventListener('click', function(e){
+            e.stopPropagation();
+            showPhotoLightbox(img.getAttribute('src'));
+          });
         });
       }
 
@@ -4614,6 +4650,31 @@
   }
 
 
+  // A camera can be physically pulled from the field without immediately having a new
+  // spot to redeploy it to (e.g. taken down for maintenance, or the next spot isn't
+  // ready yet). Without this, the app would keep showing it as "deployed" at its old
+  // location indefinitely, which is misleading — the pin would still sit on the map
+  // even though the camera is sitting in a truck. This closes that gap: marks the
+  // current deployment as ended (permanently preserving when it was picked up,
+  // alongside when it was originally deployed) and removes the live site pin, while
+  // leaving the camera fully ready to redeploy whenever its next spot is ready.
+  async function pickUpCamera(cam){
+    var currentDeployment = deployments
+      .filter(function(d){ return d.cameraId === cam.id && !d.pickedUpAt; })
+      .sort(function(a,b){ return b.deployedAt - a.deployedAt; })[0];
+    if (currentDeployment){
+      currentDeployment.pickedUpAt = Date.now();
+      try{ await saveDeployment(currentDeployment); }catch(e){ console.error('Outdoor Companion: failed to save deployment pickup', e); }
+    }
+    if (cam.currentSiteId){
+      await removeSite(cam.currentSiteId);
+    }
+    cam.currentSiteId = null;
+    try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: failed to save camera after pickup', e); }
+    renderCameraList();
+    showToast(cam.name + ' marked as picked up');
+  }
+
   function renderCameraList(){
     var list = document.getElementById('site-list');
     document.getElementById('siteCount').textContent = cameras.length + (cameras.length===1 ? ' CAMERA' : ' CAMERAS');
@@ -4639,6 +4700,7 @@
         '</div>' +
         '<div class="cam-actions">' +
           '<button data-act="deploy-cam" data-id="'+cam.id+'" style="'+deployBtnStyle+'">'+(site ? 'Deployed' : 'Deploy')+'</button>' +
+          (site ? '<button class="btn-ghost" data-act="pickup-cam" data-id="'+cam.id+'">Pick Up</button>' : '') +
           '<button class="btn-ghost" data-act="edit-cam" data-id="'+cam.id+'">Edit</button>' +
           '<button class="btn-ghost" data-act="history-cam" data-id="'+cam.id+'">📜 History</button>' +
           '<button class="btn-ghost" data-act="delete-cam" data-id="'+cam.id+'" style="color:#D94A2E;">Delete</button>' +
@@ -4657,6 +4719,15 @@
       row.querySelector('[data-act="deploy-cam"]').addEventListener('click', function(){
         showUseCameraAppReminder('deploy');
       });
+
+      var pickupBtn = row.querySelector('[data-act="pickup-cam"]');
+      if (pickupBtn){
+        pickupBtn.addEventListener('click', async function(){
+          var confirmed = await showConfirm('Mark ' + cam.name + ' as picked up? It\'ll show as not deployed until you redeploy it somewhere new.');
+          if (!confirmed) return;
+          await pickUpCamera(cam);
+        });
+      }
 
       row.querySelector('[data-act="edit-cam"]').addEventListener('click', function(){
         openEditCameraModal(cam); // convenience: edit without needing to rescan the physical tag
@@ -4822,7 +4893,8 @@
         var dateStr = new Date(d.deployedAt).toLocaleString(undefined, {
           month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'
         });
-        var isLatest = idx === 0;
+        var isCurrent = idx === 0 && !d.pickedUpAt; // still actively in the field, not picked up
+        var pickupStr = d.pickedUpAt ? ' → picked up ' + new Date(d.pickedUpAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) : '';
         var envTxt = '';
         if (d.moonPhase) envTxt += '🌙 ' + escapeHtml(d.moonPhase.name) + ' (' + d.moonPhase.illumination + '%)';
         if (d.solunarPeriod) envTxt += (envTxt ? ' · ' : '') + '⭐ ' + escapeHtml(d.solunarPeriod);
@@ -4831,7 +4903,7 @@
         }
         row.innerHTML =
           '<div class="info">' +
-            '<div class="dt">' + escapeHtml(dateStr) + (isLatest ? ' <span style="color:var(--accent);">· current</span>' : '') + '</div>' +
+            '<div class="dt">' + escapeHtml(dateStr) + escapeHtml(pickupStr) + (isCurrent ? ' <span style="color:var(--accent);">· current</span>' : '') + '</div>' +
             '<div class="co">' + fmtCoord(d.lat) + ', ' + fmtCoord(d.lng) + '</div>' +
             (envTxt ? '<div class="co" style="color:var(--text-dim);">' + envTxt + '</div>' : '') +
           '</div>' +
