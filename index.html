@@ -1421,7 +1421,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 52</div>
+    <div id="buildBadge">BUILD 53</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1983,7 +1983,7 @@
     return base + '?cam=' + encodeURIComponent(camId);
   }
 
-  var map = L.map('map', {zoomControl:true, zoomSnap:0.25, zoomDelta:0.25}).setView([39.5, -98.35], 5);
+  var map = L.map('map', {zoomControl:true, zoomSnap:0, zoomDelta:0.25}).setView([39.5, -98.35], 5);
 
   // Tracks whether ANY marker popup is currently open. renderObsMarkers()/renderMarkers()
   // destroy and recreate every marker (including whatever popup is open), which would
@@ -5223,7 +5223,7 @@
       doubleClickZoom:false,
       boxZoom:false,
       keyboard:false,
-      zoomSnap:0.25,
+      zoomSnap:0,
       zoomDelta:0.25
     });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
@@ -6334,7 +6334,7 @@
       doubleClickZoom:false,
       boxZoom:false,
       keyboard:false,
-      zoomSnap:0.25,
+      zoomSnap:0,
       zoomDelta:0.25
     });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
