@@ -1413,7 +1413,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 48</div>
+    <div id="buildBadge">BUILD 50</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1686,6 +1686,50 @@
   <div class="oc-modal-backdrop" id="photoLightboxBackdrop" style="background:rgba(0,0,0,0.88);z-index:3500;">
     <img id="photoLightboxImg" src="" style="max-width:92vw;max-height:85vh;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.6);" />
     <button class="close-x" id="photoLightboxClose" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;">&times;</button>
+  </div>
+
+  <!-- Edit Weather — shared between Quick Log observations/catches and Hunt/Trip events.
+       Also usable when weather was never successfully fetched (weatherStatus 'unavailable'
+       or 'pending'), letting a person fill it in manually from scratch, not just correct
+       an existing reading. -->
+  <div class="oc-modal-backdrop" id="editWeatherModalBackdrop">
+    <div class="oc-modal" style="width:360px;max-width:90vw;">
+      <h3>Edit Weather <button class="close-x" id="editWeatherClose">&times;</button></h3>
+      <p style="font-size:11px;color:var(--text-dim);margin:0 0 10px 0;">Once you correct or fill this in, it's kept exactly as you entered it — nothing will silently overwrite it later.</p>
+      <div class="form-pop">
+        <div class="row" style="gap:8px;">
+          <div style="flex:1;"><label>Temp (°F)</label><input type="number" step="1" id="ew_temp" /></div>
+          <div style="flex:1;"><label>Pressure (inHg)</label><input type="number" step="0.01" id="ew_pressure" /></div>
+        </div>
+        <div class="row" style="gap:8px;margin-top:8px;">
+          <div style="flex:1;"><label>Wind Speed (mph)</label><input type="number" step="1" min="0" id="ew_windspeed" /></div>
+          <div style="flex:1;"><label>Wind Direction</label>
+            <select id="ew_winddir">
+              <option value="N">N</option><option value="NNE">NNE</option><option value="NE">NE</option><option value="ENE">ENE</option>
+              <option value="E">E</option><option value="ESE">ESE</option><option value="SE">SE</option><option value="SSE">SSE</option>
+              <option value="S">S</option><option value="SSW">SSW</option><option value="SW">SW</option><option value="WSW">WSW</option>
+              <option value="W">W</option><option value="WNW">WNW</option><option value="NW">NW</option><option value="NNW">NNW</option>
+            </select>
+          </div>
+        </div>
+        <div class="row" style="gap:8px;margin-top:8px;">
+          <div style="flex:1;"><label>Visibility (mi)</label><input type="number" step="0.5" min="0" id="ew_visibility" /></div>
+          <div style="flex:1;"><label>Cloud Cover (%)</label><input type="number" step="5" min="0" max="100" id="ew_cloudcover" /></div>
+        </div>
+        <label style="margin-top:8px;">Precipitation</label>
+        <div class="chips" id="ew_precip_chips">
+          <button class="chip" data-precip="none">None</button>
+          <button class="chip" data-precip="rain">🌧 Rain</button>
+          <button class="chip" data-precip="drizzle">🌦 Drizzle</button>
+          <button class="chip" data-precip="snow">❄️ Snow</button>
+          <button class="chip" data-precip="mist">🌫 Mist</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn-ghost" id="editWeatherCancelBtn" style="flex:1;">Cancel</button>
+        <button class="btn-primary" id="editWeatherSaveBtn" style="flex:1;">Save</button>
+      </div>
+    </div>
   </div>
 
   <div class="oc-modal-backdrop" id="newSpotModalBackdrop">
@@ -2502,10 +2546,15 @@
   // Deliberately excludes cloud cover/humidity/UV/visibility/sunrise-sunset — those are
   // real signal but belong in the deeper views (Tag/Deployment History, exports) instead
   // of crowding out the photo/weight/length/notes in a small popup.
+  var PRECIP_TYPE_LABELS = {none: null, rain: '🌧 Rain', drizzle: '🌦 Drizzle', snow: '❄️ Snow', mist: '🌫 Mist'};
+
   function formatWeatherLine(w){
     if (!w) return '';
     var arrow = w.pressureTrend === 'Rising' ? ' ↑' : w.pressureTrend === 'Falling' ? ' ↓' : w.pressureTrend === 'Steady' ? ' →' : '';
-    return w.tempF + '°F, ' + (w.windDirDisplay || w.windDir) + ' ' + w.windMph + 'mph, ' + w.pressureInHg + ' inHg' + arrow;
+    var base = w.tempF + '°F, ' + (w.windDirDisplay || w.windDir) + ' ' + w.windMph + 'mph, ' + w.pressureInHg + ' inHg' + arrow;
+    if (w.precipType && PRECIP_TYPE_LABELS[w.precipType]) base += ', ' + PRECIP_TYPE_LABELS[w.precipType];
+    if (w.manuallyEdited) base += ' <span style="color:var(--accent);" title="Manually corrected">✎</span>';
+    return base;
   }
 
   // The FULL detail line for Tag History, Deployment History, and GIS exports — adds
@@ -3629,6 +3678,7 @@
     } else if (o.weatherStatus === 'unavailable'){
       envLine += (envLine ? ' · ' : '') + '<em style="color:var(--text-dim);">weather unavailable</em>';
     }
+    envLine += (envLine ? ' ' : '') + '<a href="#" class="edit-weather-link" data-type="observation" data-id="'+o.id+'" style="font-size:10.5px;color:var(--text-dim);text-decoration:underline;">' + (o.weatherStatus === 'ok' ? 'edit' : 'fill in') + '</a>';
     var fishFields = '';
     if (isFishSpeciesType(o.type)){
       fishFields =
@@ -3667,11 +3717,110 @@
       '</div>';
   }
 
+  // ---------- Edit Weather (manual correction, per Data Mutability principle) ----------
+  // Once a person corrects or fills in weather manually, it's marked and never silently
+  // overwritten by any future automated process. Shared between observations and hunt
+  // events rather than two separate forms, since both capture the same weather shape.
+  var editWeatherTarget = null; // {type: 'observation'|'huntEvent', id}
+  var selectedPrecipType = 'none';
+
+  function getWeatherEditableRecord(){
+    if (!editWeatherTarget) return null;
+    return editWeatherTarget.type === 'observation'
+      ? observations.filter(function(o){ return o.id === editWeatherTarget.id; })[0]
+      : huntEvents.filter(function(h){ return h.id === editWeatherTarget.id; })[0];
+  }
+
+  function openEditWeatherModal(type, id){
+    editWeatherTarget = {type: type, id: id};
+    var record = getWeatherEditableRecord();
+    if (!record) return;
+    var w = record.weather || {};
+    document.getElementById('ew_temp').value = w.tempF != null ? w.tempF : '';
+    document.getElementById('ew_pressure').value = w.pressureInHg != null ? w.pressureInHg : '';
+    document.getElementById('ew_windspeed').value = w.windMph != null ? w.windMph : '';
+    document.getElementById('ew_winddir').value = w.windDir || 'N';
+    document.getElementById('ew_visibility').value = w.visibilityMi != null ? w.visibilityMi : '';
+    document.getElementById('ew_cloudcover').value = w.cloudCoverPct != null ? w.cloudCoverPct : '';
+    selectedPrecipType = w.precipType || 'none';
+    document.querySelectorAll('#ew_precip_chips .chip').forEach(function(c){
+      c.classList.toggle('active', c.getAttribute('data-precip') === selectedPrecipType);
+    });
+    closeAllModals();
+    document.getElementById('editWeatherModalBackdrop').classList.add('show');
+  }
+
+  document.querySelectorAll('#ew_precip_chips .chip').forEach(function(chip){
+    chip.addEventListener('click', function(){
+      selectedPrecipType = chip.getAttribute('data-precip');
+      document.querySelectorAll('#ew_precip_chips .chip').forEach(function(c){ c.classList.toggle('active', c === chip); });
+    });
+  });
+
+  document.getElementById('editWeatherSaveBtn').addEventListener('click', async function(){
+    var record = getWeatherEditableRecord();
+    if (!record) return;
+    var temp = parseFloat(document.getElementById('ew_temp').value);
+    var pressure = parseFloat(document.getElementById('ew_pressure').value);
+    var windSpeed = parseFloat(document.getElementById('ew_windspeed').value);
+    var windDir = document.getElementById('ew_winddir').value;
+    var visibility = parseFloat(document.getElementById('ew_visibility').value);
+    var cloudCover = parseFloat(document.getElementById('ew_cloudcover').value);
+    var existing = record.weather || {};
+
+    record.weather = {
+      tempF: isNaN(temp) ? null : temp,
+      pressureInHg: isNaN(pressure) ? null : pressure,
+      pressureTrend: existing.pressureTrend || null, // a trend needs a time series - not something a single manual entry can meaningfully set, so it's preserved as-is if it existed
+      windMph: isNaN(windSpeed) ? null : windSpeed,
+      windDir: windDir,
+      windDirDisplay: windDir,
+      visibilityMi: isNaN(visibility) ? null : visibility,
+      cloudCoverPct: isNaN(cloudCover) ? null : cloudCover,
+      precipType: selectedPrecipType,
+      humidityPct: existing.humidityPct != null ? existing.humidityPct : null,
+      uvIndex: existing.uvIndex != null ? existing.uvIndex : null,
+      sunProximity: existing.sunProximity || null,
+      sunPhase: existing.sunPhase || null,
+      manuallyEdited: true,
+      fetchedAt: existing.fetchedAt || Date.now()
+    };
+    record.weatherStatus = 'ok';
+
+    try{
+      if (editWeatherTarget.type === 'observation'){
+        await saveObservation(record);
+        renderAll(); // refreshes map markers/popups so the edited observation shows the new weather
+      } else {
+        await saveHuntEvent(record);
+        renderHuntLog();
+      }
+    }catch(e){ console.error('Outdoor Companion: failed to save edited weather', e); }
+
+    document.getElementById('editWeatherModalBackdrop').classList.remove('show');
+    showToast('Weather updated');
+  });
+
+  document.getElementById('editWeatherCancelBtn').addEventListener('click', function(){
+    document.getElementById('editWeatherModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('editWeatherClose').addEventListener('click', function(){
+    document.getElementById('editWeatherModalBackdrop').classList.remove('show');
+  });
+
   function bindObsPopupActions(popup, id){
     var node = popup.getElement();
     if (!node) return;
     var delBtn = node.querySelector('[data-act="delete-obs"]');
     if (delBtn) delBtn.addEventListener('click', function(){ removeObservation(id); map.closePopup(); });
+
+    var editWeatherLink = node.querySelector('.edit-weather-link');
+    if (editWeatherLink){
+      editWeatherLink.addEventListener('click', function(e){
+        e.preventDefault();
+        openEditWeatherModal('observation', id);
+      });
+    }
 
     // Auto-saves a single field immediately — used for every input below, so nothing
     // ever sits unsaved in the DOM waiting for a final "Save Details" click. This matters
@@ -4149,12 +4298,40 @@
     huntBarTimer = setInterval(refreshLabel, 30000); // updates the elapsed time every 30s
   }
 
+  // Waits briefly for a real GPS fix before giving up. Matters most exactly when it's
+  // most likely to trigger: someone arrives at their stand and immediately taps Start
+  // Hunt, before GPS has acquired a fix — especially slow under tree canopy. Without
+  // this, the app would silently fall back to wherever the map happened to be centered
+  // (which could be nowhere near the real location), causing Property auto-attribution
+  // to silently fail against the wrong coordinates.
+  function waitForGpsFix(timeoutMs){
+    return new Promise(function(resolve){
+      if (lastKnownPos){ resolve(lastKnownPos); return; }
+      var waited = 0;
+      var interval = setInterval(function(){
+        waited += 200;
+        if (lastKnownPos){
+          clearInterval(interval);
+          resolve(lastKnownPos);
+        } else if (waited >= timeoutMs){
+          clearInterval(interval);
+          resolve(null);
+        }
+      }, 200);
+    });
+  }
+
   document.getElementById('huntStartBtn').addEventListener('click', async function(){
     if (activeHuntId){ return; } // already active — the button is hidden in this state anyway, but guard regardless
     var pos = lastKnownPos;
+    if (!pos){ showToast('Getting your location…'); pos = await waitForGpsFix(4000); }
     var lat, lng;
     if (pos){ lat = pos.lat; lng = pos.lng; }
-    else { var c = map.getCenter(); lat = c.lat; lng = c.lng; }
+    else {
+      var c = map.getCenter();
+      lat = c.lat; lng = c.lng;
+      showToast('No GPS fix yet — using the map\'s current view instead, so double-check the Property matched correctly');
+    }
 
     var match = nearestSite(lat, lng, NEAREST_SITE_RADIUS_M);
     var noun = activeModule === 'fishing' ? 'Lake' : 'Property';
@@ -4259,8 +4436,28 @@
     html += '<div style="font-size:12px;font-weight:600;color:'+t.color+';">' + escapeHtml(t.label) + ' <span style="font-weight:400;color:var(--text-dim);">· ' + timeStr + '</span></div>';
     if (parts.length) html += '<div style="font-size:11.5px;color:var(--text-dim);">' + escapeHtml(parts.join(' · ')) + '</div>';
     if (o.notes) html += '<div style="font-size:11.5px;color:var(--text-dim);font-style:italic;">' + escapeHtml(o.notes) + '</div>';
-    html += '</div></div>';
+    html += '</div>';
+    html += '<button class="btn-ghost view-on-map-link" data-obs-id="'+o.id+'" style="font-size:10px;padding:5px 8px;white-space:nowrap;flex-shrink:0;">📍 Map</button>';
+    html += '</div>';
     return html;
+  }
+
+  // Flies to and opens an observation's real, existing map marker (not a temporary
+  // stand-in) — closes the Journal so the map is actually visible, and closes the mobile
+  // sidebar drawer too, matching the same pattern already used for Deployment History's
+  // "View on Map."
+  function flyToObservation(obsId){
+    document.getElementById('huntLogModalBackdrop').classList.remove('show');
+    if (window.innerWidth <= 820) closeSidebar();
+    if (obsMarkers[obsId]){
+      var o = observations.filter(function(x){ return x.id === obsId; })[0];
+      if (o){
+        map.flyTo([o.lat, o.lng], Math.max(map.getZoom(), 16));
+        setTimeout(function(){ obsMarkers[obsId].openPopup(); }, 400);
+      }
+    } else {
+      showToast('That entry isn\'t currently visible on the map (filtered out or off-screen)');
+    }
   }
 
   function renderHuntLog(){
@@ -4348,6 +4545,8 @@
       var envParts = [];
       if (h.moonPhase) envParts.push('🌙 ' + h.moonPhase.name + ' (' + h.moonPhase.illumination + '%)');
       if (h.weatherStatus === 'ok' && h.weather) envParts.push(formatWeatherLine(h.weather));
+      else if (h.weatherStatus === 'unavailable' || h.weatherStatus === 'pending') envParts.push('<em style="color:var(--text-dim);">weather ' + (h.weatherStatus === 'pending' ? 'fetching…' : 'unavailable') + '</em>');
+      envParts.push('<a href="#" class="edit-weather-link" data-type="huntEvent" data-id="'+h.id+'" style="font-size:10.5px;color:var(--text-dim);text-decoration:underline;">' + (h.weatherStatus === 'ok' ? 'edit weather' : 'fill in weather') + '</a>');
       var eventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
       var hasEvents = h.observationIds.length > 0;
       // Find the first photo among this trip's catches/sightings (in order logged) for a
@@ -4392,6 +4591,12 @@
             showPhotoLightbox(img.getAttribute('src'));
           });
         });
+        row.querySelectorAll('.view-on-map-link').forEach(function(btn){
+          btn.addEventListener('click', function(e){
+            e.stopPropagation();
+            flyToObservation(btn.getAttribute('data-obs-id'));
+          });
+        });
       }
 
       // Fix a forgotten Start Hunt — realized late, correct the actual arrival time.
@@ -4425,6 +4630,12 @@
         e.preventDefault();
         e.stopPropagation(); // don't also trigger the row's expand/collapse toggle
         checkinFixRow.style.display = checkinFixRow.style.display === 'none' ? 'flex' : 'none';
+      });
+
+      row.querySelector('.edit-weather-link').addEventListener('click', function(e){
+        e.preventDefault();
+        e.stopPropagation(); // don't also trigger the row's expand/collapse toggle
+        openEditWeatherModal('huntEvent', h.id);
       });
 
       if (!h.checkOutAt){
