@@ -1421,7 +1421,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 54</div>
+    <div id="buildBadge">BUILD 55</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4260,6 +4260,16 @@
   // Manually panning the map turns follow-me off automatically — same behavior as
   // Google Maps' navigation mode — so the user immediately regains full manual control.
   map.on('dragstart', function(){
+    if (followMe){
+      followMe = false;
+      followBtn.classList.remove('active');
+    }
+  });
+  // Same logic applies to zooming — without this, Follow Me's continuous GPS re-centering
+  // (panTo() firing on every new GPS reading, every few seconds) can fire mid-pinch-gesture
+  // and fight with it, which looks exactly like the zoom "popping back out" the instant you
+  // release. Real, reported issue — not a hypothetical.
+  map.on('zoomstart', function(){
     if (followMe){
       followMe = false;
       followBtn.classList.remove('active');
