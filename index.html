@@ -1434,7 +1434,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 57</div>
+    <div id="buildBadge">BUILD 58</div>
     <div id="zoomReadout"><span id="zoomReadoutText">zoom: —</span> <button id="zoomReadoutCopyBtn" title="Copy" style="margin-left:2px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">📋</button></div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
@@ -2018,11 +2018,11 @@
 
   var baseLayers = {
     street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+      maxZoom: 22,
       attribution: '&copy; OpenStreetMap contributors'
     }),
     aerial: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
+      maxZoom: 22,
       attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
     }),
     // USGS Topo — official U.S. government topographic data (The National Map), public
@@ -2030,14 +2030,14 @@
     // Native tiles only go to zoom 16; maxNativeZoom lets Leaflet upscale the last real
     // tile past that instead of showing blank tiles at closer zoom.
     usgstopo: L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19,
+      maxZoom: 22,
       maxNativeZoom: 16,
       attribution: 'USGS The National Map'
     }),
     // OpenTopoMap — worldwide contour/trail-style topo, community-maintained (new server
     // as of Jan 2026), CC-BY-SA, attribution required. Native tiles only go to zoom 17.
     opentopo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
+      maxZoom: 22,
       maxNativeZoom: 17,
       subdomains: 'abc',
       attribution: 'Map data: &copy; OpenStreetMap contributors, SRTM | Map display: &copy; OpenTopoMap (CC-BY-SA)'
@@ -5279,7 +5279,7 @@
       zoomAnimation:false
     });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom:19
+      maxZoom:22
     }).addTo(logLocationMap);
     logLocationMap.on('move', function(){
       var c = logLocationMap.getCenter();
@@ -6391,7 +6391,7 @@
       zoomAnimation:false
     });
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom:19
+      maxZoom:22
     }).addTo(deployMap);
 
     // Update the confirmed position live as the map is panned — the crosshair itself
