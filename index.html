@@ -581,6 +581,19 @@
     box-shadow:0 2px 6px rgba(0,0,0,0.5);
     letter-spacing:0.3px;
   }
+  #zoomReadout{
+    position:fixed;
+    top:115px;right:14px;
+    z-index:2500;
+    background:rgba(20,26,20,0.85);
+    color:#fff;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11px;
+    font-weight:600;
+    padding:4px 9px;
+    border-radius:4px;
+    letter-spacing:0.3px;
+  }
 
   #huntBar{
     position:fixed;
@@ -1421,7 +1434,8 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 55</div>
+    <div id="buildBadge">BUILD 57</div>
+    <div id="zoomReadout"><span id="zoomReadoutText">zoom: —</span> <button id="zoomReadoutCopyBtn" title="Copy" style="margin-left:2px;background:rgba(255,255,255,0.15);color:#fff;border:none;border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;">📋</button></div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4273,6 +4287,33 @@
     if (followMe){
       followMe = false;
       followBtn.classList.remove('active');
+    }
+  });
+
+  // ---------- Diagnostic zoom readout (temporary, for pinning down the reported
+  // pinch-zoom "pops back out" issue) ----------
+  // Shows a short trail of recent zoom levels with which event triggered each one
+  // (start/move/end), so the exact before → during → after sequence during a real pinch
+  // gesture can be read back afterward, rather than relying on a general impression.
+  var zoomTrail = [];
+  function logZoomEvent(label){
+    var z = Math.round(map.getZoom() * 100) / 100;
+    zoomTrail.push(label + ' ' + z);
+    if (zoomTrail.length > 4) zoomTrail.shift();
+    document.getElementById('zoomReadoutText').textContent = 'zoom: ' + zoomTrail.join(' → ');
+  }
+  map.on('zoomstart', function(){ logZoomEvent('start'); });
+  map.on('zoom', function(){ logZoomEvent('·'); });
+  map.on('zoomend', function(){ logZoomEvent('END'); });
+  logZoomEvent('init');
+
+  document.getElementById('zoomReadoutCopyBtn').addEventListener('click', async function(){
+    var text = document.getElementById('zoomReadoutText').textContent;
+    try{
+      await navigator.clipboard.writeText(text);
+      showToast('Copied — paste it in chat');
+    }catch(e){
+      showToast('Could not copy — try selecting the text manually');
     }
   });
 
