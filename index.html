@@ -1413,7 +1413,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 50</div>
+    <div id="buildBadge">BUILD 51</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4452,8 +4452,12 @@
     if (obsMarkers[obsId]){
       var o = observations.filter(function(x){ return x.id === obsId; })[0];
       if (o){
+        // Deliberately does NOT auto-open the marker's popup — that popup is the full
+        // editable catch/sighting form, which immediately covers the map and made it look
+        // like "View on Map" just opened the edit screen instead of actually taking you
+        // anywhere. Flying there and leaving the pin visible actually shows the location;
+        // tapping the pin afterward still opens full details, same as any other pin.
         map.flyTo([o.lat, o.lng], Math.max(map.getZoom(), 16));
-        setTimeout(function(){ obsMarkers[obsId].openPopup(); }, 400);
       }
     } else {
       showToast('That entry isn\'t currently visible on the map (filtered out or off-screen)');
