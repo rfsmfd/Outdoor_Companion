@@ -2046,6 +2046,24 @@
 
   baseLayers.aerial.addTo(map); // aerial default — best for precise pin placement
 
+  // Aerial imagery resolution genuinely varies by location — confirmed directly against
+  // Esri's own service documentation: 0.5m resolution is the standard tier across the US,
+  // with sharper imagery reserved for specific metropolitan areas. Rural land can run out
+  // of real image detail at a zoom level that's still fine in a city — that's not a bug,
+  // just a real limit of the free source data for that specific spot. Rather than guess at
+  // one universal cutoff number (there isn't one — it depends on where you are), this
+  // catches actual tile load failures and explains what's happening, debounced so one
+  // zoom-too-far moment (which fails many tiles at once) shows one message, not a flood.
+  var tileErrorToastAt = 0;
+  function handleTileError(layerLabel){
+    var now = Date.now();
+    if (now - tileErrorToastAt < 4000) return; // debounce - many tiles fail together
+    tileErrorToastAt = now;
+    showToast('No ' + layerLabel + ' imagery at this zoom for this location — try Street or USGS Topo, or zoom out slightly');
+  }
+  baseLayers.aerial.on('tileerror', function(){ handleTileError('aerial'); });
+  baseLayers.street.on('tileerror', function(){ handleTileError('street map'); });
+
   // Mobile browsers (especially iOS Safari) often finish resizing their address-bar
   // chrome after the map has already initialized, leaving Leaflet with a stale/zero
   // container size and a blank map. Force a resize check once things settle, and
