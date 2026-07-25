@@ -1552,7 +1552,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 70</div>
+    <div id="buildBadge">BUILD 72</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4622,10 +4622,13 @@
         linkedObs.forEach(function(o){ galleryWrap.innerHTML += renderBuckGalleryEntry(o); });
       }
       var actionsRow = document.createElement('div');
-      actionsRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+      actionsRow.style.cssText = 'margin-top:8px;';
       actionsRow.innerHTML =
-        '<button class="btn-ghost" data-act="edit-buck" style="flex:1;font-size:11px;">Edit</button>' +
-        '<button class="btn-ghost" data-act="delete-buck" style="flex:1;font-size:11px;color:#D94A2E;">Delete</button>';
+        '<button class="btn-ghost" data-act="edit-buck" style="width:100%;font-size:11px;margin-bottom:5px;">Edit</button>' +
+        '<div style="display:flex;gap:6px;">' +
+          '<button class="btn-ghost" data-act="delete-buck" style="flex:1;font-size:11px;color:#D94A2E;">Delete Profile</button>' +
+          '<button class="btn-ghost" data-act="delete-buck-all" style="flex:1;font-size:11px;color:#D94A2E;">Delete Everything</button>' +
+        '</div>';
       galleryWrap.appendChild(actionsRow);
       row.querySelector('.info').appendChild(galleryWrap);
 
@@ -4659,11 +4662,36 @@
       });
       actionsRow.querySelector('[data-act="delete-buck"]').addEventListener('click', async function(e){
         e.stopPropagation();
-        var confirmed = await showConfirm('Delete "' + profile.name + '"? Linked sightings stay, just become unlinked. This cannot be undone.');
+        var confirmed = await showConfirm('Delete "' + profile.name + '"? The profile goes away, but any sightings tagged to him stay — they just become untagged. This cannot be undone.');
         if (!confirmed) return;
         buckProfiles = buckProfiles.filter(function(p){ return p.id !== profile.id; });
         try{ await deleteBuckProfileStorage(profile.id); }catch(err){ console.error('Outdoor Companion: failed to delete buck profile', err); }
+        // Actually clear the link on any sighting that pointed to this now-deleted
+        // profile — previously this only removed the profile itself, leaving linked
+        // sightings with a dangling buckProfileId that didn't match anything real,
+        // rather than genuinely "becoming unlinked" as the confirmation above claims.
+        var toClear = observations.filter(function(o){ return o.buckProfileId === profile.id; });
+        for (var i=0; i<toClear.length; i++){
+          toClear[i].buckProfileId = null;
+          try{ await saveObservation(toClear[i]); }catch(err){ console.error('Outdoor Companion: failed to unlink sighting after profile delete', err); }
+        }
+        renderAll();
         renderBuckProfilesList();
+      });
+      actionsRow.querySelector('[data-act="delete-buck-all"]').addEventListener('click', async function(e){
+        e.stopPropagation();
+        var linkedCount = observations.filter(function(o){ return o.buckProfileId === profile.id; }).length;
+        var confirmed = await showConfirm('Delete "' + profile.name + '" AND all ' + linkedCount + ' linked ' + (linkedCount === 1 ? 'sighting' : 'sightings') + ' (photos, notes, everything)? This genuinely cannot be undone — a true clean slate, not just untagging.');
+        if (!confirmed) return;
+        buckProfiles = buckProfiles.filter(function(p){ return p.id !== profile.id; });
+        try{ await deleteBuckProfileStorage(profile.id); }catch(err){ console.error('Outdoor Companion: failed to delete buck profile', err); }
+        var toDelete = observations.filter(function(o){ return o.buckProfileId === profile.id; });
+        for (var i=0; i<toDelete.length; i++){
+          try{ await removeObservation(toDelete[i].id); }catch(err){ console.error('Outdoor Companion: failed to delete linked sighting', err); }
+        }
+        renderAll();
+        renderBuckProfilesList();
+        showToast('Profile and all linked sightings deleted');
       });
 
       listEl.appendChild(row);
