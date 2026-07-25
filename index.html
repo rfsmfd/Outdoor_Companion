@@ -1552,7 +1552,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 69</div>
+    <div id="buildBadge">BUILD 70</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2776,9 +2776,9 @@
   // Compares current pressure to the reading from ~3 hours ago (a standard meteorological
   // window for classifying rising/falling/steady) using the hourly series Open-Meteo
   // returns alongside the current conditions in the same request.
-  function getPressureTrend(currentHpa, hourlyTimes, hourlyPressures){
+  function getPressureTrend(currentHpa, hourlyTimes, hourlyPressures, referenceMs){
     if (!hourlyTimes || !hourlyPressures || hourlyTimes.length === 0) return null;
-    var threeHoursAgoMs = Date.now() - 3*60*60*1000;
+    var threeHoursAgoMs = (referenceMs != null ? referenceMs : Date.now()) - 3*60*60*1000;
     var closestIdx = -1, closestDiff = Infinity;
     for (var i=0; i<hourlyTimes.length; i++){
       var diff = Math.abs(new Date(hourlyTimes[i]).getTime() - threeHoursAgoMs);
@@ -2791,13 +2791,15 @@
     return 'Steady';
   }
 
-  // Detects a meaningful wind direction shift vs. ~3 hours ago — actionable in the same
-  // way as pressure trend (a shifting wind can put your scent somewhere new, or signal a
-  // front moving through). 30° threshold filters normal measurement noise between
-  // adjacent compass points (each 22.5° apart) from a genuine shift.
-  function getWindShift(currentDeg, hourlyTimes, hourlyDirs, currentCompass){
+  // Detects a meaningful wind direction shift vs. ~3 hours before the reference time —
+  // actionable in the same way as pressure trend (a shifting wind can put your scent
+  // somewhere new, or signal a front moving through). 30° threshold filters normal
+  // measurement noise between adjacent compass points (each 22.5° apart) from a genuine
+  // shift. referenceMs defaults to now, but accepts an explicit past time so this same
+  // logic works for historical weather too, not just live current conditions.
+  function getWindShift(currentDeg, hourlyTimes, hourlyDirs, currentCompass, referenceMs){
     if (!hourlyTimes || !hourlyDirs || hourlyTimes.length === 0 || currentDeg == null) return currentCompass;
-    var threeHoursAgoMs = Date.now() - 3*60*60*1000;
+    var threeHoursAgoMs = (referenceMs != null ? referenceMs : Date.now()) - 3*60*60*1000;
     var closestIdx = -1, closestDiff = Infinity;
     for (var i=0; i<hourlyTimes.length; i++){
       var diff = Math.abs(new Date(hourlyTimes[i]).getTime() - threeHoursAgoMs);
@@ -2889,6 +2891,68 @@
       };
     }catch(e){
       return null; // no signal, timeout, or API hiccup — caller treats this as "unavailable"
+    }
+  }
+
+
+  // Real historical weather for a specific past date and location — confirmed directly
+  // against Open-Meteo's own documentation (the same provider already used for current
+  // conditions) rather than assumed. Genuinely useful for backdated sightings (e.g. a
+  // friend's forwarded buck photo with a known date), not just "unavailable." One honest,
+  // confirmed limitation: the archive API doesn't offer UV index or visibility as hourly
+  // variables (forecast-only concepts) — those come back null here, unlike current weather.
+  async function fetchHistoricalWeather(lat, lng, targetMs){
+    try{
+      var d = new Date(targetMs);
+      var dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+      var url = 'https://archive-api.open-meteo.com/v1/archive?latitude=' + lat + '&longitude=' + lng +
+        '&start_date=' + dateStr + '&end_date=' + dateStr +
+        '&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation,cloud_cover,relative_humidity_2m' +
+        '&daily=sunrise,sunset' +
+        '&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto';
+      var controller = new AbortController();
+      var timeoutId = setTimeout(function(){ controller.abort(); }, 10000);
+      var res = await fetch(url, {signal: controller.signal});
+      clearTimeout(timeoutId);
+      if (!res.ok) return null;
+      var data = await res.json();
+      if (!data || !data.hourly || !data.hourly.time || data.hourly.time.length === 0) return null;
+      // Find the hourly entry closest to the actual event time (archive data is hourly,
+      // not to-the-minute, so this finds the nearest available hour).
+      var closestIdx = -1, closestDiff = Infinity;
+      for (var i=0; i<data.hourly.time.length; i++){
+        var diff = Math.abs(new Date(data.hourly.time[i]).getTime() - targetMs);
+        if (diff < closestDiff){ closestDiff = diff; closestIdx = i; }
+      }
+      if (closestIdx === -1) return null;
+      var h = data.hourly;
+      var pressureHpa = h.surface_pressure[closestIdx] != null ? Math.round(h.surface_pressure[closestIdx]) : null;
+      var pressureTrend = getPressureTrend(h.surface_pressure[closestIdx], h.time, h.surface_pressure, targetMs);
+      var windDirDeg = h.wind_direction_10m[closestIdx];
+      var windDirCompass = windDirDeg != null ? degreesToCompass(windDirDeg) : null;
+      var windDirDisplay = getWindShift(windDirDeg, h.time, h.wind_direction_10m, windDirCompass, targetMs);
+      var sunrise = (data.daily && data.daily.sunrise) ? data.daily.sunrise[0] : null;
+      var sunset = (data.daily && data.daily.sunset) ? data.daily.sunset[0] : null;
+      return {
+        tempF: h.temperature_2m[closestIdx] != null ? Math.round(h.temperature_2m[closestIdx]) : null,
+        windMph: h.wind_speed_10m[closestIdx] != null ? Math.round(h.wind_speed_10m[closestIdx]) : null,
+        windDir: windDirCompass,
+        windDirDisplay: windDirDisplay,
+        pressureHpa: pressureHpa,
+        pressureInHg: pressureHpa != null ? hpaToInHg(pressureHpa) : null,
+        pressureTrend: pressureTrend,
+        precipitation: h.precipitation[closestIdx],
+        cloudCoverPct: h.cloud_cover[closestIdx] != null ? Math.round(h.cloud_cover[closestIdx]) : null,
+        humidityPct: h.relative_humidity_2m[closestIdx] != null ? Math.round(h.relative_humidity_2m[closestIdx]) : null,
+        uvIndex: null, // not available from the historical archive - confirmed, not a bug
+        visibilityMi: null, // same
+        sunProximity: sunrise ? getSunProximity(targetMs, sunrise, sunset) : null,
+        sunPhase: sunrise ? getSunPhaseBucket(targetMs, sunrise, sunset) : null,
+        isHistorical: true, // lets the UI note this came from the archive, not live conditions
+        fetchedAt: Date.now()
+      };
+    }catch(e){
+      return null;
     }
   }
 
@@ -3197,6 +3261,13 @@
   }
 
   function fmtCoord(n){ return n.toFixed(5); }
+  // Formats a timestamp for a <input type="datetime-local"> value, in LOCAL time (not
+  // UTC) — matches what that input type expects and what a person actually reads.
+  function dateTimeToLocalInputValue(ms){
+    var d = new Date(ms);
+    var pad = function(n){ return String(n).padStart(2,'0'); };
+    return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
 
   // ---------- storage (works both inside chat preview and as a standalone file) ----------
   var hasChatStorage = (typeof window.storage !== 'undefined' && window.storage !== null);
@@ -4006,6 +4077,9 @@
           '<img src="'+o.photoThumb+'" class="popup-photo-thumb" style="width:100%;max-height:140px;object-fit:cover;border-radius:6px;margin-bottom:8px;cursor:pointer;" />' : '') +
         '<input type="file" accept="image/*" id="o_photo_input" style="display:none;" />' +
         '<button class="btn-ghost" id="o_photo_btn" type="button" style="width:100%;margin-bottom:10px;">' + (o.photoThumb ? '📷 Retake / Choose Photo' : '📷 Take / Choose Photo') + '</button>' +
+        '<label>Date & Time <span style="font-weight:400;color:var(--text-dim);">(when this actually happened — matters for accurate analytics)</span></label>' +
+        '<input type="datetime-local" id="o_datetime" value="'+dateTimeToLocalInputValue(o.createdAt)+'" />' +
+        '<div id="o_datetime_note" style="font-size:10.5px;color:var(--text-dim);margin-bottom:8px;"></div>' +
         '<label>Buck Profile <span style="font-weight:400;color:var(--text-dim);">(optional — track this specific buck over time)</span></label>' +
         '<div id="o_buckprofile_list"></div>' +
         '<input type="hidden" id="o_buckprofile" value="'+(o.buckProfileId || '')+'" />' +
@@ -4278,6 +4352,21 @@
         if (!file) return;
         photoBtn.textContent = 'Compressing…';
         try{
+          // Attempt EXIF extraction from the ORIGINAL file before compression — canvas-based
+          // compression re-encodes the image and strips metadata, so this has to happen
+          // first. Reuses the same extractExifTimestamp already built for camera SD-card
+          // imports — real phone photos usually have this; messaging/email apps sometimes
+          // strip it in transit, so this is a best-effort attempt with a manual fallback,
+          // not a guarantee.
+          var dtField = node.querySelector('#o_datetime');
+          if (dtField){
+            var exifMs = await extractExifTimestamp(file);
+            if (exifMs){
+              dtField.value = dateTimeToLocalInputValue(exifMs);
+              document.getElementById('o_datetime_note') && (node.querySelector('#o_datetime_note').textContent = '📷 Detected from photo');
+              await applyObservationDateChange(exifMs);
+            }
+          }
           var compressed = await compressImageToBase64(file, 500, 0.6);
           var existingImg = node.querySelector('img');
           if (existingImg){
@@ -4300,6 +4389,36 @@
         }
       });
     }
+
+    // Shared by both EXIF auto-detection and manual date entry — updates createdAt,
+    // recalculates moon phase and solunar period (pure local calculations, always
+    // accurate for any date), and fetches real historical weather for that specific date
+    // and location rather than showing current conditions that would actually be wrong.
+    async function applyObservationDateChange(newMs){
+      var o = observations.filter(function(x){ return x.id === id; })[0];
+      if (!o) return;
+      o.createdAt = newMs;
+      o.moonPhase = getMoonPhase(new Date(newMs));
+      o.solunarPeriod = classifyEventSolunarPeriod(new Date(newMs), o.lat, o.lng);
+      o.weatherStatus = 'pending';
+      try{ await saveObservation(o); }catch(e){ console.error('Outdoor Companion: failed to save date change', e); }
+      renderAll();
+      fetchHistoricalWeather(o.lat, o.lng, newMs).then(function(weather){
+        o.weather = weather;
+        o.weatherStatus = weather ? 'ok' : 'unavailable';
+        saveObservation(o).catch(function(e){ console.error('Outdoor Companion: failed to save historical weather', e); });
+        renderAll();
+      });
+    }
+
+    var dtField = node.querySelector('#o_datetime');
+    if (dtField) dtField.addEventListener('change', function(){
+      var noteEl = node.querySelector('#o_datetime_note');
+      if (noteEl) noteEl.textContent = '';
+      var parsed = new Date(dtField.value);
+      if (isNaN(parsed.getTime())) return;
+      applyObservationDateChange(parsed.getTime());
+    });
 
     var saveBtn = node.querySelector('[data-act="save-obs"]');
     if (saveBtn) saveBtn.addEventListener('click', function(){
