@@ -1546,7 +1546,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 61</div>
+    <div id="buildBadge">BUILD 62</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3163,6 +3163,22 @@
     try{ window.localStorage.setItem(LS_KEY, JSON.stringify(list)); }catch(e){}
   }
 
+  // Fixes a real, confirmed data-integrity issue: sites and deployments were found to
+  // contain genuine duplicate records under the same id (confirmed directly from a real
+  // exported backup, not suspected) — likely a storage-layer quirk on read, not a save-
+  // logic bug, since the app's own save functions correctly update-in-place by id.
+  // Symptom this caused: rendering created a marker for each duplicate entry, but only
+  // ever tracked the last one under that id, silently orphaning the earlier marker on the
+  // map forever — immune to every filter, since nothing was tracking it anymore. Applied
+  // right after load so it fixes existing corrupted data for anyone who already has it,
+  // not just prevents new occurrences. Keeps the last-encountered copy (matching normal
+  // "last write wins" semantics) when true duplicates exist.
+  function dedupeById(arr){
+    var seen = {};
+    arr.forEach(function(item){ if (item && item.id) seen[item.id] = item; });
+    return Object.keys(seen).map(function(id){ return seen[id]; });
+  }
+
   async function loadSites(){
     if (hasChatStorage){
       try{
@@ -3175,12 +3191,12 @@
             if (r && r.value) loaded.push(JSON.parse(r.value));
           }catch(e){}
         }
-        sites = loaded;
+        sites = dedupeById(loaded);
       }catch(e){
         sites = [];
       }
     } else {
-      sites = localLoadAll();
+      sites = dedupeById(localLoadAll());
     }
     renderAll();
   }
@@ -3425,10 +3441,10 @@
         for (var i=0;i<keys.length;i++){
           try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
         }
-        deployments = loaded;
+        deployments = dedupeById(loaded);
       }catch(e){ deployments = []; }
     } else {
-      deployments = depLocalLoadAll();
+      deployments = dedupeById(depLocalLoadAll());
     }
   }
 
@@ -4980,11 +4996,11 @@
         alert('That doesn\'t look like a valid Outdoor Companion backup file.');
         return;
       }
-      sites = backup.sites || [];
-      observations = backup.observations || [];
-      cameras = backup.cameras || [];
-      deployments = backup.deployments || [];
-      properties = backup.properties || [];
+      sites = dedupeById(backup.sites || []);
+      observations = dedupeById(backup.observations || []);
+      cameras = dedupeById(backup.cameras || []);
+      deployments = dedupeById(backup.deployments || []);
+      properties = dedupeById(backup.properties || []);
       // Persist every restored record back to storage, not just memory.
       for (var i=0;i<sites.length;i++){ await saveSite(sites[i]); }
       for (var j=0;j<observations.length;j++){ await saveObservation(observations[j]); }
