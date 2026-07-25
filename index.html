@@ -1464,6 +1464,7 @@
       <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
       <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
       <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
+      <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
     </div>
 
     <div id="propertyRow">
@@ -1551,7 +1552,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 65</div>
+    <div id="buildBadge">BUILD 66</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1761,6 +1762,23 @@
       <h3>Trails <button class="close-x" id="manageTrailsClose">&times;</button></h3>
       <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Every trail you've recorded and saved. Tap the visibility toggle to show/hide one on the map, or Edit to rename/restyle it.</p>
       <div id="trailsList"></div>
+    </div>
+  </div>
+
+  <!-- Buck Gallery — named profiles for individual bucks, each showing every sighting
+       linked to it. Built to also work with future bulk-imported photos, once persistent
+       import exists — a sighting's buckProfileId link doesn't care where the photo came
+       from. -->
+  <div class="oc-modal-backdrop" id="buckGalleryModalBackdrop">
+    <div class="oc-modal">
+      <h3>🦌 Buck Gallery <button class="close-x" id="buckGalleryClose">&times;</button></h3>
+      <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Track individual bucks over time — tag any sighting (yours, or a photo a friend sends you) to a profile, and see everything linked to him here.</p>
+      <div id="buckProfilesList" style="margin-bottom:14px;"></div>
+      <div class="form-pop">
+        <label>Add New Buck Profile</label>
+        <input type="text" id="newBuckProfileName" placeholder='e.g. "Left droptine 10-pointer"' />
+        <button class="btn-primary" id="addBuckProfileBtn" style="width:100%;margin-top:8px;">+ Create Profile</button>
+      </div>
     </div>
   </div>
 
@@ -2100,6 +2118,7 @@
   var cameras = [];      // {id, name, createdAt, currentSiteId, lastDeployedAt}
   var properties = [];   // {id, name, notes, createdAt}
   var trails = [];       // {id, name, type, module, points, color, lineStyle, createdAt, notes}
+  var buckProfiles = []; // {id, name, notes, createdAt} — hunting-only; sightings optionally link to one via buckProfileId
   var huntEvents = [];   // {id, module, siteId, lat, lng, checkInAt, checkOutAt, weather, weatherStatus, moonPhase, observationIds}
   var activeHuntId = null; // the currently in-progress hunt/trip, or null if none active
   var journalFilterRange = 'all'; // 'all' | 'week' | 'month' | 'custom' — Journal totals time filter
@@ -3293,6 +3312,47 @@
   var PROP_LS_KEY = 'outdoor_companion_properties';
   var HUNT_LS_KEY = 'outdoor_companion_hunt_events';
   var TRAIL_LS_KEY = 'outdoor_companion_trails';
+  var BUCK_LS_KEY = 'outdoor_companion_buck_profiles';
+
+  function buckLocalLoadAll(){
+    try{ var raw = window.localStorage.getItem(BUCK_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
+  }
+  function buckLocalSaveAll(list){
+    try{ window.localStorage.setItem(BUCK_LS_KEY, JSON.stringify(list)); }catch(e){}
+  }
+  async function loadBuckProfiles(){
+    if (hasChatStorage){
+      try{
+        var res = await window.storage.list('buck:', false);
+        var keys = (res && res.keys) ? res.keys : [];
+        var loaded = [];
+        for (var i=0;i<keys.length;i++){
+          try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
+        }
+        buckProfiles = dedupeById(loaded);
+      }catch(e){ buckProfiles = []; }
+    } else {
+      buckProfiles = dedupeById(buckLocalLoadAll());
+    }
+  }
+  async function saveBuckProfile(profile){
+    if (hasChatStorage){
+      await window.storage.set('buck:'+profile.id, JSON.stringify(profile), false);
+    } else {
+      var all = buckLocalLoadAll();
+      var idx = all.findIndex(function(p){ return p.id === profile.id; });
+      if (idx >= 0) all[idx] = profile; else all.push(profile);
+      buckLocalSaveAll(all);
+    }
+  }
+  async function deleteBuckProfileStorage(id){
+    if (hasChatStorage){
+      try{ await window.storage.delete('buck:'+id, false); }catch(e){}
+    } else {
+      var all = buckLocalLoadAll().filter(function(p){ return p.id !== id; });
+      buckLocalSaveAll(all);
+    }
+  }
 
   function trailLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(TRAIL_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
@@ -3911,6 +3971,21 @@
         '<input type="file" accept="image/*" id="o_photo_input" style="display:none;" />' +
         '<button class="btn-ghost" id="o_photo_btn" type="button" style="width:100%;margin-bottom:10px;">' + (o.photoThumb ? '📷 Retake / Choose Photo' : '📷 Take / Choose Photo') + '</button>';
     }
+    var huntFields = '';
+    if (activeModule === 'hunting'){
+      var buckOptions = '<option value="">— None —</option>' + buckProfiles.map(function(b){
+        return '<option value="'+b.id+'"'+(o.buckProfileId === b.id ? ' selected' : '')+'>'+escapeHtml(b.name)+'</option>';
+      }).join('');
+      huntFields =
+        '<label>Photo</label>' +
+        (o.photoThumb ?
+          '<img src="'+o.photoThumb+'" class="popup-photo-thumb" style="width:100%;max-height:140px;object-fit:cover;border-radius:6px;margin-bottom:8px;cursor:pointer;" />' : '') +
+        '<input type="file" accept="image/*" id="o_photo_input" style="display:none;" />' +
+        '<button class="btn-ghost" id="o_photo_btn" type="button" style="width:100%;margin-bottom:10px;">' + (o.photoThumb ? '📷 Retake / Choose Photo' : '📷 Take / Choose Photo') + '</button>' +
+        '<label>Buck Profile <span style="font-weight:400;color:var(--text-dim);">(optional — track this specific buck over time)</span></label>' +
+        '<select id="o_buckprofile">' + buckOptions + '</select>' +
+        '<button class="btn-ghost" id="o_newbuckprofile_btn" type="button" style="width:100%;margin-top:6px;font-size:11px;">+ New Buck Profile</button>';
+    }
     return '' +
       '<div class="pop form-pop">' +
         '<h3 style="margin:0 0 2px 0;">'+t.label+'</h3>' +
@@ -3921,6 +3996,7 @@
         '<label>Count</label>' +
         '<input type="number" min="1" step="1" id="o_count" value="'+(o.count || 1)+'" />' +
         fishFields +
+        huntFields +
         '<label>Details (optional)</label>' +
         '<textarea id="o_notes" placeholder="e.g. 8-pointer, browsing near the fence line">'+escapeHtml(o.notes||'')+'</textarea>' +
         '<div class="row">' +
@@ -4084,6 +4160,26 @@
       autoSaveField(function(o){ o.lureColor = lureColorEl.value.trim() || null; });
     });
 
+    var buckProfileEl = node.querySelector('#o_buckprofile');
+    if (buckProfileEl) buckProfileEl.addEventListener('change', function(){
+      autoSaveField(function(o){ o.buckProfileId = buckProfileEl.value || null; });
+    });
+    var newBuckProfileBtn = node.querySelector('#o_newbuckprofile_btn');
+    if (newBuckProfileBtn) newBuckProfileBtn.addEventListener('click', async function(){
+      var name = await showPrompt('Name this buck (e.g. "Left droptine 10-pointer")', '');
+      if (!name) return;
+      var profile = {id: uid(), name: name, notes: '', createdAt: Date.now()};
+      buckProfiles.push(profile);
+      try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save new buck profile', e); }
+      var opt = document.createElement('option');
+      opt.value = profile.id;
+      opt.textContent = profile.name;
+      opt.selected = true;
+      buckProfileEl.appendChild(opt);
+      autoSaveField(function(o){ o.buckProfileId = profile.id; });
+      showToast('Buck profile created and linked');
+    });
+
     var photoBtn = node.querySelector('#o_photo_btn');
     var photoInput = node.querySelector('#o_photo_input');
     if (photoBtn && photoInput){
@@ -4209,6 +4305,7 @@
       document.getElementById('cameraToolbar').style.display = (activeTab === 'cameras') ? 'flex' : 'none';
       document.getElementById('cameraTip').style.display = (activeTab === 'cameras') ? 'block' : 'none';
       updateTagHistoryButtonVisibility();
+      updateBuckGalleryButtonVisibility();
       renderActiveList();
     });
   });
@@ -4217,6 +4314,126 @@
     document.getElementById('tagHistoryBtn').style.display =
       (activeTab === 'log' && activeModule === 'fishing') ? 'block' : 'none';
   }
+
+  // ---------- Buck Gallery ----------
+  function updateBuckGalleryButtonVisibility(){
+    document.getElementById('buckGalleryBtn').style.display = activeModule === 'hunting' ? 'block' : 'none';
+  }
+
+  // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
+  // sends you, chosen from the camera roll like any other observation photo) optionally
+  // linked via observation.buckProfileId. Deliberately simple, generic linking — a future
+  // persistent bulk photo import (see Cloud Migration notes) can adopt the exact same
+  // buckProfileId pattern on its own photo records, so a buck's gallery would show photos
+  // from both sources together, in one place, without redesigning anything here.
+  function renderBuckGalleryEntry(o){
+    var t = getActiveObsTypes()[o.type] || getFallbackTypeEntry(true);
+    var dateStr = new Date(o.createdAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
+    var html = '<div style="display:flex;gap:8px;padding:8px 0;border-top:1px solid var(--line);align-items:flex-start;">';
+    if (o.photoThumb) html += '<img src="'+o.photoThumb+'" class="journal-photo-thumb" style="width:52px;height:52px;object-fit:cover;border-radius:5px;flex-shrink:0;cursor:pointer;" />';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-size:12px;font-weight:600;color:'+t.color+';">' + escapeHtml(t.label) + ' <span style="font-weight:400;color:var(--text-dim);">· ' + escapeHtml(dateStr) + '</span></div>';
+    if (o.notes) html += '<div style="font-size:11.5px;color:var(--text-dim);font-style:italic;">' + escapeHtml(o.notes) + '</div>';
+    html += '</div>';
+    html += '<button class="btn-ghost view-on-map-link" data-obs-id="'+o.id+'" style="font-size:10px;padding:5px 8px;white-space:nowrap;flex-shrink:0;">📍 Map</button>';
+    html += '</div>';
+    return html;
+  }
+
+  function renderBuckProfilesList(){
+    var listEl = document.getElementById('buckProfilesList');
+    if (buckProfiles.length === 0){
+      listEl.innerHTML = '<div class="empty" style="padding:16px 0;">No buck profiles yet. Create one below, then link any sighting to it from that sighting\'s detail popup.</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    buckProfiles.forEach(function(profile){
+      var linkedObs = observations.filter(function(o){ return o.buckProfileId === profile.id; })
+        .sort(function(a,b){ return b.createdAt - a.createdAt; });
+      var row = document.createElement('div');
+      row.className = 'history-row';
+      row.style.cursor = 'pointer';
+      row.innerHTML =
+        '<div class="info">' +
+          '<div class="dt" style="display:flex;align-items:center;justify-content:space-between;">' +
+            '<span>' + escapeHtml(profile.name) + '</span>' +
+            '<span class="detail-chevron" style="color:var(--accent);font-size:14px;">▸</span>' +
+          '</div>' +
+          '<div class="co">' + linkedObs.length + ' ' + (linkedObs.length === 1 ? 'sighting' : 'sightings') + '</div>' +
+        '</div>';
+      var galleryWrap = document.createElement('div');
+      galleryWrap.style.display = 'none';
+      if (linkedObs.length === 0){
+        galleryWrap.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:8px 0;">No sightings linked yet.</div>';
+      } else {
+        linkedObs.forEach(function(o){ galleryWrap.innerHTML += renderBuckGalleryEntry(o); });
+      }
+      var actionsRow = document.createElement('div');
+      actionsRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
+      actionsRow.innerHTML =
+        '<button class="btn-ghost" data-act="rename-buck" style="flex:1;font-size:11px;">Rename</button>' +
+        '<button class="btn-ghost" data-act="delete-buck" style="flex:1;font-size:11px;color:#D94A2E;">Delete</button>';
+      galleryWrap.appendChild(actionsRow);
+      row.querySelector('.info').appendChild(galleryWrap);
+
+      row.addEventListener('click', function(){
+        var opening = galleryWrap.style.display === 'none';
+        galleryWrap.style.display = opening ? 'block' : 'none';
+        row.querySelector('.detail-chevron').textContent = opening ? '▾' : '▸';
+      });
+      galleryWrap.querySelectorAll('.view-on-map-link').forEach(function(btn){
+        btn.addEventListener('click', function(e){
+          e.stopPropagation();
+          document.getElementById('buckGalleryModalBackdrop').classList.remove('show');
+          flyToObservation(btn.getAttribute('data-obs-id'));
+        });
+      });
+      galleryWrap.querySelectorAll('.journal-photo-thumb').forEach(function(img){
+        img.addEventListener('click', function(e){
+          e.stopPropagation();
+          showPhotoLightbox(img.getAttribute('src'));
+        });
+      });
+      actionsRow.querySelector('[data-act="rename-buck"]').addEventListener('click', async function(e){
+        e.stopPropagation();
+        var newName = await showPrompt('Rename this buck profile', profile.name);
+        if (!newName) return;
+        profile.name = newName;
+        try{ await saveBuckProfile(profile); }catch(err){ console.error('Outdoor Companion: failed to rename buck profile', err); }
+        renderBuckProfilesList();
+      });
+      actionsRow.querySelector('[data-act="delete-buck"]').addEventListener('click', async function(e){
+        e.stopPropagation();
+        var confirmed = await showConfirm('Delete "' + profile.name + '"? Linked sightings stay, just become unlinked. This cannot be undone.');
+        if (!confirmed) return;
+        buckProfiles = buckProfiles.filter(function(p){ return p.id !== profile.id; });
+        try{ await deleteBuckProfileStorage(profile.id); }catch(err){ console.error('Outdoor Companion: failed to delete buck profile', err); }
+        renderBuckProfilesList();
+      });
+
+      listEl.appendChild(row);
+    });
+  }
+
+  document.getElementById('buckGalleryBtn').addEventListener('click', function(){
+    renderBuckProfilesList();
+    closeAllModals();
+    document.getElementById('buckGalleryModalBackdrop').classList.add('show');
+  });
+  document.getElementById('buckGalleryClose').addEventListener('click', function(){
+    document.getElementById('buckGalleryModalBackdrop').classList.remove('show');
+  });
+  document.getElementById('addBuckProfileBtn').addEventListener('click', async function(){
+    var nameInput = document.getElementById('newBuckProfileName');
+    var name = nameInput.value.trim();
+    if (!name){ showToast('Enter a name first'); return; }
+    var profile = {id: uid(), name: name, notes: '', createdAt: Date.now()};
+    buckProfiles.push(profile);
+    try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save new buck profile', e); }
+    nameInput.value = '';
+    renderBuckProfilesList();
+    showToast('Buck profile created');
+  });
 
   function escapeHtml(str){
     var d = document.createElement('div');
@@ -5306,6 +5523,7 @@
     renderObsMarkers();
     renderActiveList();
     updateTagHistoryButtonVisibility();
+    updateBuckGalleryButtonVisibility();
     updateActiveHuntBar();
     document.getElementById('huntLogBtn').textContent = '📋 ' + (activeModule === 'fishing' ? 'Fish' : 'Hunt') + ' Journal';
     updateWindButtonTitle();
@@ -5594,6 +5812,7 @@
 
   renderChips();
   renderObsTypeToggles();
+  updateBuckGalleryButtonVisibility();
   (async function initLoadAndUrlCheck(){
     await loadSites();
     await loadObservations();
@@ -5602,6 +5821,7 @@
     await loadProperties();
     await loadHuntEvents();
     await loadTrails();
+    await loadBuckProfiles();
     renderAllSavedTrails();
     // If a hunt was left active from a previous session (app closed without tapping End
     // Hunt), pick that state back up rather than silently losing track of it.
