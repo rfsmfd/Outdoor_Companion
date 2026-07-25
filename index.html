@@ -1552,7 +1552,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 68</div>
+    <div id="buildBadge">BUILD 69</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1621,6 +1621,8 @@
           </svg>
         </div>
       </div>
+      <button class="btn-ghost" id="logLocationJumpToPropertyBtn" type="button" style="width:100%;margin-bottom:8px;font-size:11px;">🏡 Jump to Property</button>
+      <div id="logLocationPropertyList" style="display:none;margin-bottom:8px;max-height:140px;overflow-y:auto;"></div>
       <button class="btn-primary" id="logLocationUseMyLocationBtn" style="width:100%;margin-bottom:8px;background:#3B9EFF;color:#0A1A2E;">📍 Use My Location (fast)</button>
       <button class="btn-primary" id="logLocationConfirmBtn" style="width:100%;margin-bottom:8px;">Confirm This Spot</button>
       <button class="btn-ghost" id="logLocationCancelBtn" style="width:100%;">Cancel</button>
@@ -5853,6 +5855,7 @@
     document.getElementById('logLocationTypeName').textContent = 'Adjust Location';
     logLocationPos = {lat: o.lat, lng: o.lng};
     document.getElementById('logLocationCoords').textContent = fmtCoord(o.lat) + ', ' + fmtCoord(o.lng);
+    document.getElementById('logLocationPropertyList').style.display = 'none';
     map.closePopup();
     closeAllModals();
     document.getElementById('logLocationModalBackdrop').classList.add('show');
@@ -5863,6 +5866,50 @@
     }, 50);
   }
 
+  // Jump to Property — a real gap the founder identified: adding a friend's forwarded
+  // photo usually happens from home, potentially 30+ miles from the actual property, and
+  // the crosshair defaulting to current GPS meant manually panning that whole distance by
+  // hand. Flying straight to a saved Property's own view first, then fine-tuning locally
+  // from there, is a much smaller and more realistic adjustment. Deliberately does NOT
+  // change the default behavior (still opens on current GPS as always) — this is an
+  // explicit, optional jump, not a new default.
+  var lastJumpedPropertyId = null;
+  function renderLogLocationPropertyList(){
+    var listEl = document.getElementById('logLocationPropertyList');
+    var relevant = properties.filter(function(p){ return !p.module || p.module === activeModule; });
+    if (lastJumpedPropertyId){
+      relevant.sort(function(a,b){
+        if (a.id === lastJumpedPropertyId) return -1;
+        if (b.id === lastJumpedPropertyId) return 1;
+        return 0;
+      });
+    }
+    if (relevant.length === 0){
+      listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:6px 0;">No saved properties yet for this mode.</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    relevant.forEach(function(p){
+      var btn = document.createElement('button');
+      btn.className = 'btn-ghost';
+      btn.type = 'button';
+      btn.style.cssText = 'width:100%;margin-bottom:5px;font-size:11px;text-align:left;' + (p.id === lastJumpedPropertyId ? 'border-color:var(--accent);' : '');
+      btn.textContent = (p.id === lastJumpedPropertyId ? '★ ' : '') + p.name;
+      btn.addEventListener('click', function(){
+        lastJumpedPropertyId = p.id;
+        logLocationMap.setView([p.centerLat, p.centerLng], p.zoom || 15);
+        document.getElementById('logLocationPropertyList').style.display = 'none';
+      });
+      listEl.appendChild(btn);
+    });
+  }
+  document.getElementById('logLocationJumpToPropertyBtn').addEventListener('click', function(){
+    var listEl = document.getElementById('logLocationPropertyList');
+    var opening = listEl.style.display === 'none';
+    if (opening) renderLogLocationPropertyList();
+    listEl.style.display = opening ? 'block' : 'none';
+  });
+
   function logObservation(type){
     pendingLogType = type;
     var t = getActiveObsTypes()[type];
@@ -5870,6 +5917,7 @@
     var pos = lastKnownPos || (function(){ var c = map.getCenter(); return {lat:c.lat, lng:c.lng}; })();
     logLocationPos = {lat: pos.lat, lng: pos.lng};
     document.getElementById('logLocationCoords').textContent = fmtCoord(pos.lat) + ', ' + fmtCoord(pos.lng);
+    document.getElementById('logLocationPropertyList').style.display = 'none';
     closeSheet();
     closeAllModals();
     document.getElementById('logLocationModalBackdrop').classList.add('show');
