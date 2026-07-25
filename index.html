@@ -1546,7 +1546,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 62</div>
+    <div id="buildBadge">BUILD 63</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3244,12 +3244,12 @@
             if (r && r.value) loaded.push(JSON.parse(r.value));
           }catch(e){}
         }
-        observations = loaded;
+        observations = dedupeById(loaded);
       }catch(e){
         observations = [];
       }
     } else {
-      observations = obsLocalLoadAll();
+      observations = dedupeById(obsLocalLoadAll());
     }
     renderObsMarkers();
     if (activeTab === 'log') renderLogList();
@@ -3303,10 +3303,10 @@
         for (var i=0;i<keys.length;i++){
           try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
         }
-        trails = loaded;
+        trails = dedupeById(loaded);
       }catch(e){ trails = []; }
     } else {
-      trails = trailLocalLoadAll();
+      trails = dedupeById(trailLocalLoadAll());
     }
   }
   async function saveTrail(trail){
@@ -3343,10 +3343,10 @@
         for (var i=0;i<keys.length;i++){
           try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
         }
-        huntEvents = loaded;
+        huntEvents = dedupeById(loaded);
       }catch(e){ huntEvents = []; }
     } else {
-      huntEvents = huntLocalLoadAll();
+      huntEvents = dedupeById(huntLocalLoadAll());
     }
   }
   async function saveHuntEvent(hunt){
@@ -3388,10 +3388,10 @@
         for (var i=0;i<keys.length;i++){
           try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
         }
-        properties = loaded;
+        properties = dedupeById(loaded);
       }catch(e){ properties = []; }
     } else {
-      properties = propLocalLoadAll();
+      properties = dedupeById(propLocalLoadAll());
     }
     renderPropertySelect();
   }
@@ -3424,10 +3424,10 @@
         for (var i=0;i<keys.length;i++){
           try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
         }
-        cameras = loaded;
+        cameras = dedupeById(loaded);
       }catch(e){ cameras = []; }
     } else {
-      cameras = camLocalLoadAll();
+      cameras = dedupeById(camLocalLoadAll());
     }
     if (activeTab === 'cameras') renderCameraList();
   }
