@@ -1546,7 +1546,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 60</div>
+    <div id="buildBadge">BUILD 61</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3705,6 +3705,17 @@
   function renderMarkers(){
     Object.keys(markers).forEach(function(id){ map.removeLayer(markers[id]); });
     markers = {};
+    // The Deployment History "View on Map" marker is a one-off, temporary reference (see
+    // its own declaration below) — but nothing was ever actually clearing it, so it could
+    // sit on the map indefinitely, completely outside the Site Visibility filter system.
+    // A real reported symptom: toggling off "Trail Camera" hid regular deployed-camera
+    // pins correctly, but this leftover marker (if View on Map had been used at all)
+    // stayed visible regardless, looking like "some cameras didn't disappear." Any
+    // significant marker refresh is a reasonable point to consider that one-off view done.
+    if (typeof historyViewMarker !== 'undefined' && historyViewMarker){
+      map.removeLayer(historyViewMarker);
+      historyViewMarker = null;
+    }
     sites.forEach(function(s){
       if (!activeFilters.has(s.type)) return;
       if (!passesDateFilter(s.lastActivityAt || s.createdAt)) return;
