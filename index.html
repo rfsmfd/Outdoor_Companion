@@ -1552,7 +1552,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 66</div>
+    <div id="buildBadge">BUILD 68</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1765,6 +1765,25 @@
     </div>
   </div>
 
+  <!-- Buck Compare — side-by-side comparison while tagging: the photo you're currently
+       tagging, alongside a candidate buck's existing gallery, so the decision (same buck
+       or not) can be made by actually looking, not just trusting a name and a distance. -->
+  <div class="oc-modal-backdrop" id="buckCompareModalBackdrop">
+    <div class="oc-modal">
+      <h3><span id="buckCompareTitle">Compare</span> <button class="close-x" id="buckCompareClose">&times;</button></h3>
+      <div style="margin-bottom:10px;">
+        <label style="font-size:11px;color:var(--text-dim);">Photo you're tagging</label>
+        <img id="buckCompareNewPhoto" src="" style="width:100%;max-height:160px;object-fit:cover;border-radius:6px;cursor:pointer;" />
+      </div>
+      <label style="font-size:11px;color:var(--text-dim);">His existing gallery</label>
+      <div id="buckCompareGallery" style="max-height:280px;overflow-y:auto;"></div>
+      <div class="row" style="margin-top:14px;">
+        <button class="btn-ghost" id="buckCompareCancelBtn" style="flex:1;">Close</button>
+        <button class="btn-primary" id="buckCompareTagBtn" style="flex:1;">Tag as This Buck</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Buck Gallery — named profiles for individual bucks, each showing every sighting
        linked to it. Built to also work with future bulk-imported photos, once persistent
        import exists — a sighting's buckProfileId link doesn't care where the photo came
@@ -1775,9 +1794,12 @@
       <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Track individual bucks over time — tag any sighting (yours, or a photo a friend sends you) to a profile, and see everything linked to him here.</p>
       <div id="buckProfilesList" style="margin-bottom:14px;"></div>
       <div class="form-pop">
-        <label>Add New Buck Profile</label>
+        <label id="buckProfileFormLabel">Add New Buck Profile</label>
         <input type="text" id="newBuckProfileName" placeholder='e.g. "Left droptine 10-pointer"' />
+        <label style="margin-top:8px;">Notes (optional)</label>
+        <textarea id="newBuckProfileNotes" placeholder="e.g. Mike saw him near the north stand, big 10-point, no photo yet"></textarea>
         <button class="btn-primary" id="addBuckProfileBtn" style="width:100%;margin-top:8px;">+ Create Profile</button>
+        <button class="btn-ghost" id="cancelEditBuckProfileBtn" style="width:100%;margin-top:6px;display:none;">Cancel Edit</button>
       </div>
     </div>
   </div>
@@ -3973,9 +3995,9 @@
     }
     var huntFields = '';
     if (activeModule === 'hunting'){
-      var buckOptions = '<option value="">— None —</option>' + buckProfiles.map(function(b){
-        return '<option value="'+b.id+'"'+(o.buckProfileId === b.id ? ' selected' : '')+'>'+escapeHtml(b.name)+'</option>';
-      }).join('');
+      // Candidate buck profiles (sorted nearest-first, with thumbnails) are built
+      // dynamically in bindObsPopupActions once this HTML is actually in the DOM — this
+      // string-building stage only needs to reserve the container.
       huntFields =
         '<label>Photo</label>' +
         (o.photoThumb ?
@@ -3983,8 +4005,10 @@
         '<input type="file" accept="image/*" id="o_photo_input" style="display:none;" />' +
         '<button class="btn-ghost" id="o_photo_btn" type="button" style="width:100%;margin-bottom:10px;">' + (o.photoThumb ? '📷 Retake / Choose Photo' : '📷 Take / Choose Photo') + '</button>' +
         '<label>Buck Profile <span style="font-weight:400;color:var(--text-dim);">(optional — track this specific buck over time)</span></label>' +
-        '<select id="o_buckprofile">' + buckOptions + '</select>' +
-        '<button class="btn-ghost" id="o_newbuckprofile_btn" type="button" style="width:100%;margin-top:6px;font-size:11px;">+ New Buck Profile</button>';
+        '<div id="o_buckprofile_list"></div>' +
+        '<input type="hidden" id="o_buckprofile" value="'+(o.buckProfileId || '')+'" />' +
+        '<button class="btn-ghost" id="o_newbuckprofile_btn" type="button" style="width:100%;margin-top:6px;font-size:11px;">+ New Buck Profile</button>' +
+        '<button class="btn-ghost" id="o_reposition_btn" type="button" style="width:100%;margin-top:6px;font-size:11px;">📍 Set / Adjust Location on Map</button>';
     }
     return '' +
       '<div class="pop form-pop">' +
@@ -4160,10 +4184,71 @@
       autoSaveField(function(o){ o.lureColor = lureColorEl.value.trim() || null; });
     });
 
-    var buckProfileEl = node.querySelector('#o_buckprofile');
-    if (buckProfileEl) buckProfileEl.addEventListener('change', function(){
-      autoSaveField(function(o){ o.buckProfileId = buckProfileEl.value || null; });
-    });
+    // Builds the buck candidate list fresh each time — sorted nearest-first by distance
+    // to that profile's closest existing sighting (not an averaged center point, since a
+    // real home range isn't one spot), each showing a representative thumbnail so a visual
+    // read is possible before even opening the full comparison view.
+    function renderBuckCandidateList(){
+      var o = observations.filter(function(x){ return x.id === id; })[0];
+      if (!o) return;
+      var hiddenInput = node.querySelector('#o_buckprofile');
+      var listEl = node.querySelector('#o_buckprofile_list');
+      if (!listEl) return;
+      var selectedId = hiddenInput.value;
+      var buckDistances = buckProfiles.map(function(b){
+        var linked = observations.filter(function(x){ return x.buckProfileId === b.id && x.id !== o.id; })
+          .sort(function(a,c){ return c.createdAt - a.createdAt; });
+        var nearestMi = null;
+        linked.forEach(function(x){
+          var mi = distMeters(o.lat, o.lng, x.lat, x.lng) / 1609.34;
+          if (nearestMi === null || mi < nearestMi) nearestMi = mi;
+        });
+        var thumb = linked.filter(function(x){ return x.photoThumb; })[0];
+        return {profile: b, nearestMi: nearestMi, count: linked.length, thumb: thumb ? thumb.photoThumb : null, linked: linked};
+      }).sort(function(a, b){
+        if (a.nearestMi === null && b.nearestMi === null) return 0;
+        if (a.nearestMi === null) return 1;
+        if (b.nearestMi === null) return -1;
+        return a.nearestMi - b.nearestMi;
+      });
+      listEl.innerHTML = '';
+      buckDistances.forEach(function(d){
+        var isSelected = selectedId === d.profile.id;
+        var label = d.nearestMi === null
+          ? d.profile.name + ' — no location yet'
+          : d.profile.name + ' — ' + d.nearestMi.toFixed(1) + ' mi away (' + d.count + ' ' + (d.count === 1 ? 'sighting' : 'sightings') + ')';
+        var row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px;cursor:pointer;border:1.5px solid ' + (isSelected ? 'var(--accent)' : 'var(--line)') + ';margin-bottom:5px;background:' + (isSelected ? 'rgba(212,178,76,0.12)' : 'transparent') + ';';
+        row.innerHTML =
+          (d.thumb ? '<img src="'+d.thumb+'" class="buck-candidate-thumb" data-profile-id="'+d.profile.id+'" style="width:36px;height:36px;object-fit:cover;border-radius:5px;flex-shrink:0;cursor:pointer;" />'
+                    : '<div style="width:36px;height:36px;border-radius:5px;flex-shrink:0;background:var(--panel-alt);display:flex;align-items:center;justify-content:center;font-size:16px;">🦌</div>') +
+          '<div style="flex:1;font-size:11.5px;">' + escapeHtml(label) + '</div>';
+        row.addEventListener('click', function(e){
+          if (e.target.classList.contains('buck-candidate-thumb')) return; // handled separately below
+          hiddenInput.value = isSelected ? '' : d.profile.id; // tap again to deselect
+          autoSaveField(function(oo){ oo.buckProfileId = hiddenInput.value || null; });
+          renderBuckCandidateList();
+        });
+        var thumbEl = row.querySelector('.buck-candidate-thumb');
+        if (thumbEl){
+          thumbEl.addEventListener('click', function(e){
+            e.stopPropagation();
+            openBuckCompareModal(o, d.profile, d.linked, function(profileId){
+              hiddenInput.value = profileId;
+              autoSaveField(function(oo){ oo.buckProfileId = profileId; });
+              renderBuckCandidateList();
+              showToast('Tagged as ' + d.profile.name);
+            });
+          });
+        }
+        listEl.appendChild(row);
+      });
+      if (buckDistances.length === 0){
+        listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:6px 0;">No buck profiles yet — create one below.</div>';
+      }
+    }
+    renderBuckCandidateList();
+
     var newBuckProfileBtn = node.querySelector('#o_newbuckprofile_btn');
     if (newBuckProfileBtn) newBuckProfileBtn.addEventListener('click', async function(){
       var name = await showPrompt('Name this buck (e.g. "Left droptine 10-pointer")', '');
@@ -4171,13 +4256,15 @@
       var profile = {id: uid(), name: name, notes: '', createdAt: Date.now()};
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save new buck profile', e); }
-      var opt = document.createElement('option');
-      opt.value = profile.id;
-      opt.textContent = profile.name;
-      opt.selected = true;
-      buckProfileEl.appendChild(opt);
+      node.querySelector('#o_buckprofile').value = profile.id;
       autoSaveField(function(o){ o.buckProfileId = profile.id; });
+      renderBuckCandidateList();
       showToast('Buck profile created and linked');
+    });
+
+    var repositionBtn = node.querySelector('#o_reposition_btn');
+    if (repositionBtn) repositionBtn.addEventListener('click', function(){
+      repositionObservation(id);
     });
 
     var photoBtn = node.querySelector('#o_photo_btn');
@@ -4326,6 +4413,48 @@
   // persistent bulk photo import (see Cloud Migration notes) can adopt the exact same
   // buckProfileId pattern on its own photo records, so a buck's gallery would show photos
   // from both sources together, in one place, without redesigning anything here.
+  // Opens the side-by-side comparison view — the actual "look and decide" tool discussed
+  // with the founder, rather than trusting a name and a distance alone. onTagged is a
+  // callback into the calling popup's own selection state, since this modal is generic
+  // and doesn't know about that popup's internals.
+  var pendingCompareOnTagged = null;
+  function openBuckCompareModal(o, profile, linkedObs, onTagged){
+    document.getElementById('buckCompareTitle').textContent = 'Compare — ' + profile.name;
+    document.getElementById('buckCompareNewPhoto').src = o.photoThumb || '';
+    var galleryEl = document.getElementById('buckCompareGallery');
+    if (linkedObs.length === 0){
+      galleryEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:8px 0;">No sightings linked yet.</div>';
+    } else {
+      galleryEl.innerHTML = '';
+      linkedObs.forEach(function(x){ galleryEl.innerHTML += renderBuckGalleryEntry(x); });
+    }
+    galleryEl.querySelectorAll('.journal-photo-thumb').forEach(function(img){
+      img.addEventListener('click', function(){ showPhotoLightbox(img.getAttribute('src')); });
+    });
+    galleryEl.querySelectorAll('.view-on-map-link').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        document.getElementById('buckCompareModalBackdrop').classList.remove('show');
+        flyToObservation(btn.getAttribute('data-obs-id'));
+      });
+    });
+    pendingCompareOnTagged = function(){ onTagged(profile.id); };
+    closeAllModals();
+    document.getElementById('buckCompareModalBackdrop').classList.add('show');
+  }
+  document.getElementById('buckCompareNewPhoto').addEventListener('click', function(){
+    var src = this.getAttribute('src');
+    if (src) showPhotoLightbox(src);
+  });
+  document.getElementById('buckCompareCancelBtn').addEventListener('click', function(){
+    document.getElementById('buckCompareModalBackdrop').classList.remove('show');
+    pendingCompareOnTagged = null;
+  });
+  document.getElementById('buckCompareTagBtn').addEventListener('click', function(){
+    document.getElementById('buckCompareModalBackdrop').classList.remove('show');
+    if (pendingCompareOnTagged) pendingCompareOnTagged();
+    pendingCompareOnTagged = null;
+  });
+
   function renderBuckGalleryEntry(o){
     var t = getActiveObsTypes()[o.type] || getFallbackTypeEntry(true);
     var dateStr = new Date(o.createdAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
@@ -4339,6 +4468,8 @@
     html += '</div>';
     return html;
   }
+
+  var editingBuckProfileId = null; // null = form creates a new profile; set = form is editing this one
 
   function renderBuckProfilesList(){
     var listEl = document.getElementById('buckProfilesList');
@@ -4360,6 +4491,7 @@
             '<span class="detail-chevron" style="color:var(--accent);font-size:14px;">▸</span>' +
           '</div>' +
           '<div class="co">' + linkedObs.length + ' ' + (linkedObs.length === 1 ? 'sighting' : 'sightings') + '</div>' +
+          (profile.notes ? '<div class="co" style="color:var(--text-dim);font-style:italic;">' + escapeHtml(profile.notes) + '</div>' : '') +
         '</div>';
       var galleryWrap = document.createElement('div');
       galleryWrap.style.display = 'none';
@@ -4371,7 +4503,7 @@
       var actionsRow = document.createElement('div');
       actionsRow.style.cssText = 'display:flex;gap:6px;margin-top:8px;';
       actionsRow.innerHTML =
-        '<button class="btn-ghost" data-act="rename-buck" style="flex:1;font-size:11px;">Rename</button>' +
+        '<button class="btn-ghost" data-act="edit-buck" style="flex:1;font-size:11px;">Edit</button>' +
         '<button class="btn-ghost" data-act="delete-buck" style="flex:1;font-size:11px;color:#D94A2E;">Delete</button>';
       galleryWrap.appendChild(actionsRow);
       row.querySelector('.info').appendChild(galleryWrap);
@@ -4394,13 +4526,15 @@
           showPhotoLightbox(img.getAttribute('src'));
         });
       });
-      actionsRow.querySelector('[data-act="rename-buck"]').addEventListener('click', async function(e){
+      actionsRow.querySelector('[data-act="edit-buck"]').addEventListener('click', function(e){
         e.stopPropagation();
-        var newName = await showPrompt('Rename this buck profile', profile.name);
-        if (!newName) return;
-        profile.name = newName;
-        try{ await saveBuckProfile(profile); }catch(err){ console.error('Outdoor Companion: failed to rename buck profile', err); }
-        renderBuckProfilesList();
+        editingBuckProfileId = profile.id;
+        document.getElementById('buckProfileFormLabel').textContent = 'Edit "' + profile.name + '"';
+        document.getElementById('newBuckProfileName').value = profile.name;
+        document.getElementById('newBuckProfileNotes').value = profile.notes || '';
+        document.getElementById('addBuckProfileBtn').textContent = 'Save Changes';
+        document.getElementById('cancelEditBuckProfileBtn').style.display = 'block';
+        document.getElementById('newBuckProfileName').scrollIntoView({behavior:'smooth', block:'center'});
       });
       actionsRow.querySelector('[data-act="delete-buck"]').addEventListener('click', async function(e){
         e.stopPropagation();
@@ -4415,7 +4549,17 @@
     });
   }
 
+  function resetBuckProfileForm(){
+    editingBuckProfileId = null;
+    document.getElementById('buckProfileFormLabel').textContent = 'Add New Buck Profile';
+    document.getElementById('newBuckProfileName').value = '';
+    document.getElementById('newBuckProfileNotes').value = '';
+    document.getElementById('addBuckProfileBtn').textContent = '+ Create Profile';
+    document.getElementById('cancelEditBuckProfileBtn').style.display = 'none';
+  }
+
   document.getElementById('buckGalleryBtn').addEventListener('click', function(){
+    resetBuckProfileForm();
     renderBuckProfilesList();
     closeAllModals();
     document.getElementById('buckGalleryModalBackdrop').classList.add('show');
@@ -4423,16 +4567,30 @@
   document.getElementById('buckGalleryClose').addEventListener('click', function(){
     document.getElementById('buckGalleryModalBackdrop').classList.remove('show');
   });
+  document.getElementById('cancelEditBuckProfileBtn').addEventListener('click', resetBuckProfileForm);
   document.getElementById('addBuckProfileBtn').addEventListener('click', async function(){
     var nameInput = document.getElementById('newBuckProfileName');
+    var notesInput = document.getElementById('newBuckProfileNotes');
     var name = nameInput.value.trim();
     if (!name){ showToast('Enter a name first'); return; }
-    var profile = {id: uid(), name: name, notes: '', createdAt: Date.now()};
-    buckProfiles.push(profile);
-    try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save new buck profile', e); }
-    nameInput.value = '';
+    if (editingBuckProfileId){
+      var existing = buckProfiles.filter(function(p){ return p.id === editingBuckProfileId; })[0];
+      if (existing){
+        existing.name = name;
+        existing.notes = notesInput.value.trim();
+        try{ await saveBuckProfile(existing); }catch(e){ console.error('Outdoor Companion: failed to save edited buck profile', e); }
+        showToast('Buck profile updated');
+      }
+      resetBuckProfileForm();
+    } else {
+      var profile = {id: uid(), name: name, notes: notesInput.value.trim(), createdAt: Date.now()};
+      buckProfiles.push(profile);
+      try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save new buck profile', e); }
+      nameInput.value = '';
+      notesInput.value = '';
+      showToast('Buck profile created');
+    }
     renderBuckProfilesList();
-    showToast('Buck profile created');
   });
 
   function escapeHtml(str){
@@ -5680,6 +5838,31 @@
     });
   }
 
+  var pendingRepositionObsId = null; // null = the crosshair modal is creating a new sighting; set = it's repositioning this existing one
+
+  // Reuses the exact same crosshair-confirm screen Quick Log uses for a brand new
+  // sighting, for a real, common need: a friend forwards a buck photo and you know
+  // roughly where it was taken — there was previously no way to correct a sighting's
+  // location after the fact without deleting it and starting over, losing everything
+  // else already entered (notes, buck profile tag, etc.).
+  function repositionObservation(obsId){
+    var o = observations.filter(function(x){ return x.id === obsId; })[0];
+    if (!o) return;
+    pendingRepositionObsId = obsId;
+    pendingLogType = null;
+    document.getElementById('logLocationTypeName').textContent = 'Adjust Location';
+    logLocationPos = {lat: o.lat, lng: o.lng};
+    document.getElementById('logLocationCoords').textContent = fmtCoord(o.lat) + ', ' + fmtCoord(o.lng);
+    map.closePopup();
+    closeAllModals();
+    document.getElementById('logLocationModalBackdrop').classList.add('show');
+    ensureLogLocationMap();
+    setTimeout(function(){
+      logLocationMap.invalidateSize();
+      logLocationMap.setView([o.lat, o.lng], 17);
+    }, 50);
+  }
+
   function logObservation(type){
     pendingLogType = type;
     var t = getActiveObsTypes()[type];
@@ -5697,9 +5880,27 @@
     }, 50);
   }
 
+  async function applyRepositionedLocation(lat, lng, approx){
+    var o = observations.filter(function(x){ return x.id === pendingRepositionObsId; })[0];
+    if (o){
+      o.lat = lat;
+      o.lng = lng;
+      o.approx = approx;
+      try{ await saveObservation(o); }catch(e){ console.error('Outdoor Companion: failed to save repositioned sighting', e); }
+      renderAll();
+      showToast('Location updated');
+    }
+    pendingRepositionObsId = null;
+  }
+
   document.getElementById('logLocationUseMyLocationBtn').addEventListener('click', function(){
     var pos = lastKnownPos;
     document.getElementById('logLocationModalBackdrop').classList.remove('show');
+    if (pendingRepositionObsId){
+      if (pos) applyRepositionedLocation(pos.lat, pos.lng, false);
+      else applyRepositionedLocation(logLocationPos.lat, logLocationPos.lng, true);
+      return;
+    }
     if (pos){
       createAndSaveObservation(pendingLogType, pos.lat, pos.lng, false);
     } else {
@@ -5708,11 +5909,16 @@
   });
   document.getElementById('logLocationConfirmBtn').addEventListener('click', function(){
     document.getElementById('logLocationModalBackdrop').classList.remove('show');
+    if (pendingRepositionObsId){
+      applyRepositionedLocation(logLocationPos.lat, logLocationPos.lng, false);
+      return;
+    }
     createAndSaveObservation(pendingLogType, logLocationPos.lat, logLocationPos.lng, false);
   });
   document.getElementById('logLocationCancelBtn').addEventListener('click', function(){
     document.getElementById('logLocationModalBackdrop').classList.remove('show');
     pendingLogType = null;
+    pendingRepositionObsId = null;
   });
 
   // ---------- mobile sidebar drawer ----------
