@@ -1515,6 +1515,11 @@
     </div>
 
     <div class="display-tray-section">
+      <div class="display-tray-section-title" id="obsVisibilityTitle">Sightings</div>
+      <div id="displayTrayObsTypes"></div>
+    </div>
+
+    <div class="display-tray-section">
       <div class="display-tray-section-title">Camera History</div>
       <div class="toggle-row">
         <div class="toggle-row-label">📍 Past deployment locations</div>
@@ -1546,7 +1551,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 63</div>
+    <div id="buildBadge">BUILD 64</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2084,6 +2089,7 @@
   var sites = [];
   var markers = {};
   var activeFilters = new Set(Object.keys(TYPES_HUNTING));
+  var activeObsFilters = new Set(Object.keys(OBS_TYPES_HUNTING).concat(Object.keys(OBS_TYPES_FISHING)));
   var placing = false;
   var tempMarker = null;
 
@@ -3498,6 +3504,32 @@
     });
   }
 
+  // Mirrors renderChips exactly, for logged catches/sightings (Observations) rather than
+  // Sites — a separate rendering/data system that the original Site Visibility section
+  // never actually covered, despite the similar naming (a real gap, not a bug, identified
+  // directly from a founder report where "Wildlife Sighting" the Site type was confused
+  // with actual logged wildlife sighting Observations).
+  function renderObsTypeToggles(){
+    document.getElementById('obsVisibilityTitle').textContent = activeModule === 'fishing' ? 'Catches' : 'Sightings';
+    var container = document.getElementById('displayTrayObsTypes');
+    container.innerHTML = '';
+    Object.keys(getActiveObsTypes()).forEach(function(key){
+      var t = getActiveObsTypes()[key];
+      var isOn = activeObsFilters.has(key);
+      var row = document.createElement('div');
+      row.className = 'toggle-row';
+      row.innerHTML =
+        '<div class="toggle-row-label"><span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>' + t.label + '</div>' +
+        '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>';
+      row.querySelector('.toggle-switch').addEventListener('click', function(){
+        if (activeObsFilters.has(key)) activeObsFilters.delete(key); else activeObsFilters.add(key);
+        renderObsTypeToggles();
+        renderObsMarkers();
+      });
+      container.appendChild(row);
+    });
+  }
+
   // ---------- Property layer: organize Sites under named properties ----------
   function renderPropertySelect(){
     var sel = document.getElementById('propertySelect');
@@ -4092,6 +4124,7 @@
     observations.forEach(function(o){
       if (!passesDateFilter(o.createdAt)) return;
       if (!typeIsInActiveModule(o.type, true)) return;
+      if (!activeObsFilters.has(o.type)) return;
       var m = L.marker([o.lat,o.lng], {icon: obsMarkerIcon(o.type)}).addTo(map);
       m.bindPopup(obsPopupHtml(o));
       m.on('popupopen', function(e){ bindObsPopupActions(e.popup, o.id); });
@@ -5009,6 +5042,7 @@
       for (var n=0;n<properties.length;n++){ await saveProperty(properties[n]); }
       activeFilters = new Set(Object.keys(getActiveTypes()));
       renderChips();
+      renderObsTypeToggles();
       renderPropertySelect();
       renderAll();
       renderObsMarkers();
@@ -5259,6 +5293,7 @@
     // an old hunting-only filter set would otherwise hide all fishing types (and vice versa).
     activeFilters = new Set(Object.keys(getActiveTypes()));
     renderChips();
+    renderObsTypeToggles();
     renderQuickLogGrid();
     renderMarkers();
     renderObsMarkers();
@@ -5551,6 +5586,7 @@
   });
 
   renderChips();
+  renderObsTypeToggles();
   (async function initLoadAndUrlCheck(){
     await loadSites();
     await loadObservations();
