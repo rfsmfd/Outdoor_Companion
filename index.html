@@ -7,6 +7,17 @@
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Outdoor Companion — Observation Site Map</title>
+<!-- Installable as a desktop/mobile app icon via the browser's own "Install page as
+     app" feature (Chrome/Edge/Safari desktop support this natively, no manifest
+     required) — this manifest just gives that installed icon a proper name and look
+     instead of a generic default. Deliberately NO service worker: one would cache the
+     app for offline use, which risks silently serving a stale old build after a new
+     one ships — a real conflict with how frequently this app gets updated. -->
+<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%20%22Outdoor%20Companion%22%2C%20%22short_name%22%3A%20%22Outdoor%20Co.%22%2C%20%22start_url%22%3A%20%22.%22%2C%20%22display%22%3A%20%22standalone%22%2C%20%22background_color%22%3A%20%22%231E2B23%22%2C%20%22theme_color%22%3A%20%22%231E2B23%22%2C%20%22icons%22%3A%20%5B%7B%22src%22%3A%20%22data%3Aimage/svg%2Bxml%2C%253Csvg%2520width%253D%2522512%2522%2520height%253D%2522512%2522%2520viewBox%253D%25220%25200%2520512%2520512%2522%2520xmlns%253D%2522http%253A//www.w3.org/2000/svg%2522%253E%253Crect%2520width%253D%2522512%2522%2520height%253D%2522512%2522%2520rx%253D%252296%2522%2520fill%253D%2522%25231E2B23%2522/%253E%253Cpath%2520d%253D%2522M256%252096%2520C%2520176%252096%2520112%2520160%2520112%2520240%2520C%2520112%2520336%2520256%2520432%2520256%2520432%2520C%2520256%2520432%2520400%2520336%2520400%2520240%2520C%2520400%2520160%2520336%252096%2520256%252096%2520Z%2522%2520fill%253D%2522%2523FF6A13%2522/%253E%253Ccircle%2520cx%253D%2522256%2522%2520cy%253D%2522232%2522%2520r%253D%252256%2522%2520fill%253D%2522%25231E2B23%2522/%253E%253C/svg%253E%22%2C%20%22sizes%22%3A%20%22any%22%2C%20%22type%22%3A%20%22image/svg%2Bxml%22%7D%5D%7D">
+<meta name="theme-color" content="#1E2B23">
+<meta name="apple-mobile-web-app-title" content="Outdoor Co.">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20width%3D%22512%22%20height%3D%22512%22%20viewBox%3D%220%200%20512%20512%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%2296%22%20fill%3D%22%231E2B23%22/%3E%3Cpath%20d%3D%22M256%2096%20C%20176%2096%20112%20160%20112%20240%20C%20112%20336%20256%20432%20256%20432%20C%20256%20432%20400%20336%20400%20240%20C%20400%20160%20336%2096%20256%2096%20Z%22%20fill%3D%22%23FF6A13%22/%3E%3Ccircle%20cx%3D%22256%22%20cy%3D%22232%22%20r%3D%2256%22%20fill%3D%22%231E2B23%22/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
@@ -1029,10 +1040,45 @@
   .analytics-header{ padding:12px 16px; }
   .analytics-total{ font-family:'Oswald',sans-serif; font-size:20px; text-transform:uppercase; letter-spacing:0.5px; color:var(--accent); }
   .analytics-sparse-note{ font-size:11.5px; color:var(--text-dim); margin-top:6px; line-height:1.5; background:rgba(255,224,102,0.1); border:1px solid #FFE066; border-radius:6px; padding:8px 10px; }
-  .analytics-grid{ display:flex; flex-direction:column; gap:16px; padding:0 16px 16px 16px; }
+  .analytics-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(320px, 1fr));
+    gap:16px;
+    padding:0 16px 16px 16px;
+  }
   .analytics-chart-wrap{ background:var(--panel-alt); border:1px solid var(--line); border-radius:8px; padding:12px; }
   .analytics-chart-title{ font-size:12px; font-weight:600; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; }
   .analytics-chart-wrap canvas{ max-height:220px; }
+  .analytics-filter-bar{
+    display:flex;
+    flex-wrap:wrap;
+    gap:16px;
+    padding:12px 16px;
+    background:var(--panel-alt);
+    border-bottom:1px solid var(--line);
+    margin-bottom:4px;
+  }
+  .analytics-filter-group{ min-width:160px; }
+  .analytics-filter-label{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px; }
+  /* Desktop: filter bar becomes a persistent left column instead of a bar sitting above
+     the charts, and the chart grid gets more breathing room to actually use the width —
+     built with plain CSS (grid auto-fit already handles the column count), so this same
+     structure keeps working as more charts get added later without further changes. */
+  @media (min-width: 1100px){
+    .analytics-filter-bar{
+      flex-direction:column;
+      flex-wrap:nowrap;
+      width:200px;
+      flex-shrink:0;
+      border-bottom:none;
+      border-right:1px solid var(--line);
+      margin-bottom:0;
+    }
+    #site-list.analytics-desktop-layout{
+      display:flex;
+      align-items:flex-start;
+    }
+  }
 
   #solunarModal{ width:420px; max-width:94vw; }
   #solunarDayNav{
@@ -1552,7 +1598,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 74</div>
+    <div id="buildBadge">BUILD 76</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2147,6 +2193,14 @@
   var activeHuntId = null; // the currently in-progress hunt/trip, or null if none active
   var journalFilterRange = 'all'; // 'all' | 'week' | 'month' | 'custom' — Journal totals time filter
   var activePropertyId = null; // null = "All Properties"
+  // Analytics gets its own dedicated filters, separate from the Sites tab's property
+  // filter above — you might want to browse one property's Sites while Analytics still
+  // shows everything, or vice versa.
+  var analyticsDateRange = 'all'; // 'all' | 'year' | 'month' | 'custom'
+  var analyticsCustomFrom = null;
+  var analyticsCustomTo = null;
+  var analyticsPropertyId = null; // null = All Properties
+  var analyticsBuckProfileId = null; // null = All Bucks (hunting-only)
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
   var QR_PREFIX = 'OC-CAM:'; // legacy format, still recognized by the in-page scanner as a fallback
 
@@ -4514,6 +4568,10 @@
       document.getElementById('cameraTip').style.display = (activeTab === 'cameras') ? 'block' : 'none';
       updateTagHistoryButtonVisibility();
       updateBuckGalleryButtonVisibility();
+      // Analytics adds its own layout class to this shared list container for its
+      // desktop side-by-side filter layout — always clear it first so it doesn't leak
+      // into Sites/Log/Cameras' own layout when switching tabs away from Analytics.
+      document.getElementById('site-list').classList.remove('analytics-desktop-layout');
       renderActiveList();
     });
   });
@@ -6313,12 +6371,95 @@
     analyticsChartInstances.push(chart);
   }
 
+  function passesAnalyticsDateFilter(ts){
+    if (analyticsDateRange === 'all') return true;
+    var now = Date.now();
+    if (analyticsDateRange === 'year') return ts >= now - 365*86400000;
+    if (analyticsDateRange === 'month') return ts >= now - 30*86400000;
+    if (analyticsDateRange === 'custom'){
+      if (analyticsCustomFrom && ts < analyticsCustomFrom) return false;
+      if (analyticsCustomTo && ts > analyticsCustomTo) return false;
+      return true;
+    }
+    return true;
+  }
+
+  function renderAnalyticsFilterBar(container){
+    var bar = document.createElement('div');
+    bar.className = 'analytics-filter-bar';
+
+    // Date Range
+    var dateGroup = document.createElement('div');
+    dateGroup.className = 'analytics-filter-group';
+    dateGroup.innerHTML = '<div class="analytics-filter-label">Date Range</div>';
+    var dateChips = document.createElement('div');
+    dateChips.className = 'chips';
+    [['all','All Time'],['year','Past Year'],['month','Past Month'],['custom','Custom']].forEach(function(pair){
+      var chip = document.createElement('button');
+      chip.className = 'chip' + (analyticsDateRange === pair[0] ? ' active' : '');
+      chip.textContent = pair[1];
+      chip.addEventListener('click', function(){
+        analyticsDateRange = pair[0];
+        renderAnalytics();
+      });
+      dateChips.appendChild(chip);
+    });
+    dateGroup.appendChild(dateChips);
+    bar.appendChild(dateGroup);
+
+    // Property
+    var propGroup = document.createElement('div');
+    propGroup.className = 'analytics-filter-group';
+    propGroup.innerHTML = '<div class="analytics-filter-label">Property</div>';
+    var propSelect = document.createElement('select');
+    propSelect.innerHTML = '<option value="">All Properties</option>' + properties
+      .filter(function(p){ return !p.module || p.module === activeModule; })
+      .map(function(p){ return '<option value="'+p.id+'"'+(analyticsPropertyId===p.id?' selected':'')+'>'+escapeHtml(p.name)+'</option>'; }).join('');
+    propSelect.addEventListener('change', function(){
+      analyticsPropertyId = propSelect.value || null;
+      renderAnalytics();
+    });
+    propGroup.appendChild(propSelect);
+    bar.appendChild(propGroup);
+
+    // Buck Profile (hunting only)
+    if (activeModule === 'hunting' && buckProfiles.length > 0){
+      var buckGroup = document.createElement('div');
+      buckGroup.className = 'analytics-filter-group';
+      buckGroup.innerHTML = '<div class="analytics-filter-label">Buck</div>';
+      var buckSelect = document.createElement('select');
+      buckSelect.innerHTML = '<option value="">All Bucks</option>' + buckProfiles
+        .map(function(b){ return '<option value="'+b.id+'"'+(analyticsBuckProfileId===b.id?' selected':'')+'>'+escapeHtml(b.name)+'</option>'; }).join('');
+      buckSelect.addEventListener('change', function(){
+        analyticsBuckProfileId = buckSelect.value || null;
+        renderAnalytics();
+      });
+      buckGroup.appendChild(buckSelect);
+      bar.appendChild(buckGroup);
+    }
+
+    container.appendChild(bar);
+  }
+
   function renderAnalytics(){
     destroyAnalyticsCharts();
     var list = document.getElementById('site-list');
     list.innerHTML = '';
+    list.classList.add('analytics-desktop-layout');
 
-    var relevantObs = observations.filter(function(o){ return typeIsInActiveModule(o.type, true); });
+    renderAnalyticsFilterBar(list);
+
+    var mainWrap = document.createElement('div');
+    mainWrap.style.cssText = 'flex:1;min-width:0;';
+    list.appendChild(mainWrap);
+
+    var relevantObs = observations.filter(function(o){
+      if (!typeIsInActiveModule(o.type, true)) return false;
+      if (!passesAnalyticsDateFilter(o.createdAt)) return false;
+      if (analyticsPropertyId && o.propertyId !== analyticsPropertyId) return false;
+      if (analyticsBuckProfileId && o.buckProfileId !== analyticsBuckProfileId) return false;
+      return true;
+    });
     var total = relevantObs.length;
 
     var header = document.createElement('div');
@@ -6327,16 +6468,16 @@
     if (total < 15){
       header.innerHTML += '<div class="analytics-sparse-note">📊 Charts get more meaningful with more data — right now there\'s only ' + total + ' logged, so patterns below may just be noise. Keep logging and check back.</div>';
     }
-    list.appendChild(header);
+    mainWrap.appendChild(header);
 
     if (total === 0){
-      list.innerHTML += '<div class="empty" style="padding:20px 0;">Nothing logged yet in ' + (activeModule === 'fishing' ? 'Fishing' : 'Hunting') + ' mode — use Quick Log out in the field, then come back here.</div>';
+      mainWrap.innerHTML += '<div class="empty" style="padding:20px 0;">Nothing logged yet matching these filters — try widening the date range or picking a different property/buck.</div>';
       return;
     }
 
     var chartsGrid = document.createElement('div');
     chartsGrid.className = 'analytics-grid';
-    list.appendChild(chartsGrid);
+    mainWrap.appendChild(chartsGrid);
 
     // By Moon Phase
     var moonCounts = groupCount(relevantObs, function(o){ return o.moonPhase ? o.moonPhase.name : null; });
@@ -6392,6 +6533,30 @@
     var siteLabels = Object.keys(siteCounts).sort(function(a,b){ return siteCounts[b] - siteCounts[a]; }).slice(0, 10);
     if (siteLabels.length){
       buildBarChart(makeChartCanvas(chartsGrid, '📍 By Site (top 10)', 'chartSite'), siteLabels, siteLabels.map(function(s){ return siteCounts[s]; }), 'Count');
+    }
+
+    // By Property — activity breakdown across land, new per the desktop Analytics build
+    var propCounts = groupCount(relevantObs, function(o){
+      if (!o.propertyId) return 'Unassigned';
+      var p = properties.filter(function(x){ return x.id === o.propertyId; })[0];
+      return p ? p.name : 'Unassigned';
+    });
+    var propLabels = Object.keys(propCounts).sort(function(a,b){ return propCounts[b] - propCounts[a]; });
+    if (propLabels.length > 1 || (propLabels.length === 1 && propLabels[0] !== 'Unassigned')){
+      buildBarChart(makeChartCanvas(chartsGrid, '🏡 By Property', 'chartProperty'), propLabels, propLabels.map(function(p){ return propCounts[p]; }), 'Count');
+    }
+
+    // By Buck Profile — which named bucks you're actually seeing, hunting-only, new
+    if (activeModule === 'hunting' && buckProfiles.length > 0){
+      var buckCounts = groupCount(relevantObs, function(o){
+        if (!o.buckProfileId) return null; // untagged sightings deliberately excluded from this chart specifically
+        var b = buckProfiles.filter(function(x){ return x.id === o.buckProfileId; })[0];
+        return b ? b.name : null;
+      });
+      var buckLabels = Object.keys(buckCounts).sort(function(a,b){ return buckCounts[b] - buckCounts[a]; });
+      if (buckLabels.length){
+        buildBarChart(makeChartCanvas(chartsGrid, '🦌 By Buck Profile', 'chartBuck'), buckLabels, buckLabels.map(function(b){ return buckCounts[b]; }), 'Count');
+      }
     }
   }
 
