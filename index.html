@@ -1633,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 84</div>
+    <div id="buildBadge">BUILD 85</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6393,6 +6393,11 @@
     if (stillActive){ activeHuntId = stillActive.id; }
     updateActiveHuntBar();
     handleCameraUrlParam();
+    // buckProfiles loads last of everything here — if the user is already on the
+    // Analytics tab before this finishes (a real possible race, not just a hypothetical),
+    // its Query Builder would have rendered with an empty Data dropdown and never
+    // refreshed on its own. Catches that directly rather than leaving it to chance.
+    if (activeTab === 'analytics') renderAnalytics();
   })();
 
   // ================= Camera Inventory + QR Deploy =================
