@@ -1088,6 +1088,16 @@
      the charts, and the chart grid gets more breathing room to actually use the width —
      built with plain CSS (grid auto-fit already handles the column count), so this same
      structure keeps working as more charts get added later without further changes. */
+  @media (min-width: 900px){
+    /* Analytics specifically needs real room — its own filter sidebar plus a
+       multi-column chart grid can't work inside the normal 320px sidebar width that's
+       correct for every other tab. Expands generously but leaves a visible sliver of map,
+       and caps at 1400px so it doesn't take over an ultra-wide monitor entirely. */
+    #sidebar.sidebar-analytics-mode{
+      width:min(1400px, calc(100vw - 200px));
+      min-width:min(1400px, calc(100vw - 200px));
+    }
+  }
   @media (min-width: 1100px){
     .analytics-filter-bar{
       flex-direction:column;
@@ -1623,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 78</div>
+    <div id="buildBadge">BUILD 79</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4640,6 +4650,12 @@
       // Analytics adds its own layout class to this shared list container for its
       // desktop side-by-side filter layout — always clear it first so it doesn't leak
       // into Sites/Log/Cameras' own layout when switching tabs away from Analytics.
+      // Analytics needs real room to show its desktop layout (multi-column charts, a
+      // filter sidebar of its own) — the main sidebar's normal 320px width, correct for
+      // every other tab, is nowhere near enough space for that. This class lets Analytics
+      // specifically expand the main sidebar on a wide enough screen, without affecting
+      // Sites/Log/Cameras at all.
+      document.getElementById('sidebar').classList.toggle('sidebar-analytics-mode', activeTab === 'analytics');
       document.getElementById('site-list').classList.remove('analytics-desktop-layout');
       renderActiveList();
     });
