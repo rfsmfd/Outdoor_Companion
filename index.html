@@ -1633,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 81</div>
+    <div id="buildBadge">BUILD 82</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6643,7 +6643,14 @@
       // Renders on the actual map, not in this sidebar results area — a heat map's whole
       // point is spatial, so a small canvas in the sidebar wouldn't show anything useful.
       var heatPoints = source.map(function(o){ return [o.lat, o.lng, 1]; });
-      queryHeatLayer = L.heatLayer(heatPoints, {radius: 30, blur: 25}).addTo(map);
+      // Leaflet.heat's defaults are tuned for dense datasets (its own demo uses 10,000
+      // points) — a hunter's real data is more like a handful of sightings, so the
+      // defaults render as faint, isolated dots rather than a meaningful "hot" area.
+      // Tuned specifically for that: a larger radius so each sighting has real visual
+      // presence, a low max so just a few overlapping sightings reach full "hot" red
+      // instead of needing dozens, and a minOpacity floor so even a single isolated
+      // sighting is clearly visible rather than nearly transparent.
+      queryHeatLayer = L.heatLayer(heatPoints, {radius: 45, blur: 35, max: 3, minOpacity: 0.4}).addTo(map);
       // Confirmed, documented Leaflet.heat issue (github.com/Leaflet/Leaflet.heat/issues/83):
       // its canvas defaults to z-index:100, but Leaflet's own tile pane sits at z-index:200
       // — meaning the heat map genuinely renders, just invisibly, behind the map tiles.
