@@ -1633,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 82</div>
+    <div id="buildBadge">BUILD 83</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6663,7 +6663,12 @@
       }, 0);
       var bounds = L.latLngBounds(source.map(function(o){ return [o.lat, o.lng]; }));
       map.fitBounds(bounds, {padding: [40, 40]});
-      resultsEl.innerHTML = '<div class="query-count-result" style="font-size:16px;">🔥 Showing heat map on the map — ' + source.length + ' ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>';
+      resultsEl.innerHTML = '<div class="query-count-result" style="font-size:16px;">🔥 Showing heat map on the map — ' + source.length + ' ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>' +
+        '<button class="btn-ghost" id="qb_clear_heatmap_btn" type="button" style="width:100%;margin-top:8px;">✕ Clear Heat Map</button>';
+      document.getElementById('qb_clear_heatmap_btn').addEventListener('click', function(){
+        if (queryHeatLayer){ map.removeLayer(queryHeatLayer); queryHeatLayer = null; }
+        resultsEl.innerHTML = '';
+      });
       return;
     }
 
