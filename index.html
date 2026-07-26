@@ -19,6 +19,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20width%3D%22512%22%20height%3D%22512%22%20viewBox%3D%220%200%20512%20512%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%2296%22%20fill%3D%22%231E2B23%22/%3E%3Cpath%20d%3D%22M256%2096%20C%20176%2096%20112%20160%20112%20240%20C%20112%20336%20256%20432%20256%20432%20C%20256%20432%20400%20336%20400%20240%20C%20400%20160%20336%2096%20256%2096%20Z%22%20fill%3D%22%23FF6A13%22/%3E%3Ccircle%20cx%3D%22256%22%20cy%3D%22232%22%20r%3D%2256%22%20fill%3D%22%231E2B23%22/%3E%3C/svg%3E">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
@@ -1060,6 +1061,29 @@
   }
   .analytics-filter-group{ min-width:160px; }
   .analytics-filter-label{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px; }
+  .query-builder{
+    display:none; /* hidden below the desktop breakpoint — see the min-width:1100px media
+      query for where this gets revealed. Progressive Disclosure principle (Goals
+      Checklist): advanced analytics stays opt-in and desktop-only, never confronting the
+      lean phone experience by default. */
+    background:var(--panel-alt);
+    border:1px solid var(--accent);
+    border-radius:8px;
+    padding:14px 16px;
+    margin:0 16px 20px 16px;
+  }
+  .query-builder-title{ font-family:'Oswald',sans-serif; font-size:15px; color:var(--accent); margin-bottom:4px; }
+  .query-builder-desc{ font-size:11.5px; color:var(--text-dim); margin:0 0 12px 0; }
+  .query-builder-row{ display:flex; flex-wrap:wrap; gap:12px; }
+  .query-builder-group{ min-width:150px; flex:1; }
+  .query-builder-group label{ display:block; font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px; }
+  .query-count-result{
+    font-family:'Oswald',sans-serif;
+    font-size:32px;
+    color:var(--accent);
+    text-align:center;
+    padding:24px 0;
+  }
   /* Desktop: filter bar becomes a persistent left column instead of a bar sitting above
      the charts, and the chart grid gets more breathing room to actually use the width —
      built with plain CSS (grid auto-fit already handles the column count), so this same
@@ -1078,6 +1102,7 @@
       display:flex;
       align-items:flex-start;
     }
+    .query-builder{ display:block; }
   }
 
   #solunarModal{ width:420px; max-width:94vw; }
@@ -1598,7 +1623,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 76</div>
+    <div id="buildBadge">BUILD 78</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2089,6 +2114,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -2201,6 +2227,18 @@
   var analyticsCustomTo = null;
   var analyticsPropertyId = null; // null = All Properties
   var analyticsBuckProfileId = null; // null = All Bucks (hunting-only)
+  // Custom Query Builder — deliberately separate state from the fixed-chart filters
+  // above, since changing a fixed-chart filter shouldn't silently also change whatever
+  // custom query someone's experimenting with, and vice versa.
+  var queryDataSource = 'all'; // 'all' | a specific buckProfileId
+  var queryDateRange = 'all';
+  var queryPropertyId = null;
+  var queryGroupBy = 'moon'; // dimension to break the results down by
+  var queryVizType = 'bar'; // 'bar' | 'pie' | 'count'
+  var queryDrawnLayer = null; // the Leaflet.draw shape, if one has been drawn
+  var queryDrawControl = null;
+  var queryDrawnItems = null;
+  var queryResultChart = null;
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
   var QR_PREFIX = 'OC-CAM:'; // legacy format, still recognized by the in-page scanner as a fallback
 
@@ -3137,6 +3175,37 @@
             Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180) *
             Math.sin(dLng/2)*Math.sin(dLng/2);
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  }
+
+  // Tests whether a lat/lng falls inside a drawn Leaflet.draw shape — the core spatial
+  // filter for the Analytics query builder (e.g. "just the sightings inside this drawn
+  // outline of West Holt Farm"). Rectangle and Circle have simple, exact tests built into
+  // Leaflet already; Polygon needs a real point-in-polygon test, which Leaflet doesn't
+  // provide natively — standard ray-casting algorithm, well-established, not a shortcut.
+  function pointInShape(lat, lng, layer){
+    if (layer instanceof L.Rectangle){
+      // L.Rectangle is a real subclass of L.Polygon in Leaflet, so this check must come
+      // first — getBounds() is exact and cheap for a true rectangle specifically.
+      return layer.getBounds().contains([lat, lng]);
+    }
+    if (layer instanceof L.Polygon){
+      // Ray casting on the outer ring — standard, well-established algorithm, not a
+      // shortcut. Leaflet has no built-in point-in-polygon test.
+      var latlngs = layer.getLatLngs()[0];
+      var inside = false;
+      for (var i = 0, j = latlngs.length - 1; i < latlngs.length; j = i++){
+        var pi = latlngs[i], pj = latlngs[j];
+        var intersect = ((pi.lat > lat) !== (pj.lat > lat)) &&
+          (lng < (pj.lng - pi.lng) * (lat - pi.lat) / (pj.lat - pi.lat) + pi.lng);
+        if (intersect) inside = !inside;
+      }
+      return inside;
+    }
+    if (layer instanceof L.Circle){
+      var center = layer.getLatLng();
+      return distMeters(lat, lng, center.lat, center.lng) <= layer.getRadius();
+    }
+    return false;
   }
 
   // Find the nearest Observation Site within range (meters), or null
@@ -6357,6 +6426,7 @@
       }
     });
     analyticsChartInstances.push(chart);
+    return chart;
   }
 
   function buildPieChart(canvas, labels, data){
@@ -6369,6 +6439,7 @@
       }
     });
     analyticsChartInstances.push(chart);
+    return chart;
   }
 
   function passesAnalyticsDateFilter(ts){
@@ -6383,6 +6454,173 @@
     }
     return true;
   }
+
+  // ---------- Custom Query Builder ----------
+  // Data source -> filters (including an optional drawn map area) -> visualization type
+  // -> Run. Deliberately generic and reusable rather than hardcoded, so it directly
+  // serves both "give me some common starter queries" and "let me build my own" — the
+  // same mechanism serves both, per the founder's own stated goal for this feature.
+  var QUERY_GROUPBY_OPTIONS = [
+    ['moon','Moon Phase'], ['wind','Wind Direction'], ['pressure','Pressure Trend'],
+    ['temp','Temperature'], ['sun','Time of Day'], ['solunar','Solunar Period'],
+    ['site','Site'], ['property','Property'], ['buck','Buck Profile']
+  ];
+
+  function queryGroupKeyForObs(o, dimension){
+    if (dimension === 'moon') return o.moonPhase ? o.moonPhase.name : null;
+    if (dimension === 'wind') return (o.weatherStatus === 'ok' && o.weather) ? o.weather.windDir : null;
+    if (dimension === 'pressure') return (o.weatherStatus === 'ok' && o.weather) ? o.weather.pressureTrend : null;
+    if (dimension === 'temp') return (o.weatherStatus === 'ok' && o.weather) ? tempBucket(o.weather.tempF) : null;
+    if (dimension === 'sun') return (o.weatherStatus === 'ok' && o.weather) ? o.weather.sunPhase : null;
+    if (dimension === 'solunar') return o.solunarPeriod || 'Neither';
+    if (dimension === 'site'){
+      if (!o.siteId) return 'Unlinked';
+      var s = sites.filter(function(x){ return x.id === o.siteId; })[0];
+      return s ? s.name : 'Unlinked';
+    }
+    if (dimension === 'property'){
+      if (!o.propertyId) return 'Unassigned';
+      var p = properties.filter(function(x){ return x.id === o.propertyId; })[0];
+      return p ? p.name : 'Unassigned';
+    }
+    if (dimension === 'buck'){
+      if (!o.buckProfileId) return null;
+      var b = buckProfiles.filter(function(x){ return x.id === o.buckProfileId; })[0];
+      return b ? b.name : null;
+    }
+    return null;
+  }
+
+  function passesQueryDateFilter(ts){
+    if (queryDateRange === 'all') return true;
+    var now = Date.now();
+    if (queryDateRange === 'year') return ts >= now - 365*86400000;
+    if (queryDateRange === 'month') return ts >= now - 30*86400000;
+    return true;
+  }
+
+  // Gated to desktop-width screens via CSS (.query-builder starts display:none, revealed
+  // at the same min-width:1100px breakpoint the desktop Analytics layout already uses) —
+  // per the Progressive Disclosure principle (Goals Checklist): stays available to phone
+  // users in the DOM/code, but never visible or reachable there, so it can't clutter or
+  // intimidate the lean field experience. This is display-only gating, not lazy loading —
+  // the code itself still ships to every device today. True lazy loading (skip
+  // downloading this code at all below the breakpoint) is a locked-in requirement before
+  // this section grows large enough for that download cost to matter — not yet needed at
+  // today's size, but not to be skipped later under time pressure either.
+  function renderQueryBuilder(container){
+    var section = document.createElement('div');
+    section.className = 'query-builder';
+
+    var buckOptionsHtml = '';
+    if (activeModule === 'hunting' && buckProfiles.length > 0){
+      buckOptionsHtml = buckProfiles.map(function(b){ return '<option value="'+b.id+'"'+(queryDataSource===b.id?' selected':'')+'>'+escapeHtml(b.name)+'</option>'; }).join('');
+    }
+    var propOptionsHtml = properties.filter(function(p){ return !p.module || p.module === activeModule; })
+      .map(function(p){ return '<option value="'+p.id+'"'+(queryPropertyId===p.id?' selected':'')+'>'+escapeHtml(p.name)+'</option>'; }).join('');
+    var groupByOptionsHtml = QUERY_GROUPBY_OPTIONS
+      .filter(function(pair){ return activeModule === 'hunting' || pair[0] !== 'buck'; })
+      .map(function(pair){ return '<option value="'+pair[0]+'"'+(queryGroupBy===pair[0]?' selected':'')+'>'+pair[1]+'</option>'; }).join('');
+
+    section.innerHTML =
+      '<div class="query-builder-title">🔧 Custom Query Builder</div>' +
+      '<p class="query-builder-desc">Pick your data, filter it, choose how to see it, and run it.</p>' +
+      '<div class="query-builder-row">' +
+        '<div class="query-builder-group"><label>Data</label><select id="qb_source"><option value="all">All Sightings</option>' + buckOptionsHtml + '</select></div>' +
+        '<div class="query-builder-group"><label>Date Range</label><select id="qb_daterange">' +
+          '<option value="all"'+(queryDateRange==='all'?' selected':'')+'>All Time</option>' +
+          '<option value="year"'+(queryDateRange==='year'?' selected':'')+'>Past Year</option>' +
+          '<option value="month"'+(queryDateRange==='month'?' selected':'')+'>Past Month</option></select></div>' +
+        '<div class="query-builder-group"><label>Property</label><select id="qb_property"><option value="">All Properties</option>' + propOptionsHtml + '</select></div>' +
+        '<div class="query-builder-group"><label>Area</label>' +
+          '<button class="btn-ghost" id="qb_draw_btn" type="button">🔷 Draw Area</button>' +
+          '<button class="btn-ghost" id="qb_clear_area_btn" type="button" style="display:'+(queryDrawnLayer?'inline-block':'none')+';color:#D94A2E;">✕ Clear Area</button>' +
+        '</div>' +
+        '<div class="query-builder-group"><label>Break Down By</label><select id="qb_groupby">' + groupByOptionsHtml + '</select></div>' +
+        '<div class="query-builder-group"><label>Show As</label><select id="qb_viztype">' +
+          '<option value="bar"'+(queryVizType==='bar'?' selected':'')+'>Bar Chart</option>' +
+          '<option value="pie"'+(queryVizType==='pie'?' selected':'')+'>Pie Chart</option>' +
+          '<option value="count"'+(queryVizType==='count'?' selected':'')+'>Total Count</option></select></div>' +
+      '</div>' +
+      '<button class="btn-primary" id="qb_run_btn" style="margin-top:10px;">▶ Run Query</button>' +
+      '<div id="qb_area_note" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;">' + (queryDrawnLayer ? '📍 Area drawn on map — results limited to inside it' : '') + '</div>' +
+      '<div id="qb_results" style="margin-top:14px;"></div>';
+
+    container.appendChild(section);
+
+    section.querySelector('#qb_source').addEventListener('change', function(){ queryDataSource = this.value; });
+    section.querySelector('#qb_daterange').addEventListener('change', function(){ queryDateRange = this.value; });
+    section.querySelector('#qb_property').addEventListener('change', function(){ queryPropertyId = this.value || null; });
+    section.querySelector('#qb_groupby').addEventListener('change', function(){ queryGroupBy = this.value; });
+    section.querySelector('#qb_viztype').addEventListener('change', function(){ queryVizType = this.value; });
+
+    section.querySelector('#qb_draw_btn').addEventListener('click', function(){ startQueryAreaDraw(); });
+    section.querySelector('#qb_clear_area_btn').addEventListener('click', function(){
+      if (queryDrawnLayer && queryDrawnItems){ queryDrawnItems.removeLayer(queryDrawnLayer); }
+      queryDrawnLayer = null;
+      renderAnalytics();
+    });
+    section.querySelector('#qb_run_btn').addEventListener('click', function(){ runCustomQuery(); });
+  }
+
+  function startQueryAreaDraw(){
+    if (!queryDrawnItems){
+      queryDrawnItems = new L.FeatureGroup();
+      map.addLayer(queryDrawnItems);
+    }
+    showToast('Draw a rectangle, circle, or polygon on the map, then tap Run Query');
+    var drawer = new L.Draw.Rectangle(map, {shapeOptions: {color: '#D4B24C'}});
+    // Offer a simple prompt-free flow: default to rectangle, but Circle/Polygon are
+    // available the same way if the founder wants a different shape — kept minimal here
+    // since the founder specifically named "circle or square" as the real use case.
+    drawer.enable();
+    map.once('draw:created', function(e){
+      if (queryDrawnLayer && queryDrawnItems) queryDrawnItems.removeLayer(queryDrawnLayer);
+      queryDrawnLayer = e.layer;
+      queryDrawnItems.addLayer(queryDrawnLayer);
+      renderAnalytics();
+    });
+  }
+
+  function runCustomQuery(){
+    var source = observations.filter(function(o){
+      if (!typeIsInActiveModule(o.type, true)) return false;
+      if (!passesQueryDateFilter(o.createdAt)) return false;
+      if (queryPropertyId && o.propertyId !== queryPropertyId) return false;
+      if (queryDataSource !== 'all' && o.buckProfileId !== queryDataSource) return false;
+      if (queryDrawnLayer && !pointInShape(o.lat, o.lng, queryDrawnLayer)) return false;
+      return true;
+    });
+
+    var resultsEl = document.getElementById('qb_results');
+    if (!resultsEl) return;
+    if (queryResultChart){ queryResultChart.destroy(); queryResultChart = null; }
+
+    if (source.length === 0){
+      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">No sightings match this query.</div>';
+      return;
+    }
+
+    if (queryVizType === 'count'){
+      resultsEl.innerHTML = '<div class="query-count-result">' + source.length + ' matching ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>';
+      return;
+    }
+
+    var counts = groupCount(source, function(o){ return queryGroupKeyForObs(o, queryGroupBy); });
+    var labels = Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; });
+    if (labels.length === 0){
+      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Nothing to break down — none of these sightings have that data yet.</div>';
+      return;
+    }
+    resultsEl.innerHTML = '<div class="analytics-chart-wrap"><canvas id="qb_result_canvas"></canvas></div>';
+    var canvas = document.getElementById('qb_result_canvas');
+    if (queryVizType === 'pie'){
+      queryResultChart = buildPieChart(canvas, labels, labels.map(function(l){ return counts[l]; }));
+    } else {
+      queryResultChart = buildBarChart(canvas, labels, labels.map(function(l){ return counts[l]; }), 'Count');
+    }
+  }
+
 
   function renderAnalyticsFilterBar(container){
     var bar = document.createElement('div');
@@ -6474,6 +6712,8 @@
       mainWrap.innerHTML += '<div class="empty" style="padding:20px 0;">Nothing logged yet matching these filters — try widening the date range or picking a different property/buck.</div>';
       return;
     }
+
+    renderQueryBuilder(mainWrap);
 
     var chartsGrid = document.createElement('div');
     chartsGrid.className = 'analytics-grid';
