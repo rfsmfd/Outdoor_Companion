@@ -1633,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 83</div>
+    <div id="buildBadge">BUILD 84</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2126,6 +2126,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-array@3"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-contour@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -2251,6 +2253,7 @@
   var queryDrawnItems = null;
   var queryResultChart = null;
   var queryHeatLayer = null; // the active heat map layer on the main map, if any
+  var queryHomeRangeLayers = []; // array of ring polygon layers, if home range rings are shown
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
   var QR_PREFIX = 'OC-CAM:'; // legacy format, still recognized by the in-page scanner as a fallback
 
@@ -4663,6 +4666,7 @@
       // content — it must be explicitly cleared here, or it would keep showing over
       // Sites/Log/Cameras after navigating away, which would be genuinely confusing.
       if (typeof queryHeatLayer !== 'undefined' && queryHeatLayer){ map.removeLayer(queryHeatLayer); queryHeatLayer = null; }
+      if (typeof queryHomeRangeLayers !== 'undefined' && queryHomeRangeLayers.length){ queryHomeRangeLayers.forEach(function(l){ map.removeLayer(l); }); queryHomeRangeLayers = []; }
       renderActiveList();
     });
   });
@@ -6563,7 +6567,8 @@
           '<option value="bar"'+(queryVizType==='bar'?' selected':'')+'>Bar Chart</option>' +
           '<option value="pie"'+(queryVizType==='pie'?' selected':'')+'>Pie Chart</option>' +
           '<option value="count"'+(queryVizType==='count'?' selected':'')+'>Total Count</option>' +
-          '<option value="heatmap"'+(queryVizType==='heatmap'?' selected':'')+'>Heat Map</option></select></div>' +
+          '<option value="heatmap"'+(queryVizType==='heatmap'?' selected':'')+'>Heat Map</option>' +
+          '<option value="homerange"'+(queryVizType==='homerange'?' selected':'')+'>Home Range Rings</option></select></div>' +
       '</div>' +
       '<button class="btn-primary" id="qb_run_btn" style="margin-top:10px;">▶ Run Query</button>' +
       '<div id="qb_area_note" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;">' + (queryDrawnLayer ? '📍 Area drawn on map — results limited to inside it' : '') + '</div>' +
@@ -6580,9 +6585,9 @@
       // Break Down By is meaningless for Count (a single total) and Heat Map (purely
       // spatial density, not a category breakdown) — hide it for those specifically
       // rather than leave a control on screen that does nothing.
-      section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'heatmap') ? 'none' : '';
+      section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
     });
-    section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'heatmap') ? 'none' : '';
+    section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
 
     section.querySelector('#qb_draw_btn').addEventListener('click', function(){ startQueryAreaDraw(); });
     section.querySelector('#qb_clear_area_btn').addEventListener('click', function(){
@@ -6612,6 +6617,107 @@
     });
   }
 
+  // Home Range Rings — density-threshold bands, deliberately NOT labeled as a rigorous
+  // statistical volume-percentile the way professional wildlife studies compute (that
+  // would need real numerical integration this build doesn't attempt) — an honest,
+  // simpler approximation: 4 evenly-spaced bands of d3's kernel density estimate relative
+  // to the peak, which is visually and conceptually similar without overclaiming rigor,
+  // especially given hunting-scale sample sizes (a handful of sightings) are already far
+  // below what real home-range statistics assume (see Checklist's honest caveat on this).
+  // Founder's own framing: innermost/smallest ring = "100%" (core, most concentrated),
+  // outermost/largest = "25%" (edge of meaningfully notable activity).
+  function renderHomeRangeRings(source, resultsEl){
+    if (typeof d3 === 'undefined' || !d3.contourDensity){
+      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Home Range Rings couldn\'t load its required library — try again, or check your connection.</div>';
+      return;
+    }
+    if (source.length < 3){
+      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Need at least 3 sightings to estimate a home range — this query only matched ' + source.length + '.</div>';
+      return;
+    }
+    // Local equirectangular-style projection to meters, relative to the centroid — a
+    // reasonable approximation at hunting-property scale (a few miles at most), not a
+    // full geodesic projection, which would be real overkill at this scale.
+    var centerLat = source.reduce(function(s,o){ return s+o.lat; }, 0) / source.length;
+    var centerLng = source.reduce(function(s,o){ return s+o.lng; }, 0) / source.length;
+    var metersPerDegLat = 111320;
+    var metersPerDegLng = 111320 * Math.cos(centerLat * Math.PI/180);
+    var points = source.map(function(o){
+      return [(o.lng - centerLng) * metersPerDegLng, (o.lat - centerLat) * metersPerDegLat];
+    });
+    var xs = points.map(function(p){ return p[0]; });
+    var ys = points.map(function(p){ return p[1]; });
+    var pad = 200; // meters of padding so the outer ring isn't clipped at the data's edge
+    var xMin = Math.min.apply(null, xs) - pad, xMax = Math.max.apply(null, xs) + pad;
+    var yMin = Math.min.apply(null, ys) - pad, yMax = Math.max.apply(null, ys) + pad;
+
+    var contourGen = d3.contourDensity()
+      .x(function(d){ return d[0]; })
+      .y(function(d){ return d[1]; })
+      .size([200, 200]) // internal grid resolution, independent of real-world scale
+      .weight(function(){ return 1; });
+    // Map the real meter-space extent onto the internal 200x200 grid the generator uses.
+    var scaleX = function(x){ return (x - xMin) / (xMax - xMin) * 200; };
+    var scaleY = function(y){ return (y - yMin) / (yMax - yMin) * 200; };
+    var gridPoints = points.map(function(p){ return [scaleX(p[0]), scaleY(p[1])]; });
+    contourGen.bandwidth(20).thresholds(4);
+    var contours;
+    try{
+      contours = contourGen(gridPoints);
+    }catch(e){
+      console.error('Outdoor Companion: home range contour generation failed', e);
+      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Couldn\'t generate a home range for this data — try a different query.</div>';
+      return;
+    }
+    if (!contours || contours.length === 0){
+      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Not enough spatial spread in this data to estimate a home range.</div>';
+      return;
+    }
+
+    // Sort by density value ascending — lowest density (largest, outermost ring) first,
+    // so higher rings draw on top of lower ones and are visible rather than covered.
+    contours.sort(function(a,b){ return a.value - b.value; });
+    var ringLabels = ['25%', '50%', '75%', '100%'];
+    var ringColors = ['#6B8F5C', '#8FA05C', '#D4B24C', '#FF6A13']; // green (edge) to blaze orange (core), matching the app's own established palette
+
+    contours.forEach(function(contour, idx){
+      var label = ringLabels[idx] || ((idx+1) + '');
+      var color = ringColors[idx] || '#FF6A13';
+      contour.coordinates.forEach(function(polygon){
+        // Convert grid coordinates back through meters back to real lat/lng.
+        var latlngs = polygon.map(function(ring){
+          return ring.map(function(pt){
+            var xMeters = (pt[0] / 200) * (xMax - xMin) + xMin;
+            var yMeters = (pt[1] / 200) * (yMax - yMin) + yMin;
+            var lat = centerLat + (yMeters / metersPerDegLat);
+            var lng = centerLng + (xMeters / metersPerDegLng);
+            return [lat, lng];
+          });
+        });
+        var poly = L.polygon(latlngs, {
+          color: color,
+          weight: 2,
+          fillColor: color,
+          fillOpacity: 0.18,
+          interactive: false
+        }).addTo(map);
+        poly.bindTooltip(label + ' band', {sticky: true});
+        queryHomeRangeLayers.push(poly);
+      });
+    });
+
+    var bounds = L.latLngBounds(source.map(function(o){ return [o.lat, o.lng]; }));
+    map.fitBounds(bounds, {padding: [40, 40]});
+    resultsEl.innerHTML = '<div class="query-count-result" style="font-size:16px;">🎯 Showing home range rings — ' + source.length + ' ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>' +
+      '<div style="font-size:10.5px;color:var(--text-dim);margin-top:4px;">Density-based bands, not a formal statistical home range — treat as a visual guide, especially with limited sightings.</div>' +
+      '<button class="btn-ghost" id="qb_clear_homerange_btn" type="button" style="width:100%;margin-top:8px;">✕ Clear Home Range Rings</button>';
+    document.getElementById('qb_clear_homerange_btn').addEventListener('click', function(){
+      queryHomeRangeLayers.forEach(function(l){ map.removeLayer(l); });
+      queryHomeRangeLayers = [];
+      resultsEl.innerHTML = '';
+    });
+  }
+
   function runCustomQuery(){
     var source = observations.filter(function(o){
       if (!typeIsInActiveModule(o.type, true)) return false;
@@ -6628,9 +6734,15 @@
     // Cleared regardless of which viz type is now selected — switching away from Heat Map
     // to Bar/Pie/Count should never leave a stale heat layer sitting on the map.
     if (queryHeatLayer){ map.removeLayer(queryHeatLayer); queryHeatLayer = null; }
+    if (queryHomeRangeLayers.length){ queryHomeRangeLayers.forEach(function(l){ map.removeLayer(l); }); queryHomeRangeLayers = []; }
 
     if (source.length === 0){
       resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">No sightings match this query.</div>';
+      return;
+    }
+
+    if (queryVizType === 'homerange'){
+      renderHomeRangeRings(source, resultsEl);
       return;
     }
 
