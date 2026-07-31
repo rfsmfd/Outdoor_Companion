@@ -1633,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 91</div>
+    <div id="buildBadge">BUILD 92</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3160,11 +3160,21 @@
   });
   modalHistoryObserver.observe(document.body, {subtree:true, attributes:true, attributeFilter:['class'], attributeOldValue:true});
 
-  function markerIcon(type){
+  // For camera sites specifically, shows the camera's own number (extracted from its
+  // name, e.g. "Camera 3" -> "3") right on the map icon, so multiple cameras are
+  // distinguishable at a glance instead of every one showing the same generic "CAM"
+  // label. Falls back to the standard type abbreviation for every other site type, and
+  // for cameras whose name doesn't contain a number to extract.
+  function markerIcon(type, siteName){
     var t = getActiveTypes()[type] || getFallbackTypeEntry(false);
+    var label = t.abbrev;
+    if (type === 'camera' && siteName){
+      var numMatch = siteName.match(/\d+/);
+      if (numMatch) label = numMatch[0];
+    }
     return L.divIcon({
       className: '',
-      html: '<div class="site-marker" style="--mc:'+t.color+'">'+t.abbrev+'</div>',
+      html: '<div class="site-marker" style="--mc:'+t.color+'">'+label+'</div>',
       iconSize: [28,28],
       iconAnchor: [14,14],
       popupAnchor: [0,-16]
@@ -4062,7 +4072,7 @@
       if (!activeFilters.has(s.type)) return;
       if (!passesDateFilter(s.lastActivityAt || s.createdAt)) return;
       if (!passesPropertyFilter(s)) return;
-      var m = L.marker([s.lat,s.lng], {icon: markerIcon(s.type)}).addTo(map);
+      var m = L.marker([s.lat,s.lng], {icon: markerIcon(s.type, s.name)}).addTo(map);
       m.bindPopup(popupHtml(s));
       m.on('popupopen', function(e){ bindPopupActions(e.popup, s.id); });
       markers[s.id] = m;
