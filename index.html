@@ -1633,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 86</div>
+    <div id="buildBadge">BUILD 89</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6445,6 +6445,46 @@
     return '105°F+';
   }
 
+  // Actual barometric pressure, bucketed the same way temperature is — a real, useful
+  // complement to the existing Rising/Falling/Steady trend, since a "falling" trend from
+  // 30.10 to 30.05 inHg is meaningfully different from one that dropped to 29.40.
+  function pressureBucket(inHg){
+    if (inHg == null) return null;
+    if (inHg < 29.30) return 'Under 29.30"';
+    if (inHg < 29.60) return '29.30-29.60"';
+    if (inHg < 29.80) return '29.60-29.80"';
+    if (inHg < 30.00) return '29.80-30.00"';
+    if (inHg < 30.20) return '30.00-30.20"';
+    return '30.20"+';
+  }
+
+  // Actual clock time, bucketed into 2-hour windows across the full day — a real
+  // complement to the existing sun-relative categories (Dawn/Daytime/Dusk/Night), since
+  // those shift with the season while an actual hour doesn't. Uses the sighting's own
+  // local timestamp directly, ordered chronologically starting at midnight rather than
+  // alphabetically, so a chart reads left-to-right as the day actually progresses.
+  var HOUR_BUCKET_ORDER = ['12AM-2AM','2AM-4AM','4AM-6AM','6AM-8AM','8AM-10AM','10AM-12PM','12PM-2PM','2PM-4PM','4PM-6PM','6PM-8PM','8PM-10PM','10PM-12AM'];
+  function hourBucket(timestampMs){
+    if (timestampMs == null) return null;
+    var hour = new Date(timestampMs).getHours();
+    var idx = Math.floor(hour / 2);
+    return HOUR_BUCKET_ORDER[idx];
+  }
+
+  // Moon illumination as a continuous percentage range, complementing the discrete phase
+  // name — "Waxing Crescent" alone collapses a 5%-lit night and a 45%-lit night into the
+  // same label, which loses real information about actual brightness. Genuinely different
+  // from Solunar Period (moon position/gravitational pull, tracked separately) — this is
+  // specifically about how much light was actually available.
+  var ILLUM_BUCKET_ORDER = ['0-25% lit','25-50% lit','50-75% lit','75-100% lit'];
+  function illuminationBucket(pct){
+    if (pct == null) return null;
+    if (pct < 25) return '0-25% lit';
+    if (pct < 50) return '25-50% lit';
+    if (pct < 75) return '50-75% lit';
+    return '75-100% lit';
+  }
+
   var ANALYTICS_COLORS = ['#FF6A13','#8FA05C','#3B9EFF','#C9A03C','#4A7A6C','#D94A2E','#B08D57','#7A8A94'];
 
   function makeChartCanvas(container, title, id){
@@ -6504,17 +6544,21 @@
   // serves both "give me some common starter queries" and "let me build my own" — the
   // same mechanism serves both, per the founder's own stated goal for this feature.
   var QUERY_GROUPBY_OPTIONS = [
-    ['moon','Moon Phase'], ['wind','Wind Direction'], ['pressure','Pressure Trend'],
-    ['temp','Temperature'], ['sun','Time of Day'], ['solunar','Solunar Period'],
+    ['moon','Moon Phase'], ['illum','Moon Illumination %'], ['wind','Wind Direction'],
+    ['pressure','Pressure Trend'], ['pressureval','Barometric Pressure'], ['temp','Temperature'],
+    ['sun','Time of Day'], ['hour','Actual Clock Time'], ['solunar','Solunar Period'],
     ['site','Site'], ['property','Property'], ['buck','Buck Profile']
   ];
 
   function queryGroupKeyForObs(o, dimension){
     if (dimension === 'moon') return o.moonPhase ? o.moonPhase.name : null;
+    if (dimension === 'illum') return o.moonPhase ? illuminationBucket(o.moonPhase.illumination) : null;
     if (dimension === 'wind') return (o.weatherStatus === 'ok' && o.weather) ? o.weather.windDir : null;
     if (dimension === 'pressure') return (o.weatherStatus === 'ok' && o.weather) ? o.weather.pressureTrend : null;
+    if (dimension === 'pressureval') return (o.weatherStatus === 'ok' && o.weather) ? pressureBucket(o.weather.pressureInHg) : null;
     if (dimension === 'temp') return (o.weatherStatus === 'ok' && o.weather) ? tempBucket(o.weather.tempF) : null;
     if (dimension === 'sun') return (o.weatherStatus === 'ok' && o.weather) ? o.weather.sunPhase : null;
+    if (dimension === 'hour') return hourBucket(o.createdAt);
     if (dimension === 'solunar') return o.solunarPeriod || 'Neither';
     if (dimension === 'site'){
       if (!o.siteId) return 'Unlinked';
@@ -6802,7 +6846,11 @@
     }
 
     var counts = groupCount(source, function(o){ return queryGroupKeyForObs(o, queryGroupBy); });
-    var labels = Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; });
+    var labels = (queryGroupBy === 'hour')
+      ? HOUR_BUCKET_ORDER.filter(function(h){ return counts[h]; })
+      : (queryGroupBy === 'illum')
+      ? ILLUM_BUCKET_ORDER.filter(function(i){ return counts[i]; })
+      : Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; });
     if (labels.length === 0){
       resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Nothing to break down — none of these sightings have that data yet.</div>';
       return;
