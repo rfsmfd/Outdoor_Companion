@@ -1633,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 85</div>
+    <div id="buildBadge">BUILD 86</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5690,7 +5690,8 @@
   // Different purpose from the GIS exports below — this is meant to round-trip straight
   // back into this app (or feed a real database migration later), not for viewing in
   // outside tools. Includes everything: sites, cameras, deployments, observations/catches
-  // (with photos, weight/length/tag#), and properties.
+  // (with photos, weight/length/tag#), properties, hunt events/fishing trips, trails, and
+  // buck profiles.
   function gatherFullBackup(){
     return {
       backupFormat: 'outdoor-companion-full-backup-v1',
@@ -5699,7 +5700,10 @@
       observations: observations,
       cameras: cameras,
       deployments: deployments,
-      properties: properties
+      properties: properties,
+      huntEvents: huntEvents,
+      trails: trails,
+      buckProfiles: buckProfiles
     };
   }
 
@@ -5728,21 +5732,29 @@
       cameras = dedupeById(backup.cameras || []);
       deployments = dedupeById(backup.deployments || []);
       properties = dedupeById(backup.properties || []);
+      huntEvents = dedupeById(backup.huntEvents || []);
+      trails = dedupeById(backup.trails || []);
+      buckProfiles = dedupeById(backup.buckProfiles || []);
       // Persist every restored record back to storage, not just memory.
       for (var i=0;i<sites.length;i++){ await saveSite(sites[i]); }
       for (var j=0;j<observations.length;j++){ await saveObservation(observations[j]); }
       for (var k=0;k<cameras.length;k++){ await saveCamera(cameras[k]); }
       for (var m=0;m<deployments.length;m++){ await saveDeployment(deployments[m]); }
       for (var n=0;n<properties.length;n++){ await saveProperty(properties[n]); }
+      for (var p=0;p<huntEvents.length;p++){ await saveHuntEvent(huntEvents[p]); }
+      for (var q=0;q<trails.length;q++){ await saveTrail(trails[q]); }
+      for (var r=0;r<buckProfiles.length;r++){ await saveBuckProfile(buckProfiles[r]); }
       activeFilters = new Set(Object.keys(getActiveTypes()));
       renderChips();
       renderObsTypeToggles();
       renderPropertySelect();
       renderAll();
       renderObsMarkers();
+      renderAllSavedTrails();
       if (activeTab === 'log') renderLogList();
       if (activeTab === 'cameras') renderCameraList();
-      showToast('Backup restored — ' + sites.length + ' sites, ' + observations.length + ' logged, ' + cameras.length + ' cameras');
+      if (activeTab === 'analytics') renderAnalytics();
+      showToast('Backup restored — ' + sites.length + ' sites, ' + observations.length + ' logged, ' + cameras.length + ' cameras, ' + buckProfiles.length + ' buck profiles');
       document.getElementById('exportModalBackdrop').classList.remove('show');
     }catch(e){
       console.error('Outdoor Companion: restore failed', e);
