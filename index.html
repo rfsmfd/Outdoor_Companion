@@ -1633,7 +1633,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 90</div>
+    <div id="buildBadge">BUILD 91</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2254,6 +2254,7 @@
   var queryResultChart = null;
   var queryHeatLayer = null; // the active heat map layer on the main map, if any
   var queryHomeRangeLayers = []; // array of ring polygon layers, if home range rings are shown
+  var queryPageTotal = 0; // the page-level "X logged sightings" total, shared here so the Query Builder can show "X of Y" against the exact same number
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
   var QR_PREFIX = 'OC-CAM:'; // legacy format, still recognized by the in-page scanner as a fallback
 
@@ -6707,11 +6708,11 @@
   // outermost/largest = "25%" (edge of meaningfully notable activity).
   function renderHomeRangeRings(source, resultsEl){
     if (typeof d3 === 'undefined' || !d3.contourDensity){
-      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Home Range Rings couldn\'t load its required library — try again, or check your connection.</div>';
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">Home Range Rings couldn\'t load its required library — try again, or check your connection.</div>';
       return;
     }
     if (source.length < 3){
-      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Need at least 3 sightings to estimate a home range — this query only matched ' + source.length + '.</div>';
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">Need at least 3 sightings to estimate a home range — this query only matched ' + source.length + '.</div>';
       return;
     }
     // Local equirectangular-style projection to meters, relative to the centroid — a
@@ -6745,11 +6746,11 @@
       contours = contourGen(gridPoints);
     }catch(e){
       console.error('Outdoor Companion: home range contour generation failed', e);
-      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Couldn\'t generate a home range for this data — try a different query.</div>';
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">Couldn\'t generate a home range for this data — try a different query.</div>';
       return;
     }
     if (!contours || contours.length === 0){
-      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Not enough spatial spread in this data to estimate a home range.</div>';
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">Not enough spatial spread in this data to estimate a home range.</div>';
       return;
     }
 
@@ -6787,7 +6788,7 @@
 
     var bounds = L.latLngBounds(source.map(function(o){ return [o.lat, o.lng]; }));
     map.fitBounds(bounds, {padding: [40, 40]});
-    resultsEl.innerHTML = '<div class="query-count-result" style="font-size:16px;">🎯 Showing home range rings — ' + source.length + ' ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>' +
+    resultsEl.innerHTML += '<div class="query-count-result" style="font-size:16px;">🎯 Showing home range rings — ' + source.length + ' ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>' +
       '<div style="font-size:10.5px;color:var(--text-dim);margin-top:4px;">Density-based bands, not a formal statistical home range — treat as a visual guide, especially with limited sightings.</div>' +
       '<button class="btn-ghost" id="qb_clear_homerange_btn" type="button" style="width:100%;margin-top:8px;">✕ Clear Home Range Rings</button>';
     document.getElementById('qb_clear_homerange_btn').addEventListener('click', function(){
@@ -6815,8 +6816,15 @@
     if (queryHeatLayer){ map.removeLayer(queryHeatLayer); queryHeatLayer = null; }
     if (queryHomeRangeLayers.length){ queryHomeRangeLayers.forEach(function(l){ map.removeLayer(l); }); queryHomeRangeLayers = []; }
 
+    // Shows how much of the page-level total this specific query actually used —
+    // resolves a real, reported ambiguity: the big header above ("X logged sightings")
+    // and this query's own result are two genuinely separate numbers, easy to conflate
+    // when they sit close together on the same page. Always shown first, regardless of
+    // which visualization is selected below it.
+    resultsEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Using ' + source.length + ' of ' + queryPageTotal + ' total logged ' + (queryPageTotal === 1 ? 'sighting' : 'sightings') + '</div>';
+
     if (source.length === 0){
-      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">No sightings match this query.</div>';
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">No sightings match this query.</div>';
       return;
     }
 
@@ -6826,7 +6834,7 @@
     }
 
     if (queryVizType === 'count'){
-      resultsEl.innerHTML = '<div class="query-count-result">' + source.length + ' matching ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>';
+      resultsEl.innerHTML += '<div class="query-count-result">' + source.length + ' matching ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>';
       return;
     }
 
@@ -6854,7 +6862,7 @@
       }, 0);
       var bounds = L.latLngBounds(source.map(function(o){ return [o.lat, o.lng]; }));
       map.fitBounds(bounds, {padding: [40, 40]});
-      resultsEl.innerHTML = '<div class="query-count-result" style="font-size:16px;">🔥 Showing heat map on the map — ' + source.length + ' ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>' +
+      resultsEl.innerHTML += '<div class="query-count-result" style="font-size:16px;">🔥 Showing heat map on the map — ' + source.length + ' ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>' +
         '<button class="btn-ghost" id="qb_clear_heatmap_btn" type="button" style="width:100%;margin-top:8px;">✕ Clear Heat Map</button>';
       document.getElementById('qb_clear_heatmap_btn').addEventListener('click', function(){
         if (queryHeatLayer){ map.removeLayer(queryHeatLayer); queryHeatLayer = null; }
@@ -6870,10 +6878,10 @@
       ? ILLUM_BUCKET_ORDER.filter(function(i){ return counts[i]; })
       : Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; });
     if (labels.length === 0){
-      resultsEl.innerHTML = '<div class="empty" style="padding:16px 0;">Nothing to break down — none of these sightings have that data yet.</div>';
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">Nothing to break down — none of these sightings have that data yet.</div>';
       return;
     }
-    resultsEl.innerHTML = '<div class="analytics-chart-wrap"><canvas id="qb_result_canvas"></canvas></div>';
+    resultsEl.innerHTML += '<div class="analytics-chart-wrap"><canvas id="qb_result_canvas"></canvas></div>';
     var canvas = document.getElementById('qb_result_canvas');
     if (queryVizType === 'pie'){
       queryResultChart = buildPieChart(canvas, labels, labels.map(function(l){ return counts[l]; }));
@@ -6960,6 +6968,7 @@
       return true;
     });
     var total = relevantObs.length;
+    queryPageTotal = total; // shared with the Query Builder below, so "X of Y" always matches the header exactly, never a separately-computed number that could drift
 
     var header = document.createElement('div');
     header.className = 'analytics-header';
