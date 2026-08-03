@@ -2136,6 +2136,27 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/esri-leaflet/3.1.0/esri-leaflet.min.js"></script>
+<!-- Firebase (cloud sync) — compat SDK so it works with the app's classic (non-module)
+     script below. The config keys are public identifiers, NOT secrets; who can read/write
+     is controlled by Firestore security rules, not by hiding these. -->
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script>
+  (function(){
+    try{
+      var firebaseConfig = {
+        apiKey: "AIzaSyByv_omLC3aUe0Eyoahm8SyOegPN1oLjII",
+        authDomain: "outdoor-companion-ee5b3.firebaseapp.com",
+        projectId: "outdoor-companion-ee5b3",
+        storageBucket: "outdoor-companion-ee5b3.firebasestorage.app",
+        messagingSenderId: "567149311282",
+        appId: "1:567149311282:web:e5f7af77639669091b132b"
+      };
+      if (typeof firebase !== 'undefined'){ firebase.initializeApp(firebaseConfig); }
+    }catch(e){ console.warn('Firebase init skipped:', e); }
+  })();
+</script>
 <script>
 (function(){
 
@@ -6401,7 +6422,7 @@
   renderChips();
   renderObsTypeToggles();
   updateBuckGalleryButtonVisibility();
-  (async function initLoadAndUrlCheck(){
+  async function initLoadAndUrlCheck(){
     await loadSites();
     await loadObservations();
     await loadCameras();
@@ -6422,6 +6443,249 @@
     // its Query Builder would have rendered with an empty Data dropdown and never
     // refreshed on its own. Catches that directly rather than leaving it to chance.
     if (activeTab === 'analytics') renderAnalytics();
+  }
+
+  // ================= Cloud sync (Firebase) — Phase 1: login + per-user sync =================
+  // Each signed-in user's records live in Firestore at  users/{uid}/{collection}/{id}
+  // where {collection} maps from the app's existing storage prefixes (site:, obs:, ...).
+  // We provide a Firebase-backed object with the SAME interface the app already uses for
+  // window.storage (list/get/set/delete), then flip hasChatStorage=true once signed in —
+  // so every existing load/save/delete path routes to the cloud with no other changes.
+  // Each record is stored as an opaque JSON string in a `data` field, which faithfully
+  // round-trips any shape (including arrays-of-arrays, which Firestore can't store
+  // natively). Structured condition fields for the future aggregate-insights feature can
+  // be layered on later without disturbing this.
+  var CLOUD_COLLECTIONS = {
+    site:'sites', obs:'observations', buck:'bucks', trail:'trails',
+    hunt:'hunts', cam:'cameras', dep:'deployments', prop:'properties'
+  };
+  function cloudCollName(prefix){
+    var p = String(prefix).replace(/:$/, '');
+    return CLOUD_COLLECTIONS[p] || p;
+  }
+  function cloudParseKey(key){
+    var i = String(key).indexOf(':');
+    return { coll: cloudCollName(key.slice(0, i)), id: key.slice(i + 1) };
+  }
+
+  function makeCloudStorage(uid){
+    var db = firebase.firestore();
+    var userRef = db.collection('users').doc(uid);
+    var cache = {}; // key -> data string; filled by list() so get() needs no extra read
+    return {
+      list: async function(prefix){
+        var coll = cloudCollName(prefix);
+        var p = String(prefix).replace(/:$/, '');
+        var snap = await userRef.collection(coll).get();
+        var keys = [];
+        snap.forEach(function(doc){
+          var k = p + ':' + doc.id;
+          keys.push(k);
+          var d = doc.data();
+          cache[k] = (d && typeof d.data === 'string') ? d.data : JSON.stringify(d || {});
+        });
+        return { keys: keys };
+      },
+      get: async function(key){
+        if (Object.prototype.hasOwnProperty.call(cache, key)) return { value: cache[key] };
+        var pk = cloudParseKey(key);
+        var doc = await userRef.collection(pk.coll).doc(pk.id).get();
+        if (!doc.exists) return null;
+        var d = doc.data();
+        var val = (d && typeof d.data === 'string') ? d.data : JSON.stringify(d || {});
+        cache[key] = val;
+        return { value: val };
+      },
+      set: async function(key, value){
+        var pk = cloudParseKey(key);
+        cache[key] = value;
+        await userRef.collection(pk.coll).doc(pk.id).set({
+          data: value,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      },
+      delete: async function(key){
+        var pk = cloudParseKey(key);
+        delete cache[key];
+        await userRef.collection(pk.coll).doc(pk.id).delete();
+      }
+    };
+  }
+
+  // One-time upload of anything already in THIS browser's localStorage into the user's
+  // cloud account, so nothing entered before the cloud existed is lost. Runs at most once
+  // per (device, account) and never when the account already has cloud data (so it can't
+  // clobber newer cloud edits with stale local copies).
+  async function migrateLocalToCloudIfNeeded(uid){
+    var flagKey = 'oc_cloud_migrated_' + uid;
+    try{ if (localStorage.getItem(flagKey)) return; }catch(e){ return; }
+    var userRef = firebase.firestore().collection('users').doc(uid);
+    try{
+      var probes = ['sites','observations','cameras'];
+      for (var pi=0; pi<probes.length; pi++){
+        var ex = await userRef.collection(probes[pi]).limit(1).get();
+        if (!ex.empty){ localStorage.setItem(flagKey, '1'); return; }
+      }
+    }catch(e){}
+    var lsMap = {
+      site: LS_KEY, obs: OBS_LS_KEY, buck: BUCK_LS_KEY, trail: TRAIL_LS_KEY,
+      hunt: HUNT_LS_KEY, cam: CAM_LS_KEY, dep: DEP_LS_KEY, prop: PROP_LS_KEY
+    };
+    var total = 0;
+    for (var prefix in lsMap){
+      if (!Object.prototype.hasOwnProperty.call(lsMap, prefix)) continue;
+      var raw = null;
+      try{ raw = localStorage.getItem(lsMap[prefix]); }catch(e){}
+      if (!raw) continue;
+      var arr; try{ arr = JSON.parse(raw); }catch(e){ continue; }
+      if (!Array.isArray(arr)) continue;
+      for (var i=0; i<arr.length; i++){
+        var item = arr[i];
+        if (item && item.id){
+          try{ await window.storage.set(prefix + ':' + item.id, JSON.stringify(item), false); total++; }catch(e){}
+        }
+      }
+    }
+    try{ localStorage.setItem(flagKey, '1'); }catch(e){}
+    if (total > 0) console.log('Outdoor Companion: migrated ' + total + ' local records to the cloud.');
+  }
+
+  // ---- Login / sign-up screen (built in JS so it needs no page-markup changes) ----
+  function buildAuthUI(){
+    if (document.getElementById('oc-auth-overlay')) return;
+    var style = document.createElement('style');
+    style.textContent =
+      '#oc-auth-overlay{position:fixed;inset:0;z-index:100000;background:#1E2B23;display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;}' +
+      '#oc-auth-card{width:100%;max-width:360px;background:#26332B;border:1px solid #35443A;border-radius:16px;padding:26px 22px;box-shadow:0 12px 40px rgba(0,0,0,.45);}' +
+      '#oc-auth-card h2{margin:0 0 4px;color:#fff;font-size:22px;text-align:center;}' +
+      '#oc-auth-sub{margin:0 0 18px;color:#9db0a3;font-size:13px;text-align:center;line-height:1.4;}' +
+      '#oc-auth-card label{display:block;color:#c7d4cc;font-size:12px;margin:12px 0 5px;}' +
+      '#oc-auth-card input{width:100%;box-sizing:border-box;padding:12px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#fff;font-size:15px;}' +
+      '#oc-auth-card input:focus{outline:none;border-color:#FF6A13;}' +
+      '#oc-auth-btn{width:100%;margin-top:18px;padding:13px;border:none;border-radius:9px;background:#FF6A13;color:#fff;font-size:16px;font-weight:600;cursor:pointer;}' +
+      '#oc-auth-btn:disabled{opacity:.6;cursor:default;}' +
+      '#oc-auth-toggle{margin-top:14px;text-align:center;color:#9db0a3;font-size:13px;}' +
+      '#oc-auth-toggle a{color:#FF6A13;cursor:pointer;text-decoration:underline;}' +
+      '#oc-auth-forgot{margin-top:10px;text-align:center;}' +
+      '#oc-auth-forgot a{color:#9db0a3;cursor:pointer;font-size:12px;text-decoration:underline;}' +
+      '#oc-auth-msg{margin-top:12px;min-height:16px;text-align:center;font-size:13px;color:#ff8f6b;line-height:1.4;}' +
+      '#oc-auth-msg.ok{color:#7fd6a2;}' +
+      '#oc-signout{position:fixed;top:8px;right:8px;z-index:99990;display:none;align-items:center;gap:8px;background:rgba(30,43,35,.9);border:1px solid #35443A;border-radius:20px;padding:5px 10px;color:#c7d4cc;font-size:12px;font-family:inherit;}' +
+      '#oc-signout button{background:#FF6A13;color:#fff;border:none;border-radius:14px;padding:4px 10px;font-size:12px;cursor:pointer;}';
+    document.head.appendChild(style);
+
+    var overlay = document.createElement('div');
+    overlay.id = 'oc-auth-overlay';
+    overlay.innerHTML =
+      '<div id="oc-auth-card">' +
+      '<h2>Outdoor Companion</h2>' +
+      '<p id="oc-auth-sub">Sign in to sync your sites, cameras &amp; hunts across your devices.</p>' +
+      '<label for="oc-auth-email">Email</label>' +
+      '<input id="oc-auth-email" type="email" autocomplete="email" placeholder="you@example.com" />' +
+      '<label for="oc-auth-pass">Password</label>' +
+      '<input id="oc-auth-pass" type="password" autocomplete="current-password" placeholder="at least 6 characters" />' +
+      '<button id="oc-auth-btn" type="button">Sign In</button>' +
+      '<div id="oc-auth-msg"></div>' +
+      '<div id="oc-auth-toggle">Need an account? <a id="oc-auth-switch">Sign up</a></div>' +
+      '<div id="oc-auth-forgot"><a id="oc-auth-reset">Forgot password?</a></div>' +
+      '</div>';
+    document.body.appendChild(overlay);
+
+    var signout = document.createElement('div');
+    signout.id = 'oc-signout';
+    signout.innerHTML = '<span id="oc-signout-email"></span><button type="button">Sign out</button>';
+    document.body.appendChild(signout);
+
+    var mode = 'signin';
+    var emailEl = document.getElementById('oc-auth-email');
+    var passEl = document.getElementById('oc-auth-pass');
+    var btn = document.getElementById('oc-auth-btn');
+    var msg = document.getElementById('oc-auth-msg');
+    var toggle = document.getElementById('oc-auth-toggle');
+
+    function setMsg(text, ok){ msg.textContent = text || ''; msg.className = ok ? 'ok' : ''; }
+    function setMode(m){
+      mode = m;
+      if (m === 'signup'){
+        btn.textContent = 'Create Account';
+        toggle.innerHTML = 'Have an account? <a id="oc-auth-switch">Sign in</a>';
+        passEl.setAttribute('autocomplete','new-password');
+      } else {
+        btn.textContent = 'Sign In';
+        toggle.innerHTML = 'Need an account? <a id="oc-auth-switch">Sign up</a>';
+        passEl.setAttribute('autocomplete','current-password');
+      }
+      toggle.querySelector('a').addEventListener('click', function(){ setMode(mode === 'signin' ? 'signup' : 'signin'); });
+      setMsg('');
+    }
+    toggle.querySelector('a').addEventListener('click', function(){ setMode('signup'); });
+
+    function humanError(e){
+      var c = (e && e.code) || '';
+      if (c.indexOf('invalid-credential') >= 0 || c.indexOf('wrong-password') >= 0 || c.indexOf('user-not-found') >= 0) return 'Email or password is incorrect.';
+      if (c.indexOf('email-already-in-use') >= 0) return 'That email already has an account — try signing in.';
+      if (c.indexOf('invalid-email') >= 0) return 'That does not look like a valid email.';
+      if (c.indexOf('weak-password') >= 0) return 'Password must be at least 6 characters.';
+      if (c.indexOf('network') >= 0) return 'Network problem — check your connection.';
+      return (e && e.message) ? e.message : 'Something went wrong. Please try again.';
+    }
+    async function submit(){
+      var email = emailEl.value.trim();
+      var pass = passEl.value;
+      if (!email || !pass){ setMsg('Enter your email and password.'); return; }
+      btn.disabled = true; setMsg(mode === 'signup' ? 'Creating your account…' : 'Signing in…', true);
+      try{
+        if (mode === 'signup'){ await firebase.auth().createUserWithEmailAndPassword(email, pass); }
+        else { await firebase.auth().signInWithEmailAndPassword(email, pass); }
+      }catch(e){ setMsg(humanError(e)); btn.disabled = false; }
+    }
+    btn.addEventListener('click', submit);
+    passEl.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') submit(); });
+    document.getElementById('oc-auth-reset').addEventListener('click', async function(){
+      var email = emailEl.value.trim();
+      if (!email){ setMsg('Enter your email above first, then tap “Forgot password?”'); return; }
+      try{ await firebase.auth().sendPasswordResetEmail(email); setMsg('Password reset email sent — check your inbox.', true); }
+      catch(e){ setMsg(humanError(e)); }
+    });
+    signout.querySelector('button').addEventListener('click', function(){ firebase.auth().signOut(); });
+  }
+
+  function showAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o){ o.style.display = 'flex'; var b=document.getElementById('oc-auth-btn'); if(b) b.disabled=false; } }
+  function hideAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o) o.style.display = 'none'; }
+  function showSignoutButton(email){ var s = document.getElementById('oc-signout'); if (s){ s.style.display = 'flex'; var e=document.getElementById('oc-signout-email'); if(e) e.textContent = email || ''; } }
+  function hideSignoutButton(){ var s = document.getElementById('oc-signout'); if (s) s.style.display = 'none'; }
+
+  // ---- Boot: gate the app behind sign-in when Firebase is available ----
+  (function startCloudAuthGate(){
+    var hasFirebase = (typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length > 0);
+    if (!hasFirebase){
+      // Offline or SDK blocked → run on local storage (previous behavior) so the app still
+      // works in the field with no signal.
+      initLoadAndUrlCheck();
+      return;
+    }
+    try{ firebase.firestore().enablePersistence({ synchronizeTabs: true }).catch(function(){}); }catch(e){}
+    buildAuthUI();
+    var didInitForUid = null;
+    firebase.auth().onAuthStateChanged(function(user){
+      if (user){
+        window.storage = makeCloudStorage(user.uid);
+        hasChatStorage = true;
+        hideAuthOverlay();
+        showSignoutButton(user.email);
+        if (didInitForUid === user.uid) return; // don't reload on token refresh
+        didInitForUid = user.uid;
+        (async function(){
+          try{ await migrateLocalToCloudIfNeeded(user.uid); }catch(e){ console.warn('Migration issue:', e); }
+          try{ await initLoadAndUrlCheck(); }catch(e){ console.warn('Cloud load issue:', e); }
+        })();
+      } else {
+        hasChatStorage = false;
+        didInitForUid = null;
+        hideSignoutButton();
+        showAuthOverlay();
+      }
+    });
   })();
 
   // ================= Camera Inventory + QR Deploy =================
