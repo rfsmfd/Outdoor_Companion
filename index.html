@@ -1187,9 +1187,9 @@
   }
   #importPhotosFixedClose.show{ display:flex; align-items:center; justify-content:center; }
   #importPreviewNotice{
-    background:rgba(255,224,102,0.12);
-    border:1px solid #FFE066;
-    color:#FFE066;
+    background:rgba(107,143,92,0.15);
+    border:1px solid #6B8F5C;
+    color:#b7d4a8;
     font-size:11.5px;
     padding:10px 12px;
     border-radius:6px;
@@ -1570,7 +1570,7 @@
       <button class="btn-primary" id="scanDeployBtn" style="flex:1 1 45%;background:#3B9EFF;color:#0A1A2E;">📷 Deploy Camera</button>
       <button class="btn-primary" id="batchAddBtn" style="flex:1 1 45%;background:#B8AF9C;color:#1A1204;">🖶 Batch Generate QR Codes</button>
       <button class="btn-ghost" id="printAllBtn" style="flex:1 1 45%;">Print / Re-print Sheet</button>
-      <button class="btn-primary" id="importPhotosBtn" style="flex:1 1 100%;background:#6B8F5C;color:#0F1A0C;">🗂 Import Photos (Preview)</button>
+      <button class="btn-primary" id="importPhotosBtn" style="flex:1 1 100%;background:#6B8F5C;color:#0F1A0C;">🗂 Import Photos</button>
     </div>
 
     <button id="tagHistoryBtn" style="display:none;">🏷 Search Tag History</button>
@@ -1779,7 +1779,7 @@
   <div class="oc-modal-backdrop" id="importPhotosModalBackdrop">
     <div class="oc-modal" id="importPhotosModal">
       <h3>Import Photos <button class="close-x" id="importPhotosClose">&times;</button></h3>
-      <div id="importPreviewNotice">⚠ Preview only — this proves the matching logic works, but photos are NOT saved yet (no cloud storage in this prototype). They'll disappear if you reload the page.</div>
+      <div id="importPreviewNotice">☁ Photos are saved to your cloud account (full quality, kept for antler comparison) and synced across your devices. Each photo is matched to the site its camera was on at capture time.</div>
 
       <div class="form-pop" id="importPickerArea">
         <label>Which camera are these photos from?</label>
@@ -2142,6 +2142,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-storage-compat.js"></script>
 <script>
   (function(){
     try{
@@ -6431,6 +6432,7 @@
     await loadHuntEvents();
     await loadTrails();
     await loadBuckProfiles();
+    await loadImportedPhotos();
     renderAllSavedTrails();
     // If a hunt was left active from a previous session (app closed without tapping End
     // Hunt), pick that state back up rather than silently losing track of it.
@@ -6457,7 +6459,8 @@
   // be layered on later without disturbing this.
   var CLOUD_COLLECTIONS = {
     site:'sites', obs:'observations', buck:'bucks', trail:'trails',
-    hunt:'hunts', cam:'cameras', dep:'deployments', prop:'properties'
+    hunt:'hunts', cam:'cameras', dep:'deployments', prop:'properties',
+    photo:'photos'
   };
   function cloudCollName(prefix){
     var p = String(prefix).replace(/:$/, '');
@@ -7636,23 +7639,126 @@
   }
 
   // ---------- Bulk Photo Import (Preview) ----------
-  // Session-only storage — proves the real matching logic (EXIF timestamp + Deployment
-  // History cross-reference) without needing real cloud storage yet. Swapping this for
-  // permanent storage later means replacing ONLY persistImportedPhoto()'s body — nothing
-  // else in this feature needs to change.
+  // Session-only list of the CURRENT import batch, for immediate on-screen preview.
   var importedPhotosSession = [];
+  // All trail-cam photos saved to the cloud (loaded on startup). Each is a metadata record
+  // whose full image lives in Firebase Storage. `antler` is reserved for Phase 2.5
+  // (auto-tagging & antler comparison) so the pipeline is ready to feed it.
+  var importedPhotos = [];
 
-  function persistImportedPhoto(photoRecord){
-    // TODO when real backend exists: upload photoRecord.blob to cloud storage here,
-    // save the resulting URL + metadata to the real database, instead of this array.
+  // Analysis-grade compression: resize to a generous max dimension at good JPEG quality,
+  // returned as a Blob for upload to Storage. Deliberately NOT aggressive — trail-cam
+  // bucks are often far in frame, and over-shrinking would destroy the antler detail that
+  // Phase 2.5 needs. Falls back to the original blob if the canvas step fails.
+  function compressImageToBlob(fileOrBlob, maxDim, quality){
+    return new Promise(function(resolve){
+      try{
+        var reader = new FileReader();
+        reader.onload = function(e){
+          var img = new Image();
+          img.onload = function(){
+            var w = img.width, h = img.height;
+            if (w > h){ if (w > maxDim){ h = Math.round(h * maxDim / w); w = maxDim; } }
+            else { if (h > maxDim){ w = Math.round(w * maxDim / h); h = maxDim; } }
+            var canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            canvas.toBlob(function(blob){ resolve(blob || fileOrBlob); }, 'image/jpeg', quality);
+          };
+          img.onerror = function(){ resolve(fileOrBlob); };
+          img.src = e.target.result;
+        };
+        reader.onerror = function(){ resolve(fileOrBlob); };
+        reader.readAsDataURL(fileOrBlob);
+      }catch(e){ resolve(fileOrBlob); }
+    });
+  }
+
+  function cloudPhotosAvailable(){
+    return hasChatStorage && (typeof firebase !== 'undefined') && firebase.auth && firebase.auth().currentUser;
+  }
+
+  // Uploads one imported photo's image to Firebase Storage (analysis-grade) and saves its
+  // metadata (+ a small browsing thumbnail) to Firestore. Also keeps it in the session
+  // list for immediate preview. If the cloud is unavailable, it still previews locally.
+  async function persistImportedPhoto(photoRecord){
     importedPhotosSession.push(photoRecord);
+    if (!cloudPhotosAvailable() || !photoRecord.blob){ return; }
+    try{
+      var uid = firebase.auth().currentUser.uid;
+      var storagePath = 'users/' + uid + '/trailcam/' + photoRecord.id + '.jpg';
+      var analysisBlob = await compressImageToBlob(photoRecord.blob, 2048, 0.85);
+      var ref = firebase.storage().ref(storagePath);
+      await ref.put(analysisBlob, { contentType: 'image/jpeg' });
+      var downloadURL = await ref.getDownloadURL();
+      var thumb = await compressImageToBase64(photoRecord.blob, 400, 0.7);
+      var doc = {
+        id: photoRecord.id,
+        cameraId: photoRecord.cameraId,
+        filename: photoRecord.filename,
+        timestamp: photoRecord.timestamp,
+        timestampSource: photoRecord.timestampSource,
+        usedFallbackDate: !!photoRecord.usedFallbackDate,
+        matchedSiteId: photoRecord.matchedSiteId || null,
+        matchedSiteName: photoRecord.matchedSiteName || null,
+        storagePath: storagePath,
+        downloadURL: downloadURL,
+        thumb: thumb,
+        antler: null, // reserved for Phase 2.5 (auto-tagging & antler comparison)
+        createdAt: photoRecord.timestamp || null
+      };
+      await window.storage.set('photo:' + photoRecord.id, JSON.stringify(doc), false);
+      importedPhotos.push(doc);
+      photoRecord.cloudSaved = true;
+    }catch(e){
+      console.warn('Outdoor Companion: photo upload failed', e);
+      photoRecord.cloudSaved = false;
+    }
+  }
+
+  async function loadImportedPhotos(){
+    if (!hasChatStorage){ importedPhotos = []; return; }
+    try{
+      var res = await window.storage.list('photo:', false);
+      var keys = (res && res.keys) ? res.keys : [];
+      var loaded = [];
+      for (var i=0; i<keys.length; i++){
+        try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
+      }
+      importedPhotos = dedupeById(loaded);
+    }catch(e){ importedPhotos = []; }
+  }
+
+  // Renders already-saved trail-cam photos into the import modal's grid, so the backlog is
+  // visible and confirmed to persist across sessions. Newest first; optional camera filter.
+  function renderSavedPhotosGrid(cameraId){
+    var grid = document.getElementById('importResultsGrid');
+    if (!grid) return;
+    var list = importedPhotos.slice();
+    if (cameraId) list = list.filter(function(p){ return p.cameraId === cameraId; });
+    list.sort(function(a,b){ return (b.timestamp||0) - (a.timestamp||0); });
+    if (list.length === 0){ grid.innerHTML = ''; return; }
+    grid.innerHTML = '';
+    list.forEach(function(p){
+      var card = document.createElement('div');
+      card.className = 'import-photo-card';
+      var dateStr = new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
+      var src = p.thumb || p.downloadURL || '';
+      card.innerHTML =
+        '<img src="' + src + '" alt="' + escapeHtml(p.filename||'') + '">' +
+        '<div class="meta">' +
+          '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
+          '<div class="site' + (p.matchedSiteName ? '' : ' unmatched') + '">' + (p.matchedSiteName ? escapeHtml(p.matchedSiteName) : 'No site match') + '</div>' +
+        '</div>';
+      grid.appendChild(card);
+    });
   }
 
   document.getElementById('importPhotosBtn').addEventListener('click', function(){
     var sel = document.getElementById('importCameraSelect');
     sel.innerHTML = cameras.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
       .map(function(c){ return '<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>'; }).join('');
-    document.getElementById('importResultsGrid').innerHTML = '';
+    renderSavedPhotosGrid();
     document.getElementById('importProgress').style.display = 'none';
     document.getElementById('importPickerArea').style.display = 'block';
     document.getElementById('importFileInput').value = '';
@@ -7824,9 +7930,11 @@
         timestampSource: timestampSource, // 'filename' | 'exif' | 'file date'
         matchedSiteId: matchedSite ? matchedSite.id : null,
         matchedSiteName: matchedSite ? matchedSite.name : null,
-        objectUrl: objectUrl
+        objectUrl: objectUrl,
+        blob: job.blob
       };
-      persistImportedPhoto(record);
+      if (cloudPhotosAvailable()) progress.textContent = 'Uploading ' + (k+1) + ' of ' + imageJobs.length + '…';
+      await persistImportedPhoto(record);
       results.push(record);
     }
 
