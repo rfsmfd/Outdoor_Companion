@@ -1694,6 +1694,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
       <button class="layer-btn" data-layer="usgstopo" title="USGS Topo — official U.S. government topographic data">USGS</button>
       <button class="layer-btn" data-layer="opentopo" title="OpenTopoMap — worldwide contour/trail topo">Topo</button>
+      <button class="layer-btn" id="roadsToggleBtn" title="Toggle road names &amp; labels on top of any layer" style="margin-left:6px;border-left:2px solid rgba(255,255,255,0.25);">🛣 Roads</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
@@ -2145,6 +2146,9 @@
     </select>
     <select id="photoLightboxBuck" style="display:none;position:absolute;top:92px;left:16px;background:rgba(0,0,0,0.65);color:#fff;border:1px solid rgba(255,176,102,0.55);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px;max-width:60vw;"></select>
     <button class="close-x" id="photoLightboxClose" title="Close (Esc)" style="position:absolute;top:14px;right:14px;width:46px;height:46px;padding:0;font-size:30px;line-height:44px;text-align:center;background:rgba(0,0,0,0.62);color:#fff;border:1.5px solid rgba(255,255,255,0.5);border-radius:50%;cursor:pointer;z-index:3;">&times;</button>
+    <button id="photoLightboxPrev" title="Previous (←)" style="display:none;position:absolute;top:50%;left:12px;transform:translateY(-50%);width:48px;height:74px;padding:0;font-size:36px;line-height:70px;text-align:center;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.4);border-radius:10px;cursor:pointer;z-index:3;">&#8249;</button>
+    <button id="photoLightboxNext" title="Next (→)" style="display:none;position:absolute;top:50%;right:12px;transform:translateY(-50%);width:48px;height:74px;padding:0;font-size:36px;line-height:70px;text-align:center;background:rgba(0,0,0,0.5);color:#fff;border:1px solid rgba(255,255,255,0.4);border-radius:10px;cursor:pointer;z-index:3;">&#8250;</button>
+    <div id="photoLightboxCounter" style="display:none;position:absolute;top:18px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.6);color:#fff;font-size:12px;padding:4px 12px;border-radius:12px;z-index:3;"></div>
   </div>
 
   <!-- Edit Weather — shared between Quick Log observations/catches and Hunt/Trip events.
@@ -3355,8 +3359,15 @@
   // genuine net change in how many modals are open triggers a push or a back().
   var modalStack = [];
   var suppressBackForModalClose = false;
+  // When a modal is closed via its OWN button (not the back button), the observer below
+  // calls history.back() purely to keep history in sync. That back() fires a popstate we
+  // must NOT treat as a user "go back" — otherwise it would pop and close the modal
+  // UNDERNEATH (e.g. closing the photo lightbox would also close the gallery, dumping you
+  // to the map). This counter lets popstate swallow exactly those self-triggered backs.
+  var pendingSyncBacks = 0;
 
   window.addEventListener('popstate', function(){
+    if (pendingSyncBacks > 0){ pendingSyncBacks--; return; } // our own history-sync back(), not a user press
     if (modalStack.length === 0) return; // nothing open - let normal back navigation happen
     suppressBackForModalClose = true;
     var topModal = modalStack.pop();
@@ -3395,6 +3406,7 @@
     if (netChange > 0){
       for (var i=0; i<netChange; i++) window.history.pushState({ocModal: true}, '');
     } else if (netChange < 0 && !suppressBackForModalClose){
+      pendingSyncBacks += (-netChange); // the popstate(s) these back()s fire are ours to swallow
       for (var j=0; j<-netChange; j++) window.history.back();
     }
     // netChange === 0 (a same-batch replace, e.g. close A + open B together) —
@@ -3573,6 +3585,7 @@
     document.getElementById('photoLightboxAiBtn').style.display = 'none';
     document.getElementById('photoLightboxCorrect').style.display = 'none';
     document.getElementById('photoLightboxBuck').style.display = 'none';
+    galleryLightboxList = []; galleryLightboxIndex = -1; updateLightboxNav(); // no paging for single-image view
     // Deliberately does NOT call closeAllModals() — the lightbox should layer on top of
     // whatever's already open (e.g. the Journal), not replace it, so that closing the
     // lightbox correctly reveals what was open underneath rather than dumping back to
@@ -3590,11 +3603,14 @@
   document.getElementById('photoLightboxImg').addEventListener('click', function(){
     document.getElementById('photoLightboxBackdrop').classList.remove('show');
   });
+  document.getElementById('photoLightboxPrev').addEventListener('click', function(e){ e.stopPropagation(); lightboxNav(-1); });
+  document.getElementById('photoLightboxNext').addEventListener('click', function(e){ e.stopPropagation(); lightboxNav(1); });
   document.addEventListener('keydown', function(e){
-    if (e.key === 'Escape'){
-      var lb = document.getElementById('photoLightboxBackdrop');
-      if (lb && lb.classList.contains('show')) lb.classList.remove('show');
-    }
+    var lb = document.getElementById('photoLightboxBackdrop');
+    if (!lb || !lb.classList.contains('show')) return;
+    if (e.key === 'Escape') lb.classList.remove('show');
+    else if (e.key === 'ArrowLeft') lightboxNav(-1);
+    else if (e.key === 'ArrowRight') lightboxNav(1);
   });
 
   // ---------- Photo Gallery ----------
@@ -3773,7 +3789,7 @@
           photoAiBadgeHtml(p) +
           (p.buckProfileId ? (function(){ var b = buckProfiles.filter(function(x){ return x.id === p.buckProfileId; })[0]; return b ? '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#ffb066;">🦌 ' + escapeHtml(b.name) + '</div>' : ''; })() : '') +
         '</div>';
-      card.addEventListener('click', function(){ showGalleryPhoto(p); });
+      card.addEventListener('click', function(){ showGalleryPhoto(p, list); }); // page through all photos in view
       grid.appendChild(card);
     });
   }
@@ -3808,13 +3824,39 @@
           '<div class="sp' + (v.isBuck ? ' buck' : '') + '">' + escapeHtml(spText) + '</div>' +
           '<div class="dur">' + escapeHtml(durHtml) + '</div>' +
         '</div>';
-      card.title = v.count + ' photo' + (v.count===1?'':'s') + ' in this visit — opens the best frame';
-      card.addEventListener('click', function(){ showGalleryPhoto(v.cover); });
+      card.title = v.count + ' photo' + (v.count===1?'':'s') + ' in this visit — opens the best frame, arrows page through them all';
+      card.addEventListener('click', function(){ showGalleryPhoto(v.cover, v.photos); }); // page through this visit's frames
+
       grid.appendChild(card);
     });
   }
-  function showGalleryPhoto(doc){
+  // A photo can open with a NAV LIST — the frames of a visit, or every photo in the current
+  // view — so the lightbox can page through them (the best shot is often mid-burst).
+  var galleryLightboxList = [];
+  var galleryLightboxIndex = -1;
+  function updateLightboxNav(){
+    var list = galleryLightboxList, i = galleryLightboxIndex;
+    var prev = document.getElementById('photoLightboxPrev');
+    var next = document.getElementById('photoLightboxNext');
+    var counter = document.getElementById('photoLightboxCounter');
+    var multi = list.length > 1;
+    prev.style.display = next.style.display = counter.style.display = multi ? 'block' : 'none';
+    if (multi){
+      prev.style.visibility = (i > 0) ? 'visible' : 'hidden';
+      next.style.visibility = (i < list.length - 1) ? 'visible' : 'hidden';
+      counter.textContent = (i + 1) + ' of ' + list.length;
+    }
+  }
+  function lightboxNav(delta){
+    var ni = galleryLightboxIndex + delta;
+    if (ni < 0 || ni >= galleryLightboxList.length) return;
+    showGalleryPhoto(galleryLightboxList[ni], galleryLightboxList);
+  }
+  function showGalleryPhoto(doc, navList){
     galleryLightboxDoc = doc;
+    if (Array.isArray(navList) && navList.length){ galleryLightboxList = navList; galleryLightboxIndex = navList.indexOf(doc); }
+    else { galleryLightboxList = [doc]; galleryLightboxIndex = 0; }
+    updateLightboxNav();
     document.getElementById('photoLightboxImg').src = doc.downloadURL || doc.thumb || '';
     var cam = cameras.filter(function(c){ return c.id === doc.cameraId; })[0];
     var dateStr = doc.timestamp ? new Date(doc.timestamp).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'}) : 'Unknown date';
@@ -6092,17 +6134,43 @@
 
   // ---------- base layer switcher ----------
   var currentBase = 'aerial';
-  document.querySelectorAll('.layer-btn').forEach(function(btn){
+
+  // Roads/labels overlay — a toggle that paints road names over ANY base layer (esp.
+  // Aerial, which otherwise has nothing to orient by). Same Esri reference tiles as the
+  // import location picker's "Aerial + Roads" hybrid. Preference persists across sessions.
+  var roadsOverlay = L.layerGroup([
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { maxZoom:22 }),
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom:22 })
+  ]);
+  var roadsOn = false;
+  function raiseOverlaysAndMarkers(){
+    if (roadsOn){ map.removeLayer(roadsOverlay); roadsOverlay.addTo(map); } // keep roads above the (re)added base
+    Object.keys(markers).forEach(function(id){ if (markers[id]) markers[id].bringToFront(); });
+  }
+  document.getElementById('roadsToggleBtn').addEventListener('click', function(){
+    roadsOn = !roadsOn;
+    this.classList.toggle('active', roadsOn);
+    if (roadsOn){ roadsOverlay.addTo(map); raiseOverlaysAndMarkers(); } else { map.removeLayer(roadsOverlay); }
+    try{ localStorage.setItem('oc_roads_on', roadsOn ? '1' : '0'); }catch(e){}
+  });
+  try{
+    if (localStorage.getItem('oc_roads_on') === '1'){
+      roadsOn = true; roadsOverlay.addTo(map);
+      document.getElementById('roadsToggleBtn').classList.add('active');
+      raiseOverlaysAndMarkers();
+    }
+  }catch(e){}
+
+  document.querySelectorAll('.layer-btn[data-layer]').forEach(function(btn){
     btn.addEventListener('click', function(){
       var layer = btn.getAttribute('data-layer');
       if (layer === currentBase) return;
       map.removeLayer(baseLayers[currentBase]);
       baseLayers[layer].addTo(map);
       currentBase = layer;
-      document.querySelectorAll('.layer-btn').forEach(function(b){ b.classList.remove('active'); });
+      document.querySelectorAll('.layer-btn[data-layer]').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
-      // keep site markers above the newly added base layer
-      Object.keys(markers).forEach(function(id){ markers[id].bringToFront(); });
+      raiseOverlaysAndMarkers(); // keep roads overlay + site markers above the new base
     });
   });
 
