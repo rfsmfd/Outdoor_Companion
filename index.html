@@ -1249,6 +1249,14 @@
   .cleanup-card .cleanup-cb{ position:absolute; top:6px; left:6px; width:20px; height:20px; z-index:2; cursor:pointer; accent-color:#D94A2E; }
   .cleanup-card .keep-badge{ position:absolute; top:6px; right:6px; z-index:2; font-size:9px; font-weight:700; background:rgba(0,0,0,0.6); color:#7CCB7C; padding:1px 5px; border-radius:8px; display:none; }
   .cleanup-card:not(:has(.cleanup-cb:checked)) .keep-badge{ display:block; }
+  /* Visit cards — a burst of photos of one species at one site collapsed into
+     a single "visit" with a duration. Nothing is deleted; this is a count view. */
+  .visit-card{ position:relative; }
+  .visit-card .visit-count{ position:absolute; top:6px; right:6px; background:rgba(0,0,0,0.72); color:#fff; font-size:10px; font-weight:700; padding:1px 6px; border-radius:9px; z-index:2; }
+  .visit-card.is-buck{ outline:2px solid #E8B04B; outline-offset:-2px; }
+  .visit-card .sp{ font-size:10px; font-weight:700; margin-top:2px; }
+  .visit-card .sp.buck{ color:#E8B04B; }
+  .visit-card .dur{ font-size:9.5px; color:var(--accent); font-weight:600; margin-top:2px; }
   #historyList{ max-height:50vh; overflow-y:auto; }
   .history-row{
     display:flex;
@@ -1693,7 +1701,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 103</div>
+    <div id="buildBadge">BUILD 104</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2014,6 +2022,16 @@
         <select id="gallerySort">
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 4px 0;">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;" title="Collapse bursts of the same animal at the same site into one visit with a duration. No photos are deleted — this only changes how they're counted.">
+          <input type="checkbox" id="galleryGroupVisits"> 👣 Group into visits
+        </label>
+        <select id="galleryVisitGap" style="display:none;flex:0 0 auto;min-width:112px;">
+          <option value="15">15 min gap</option>
+          <option value="30" selected>30 min gap</option>
+          <option value="60">60 min gap</option>
         </select>
       </div>
       <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 6px 0;"></div>
@@ -3563,6 +3581,81 @@
   // ---------- Photo Gallery ----------
   var galleryLightboxDoc = null; // the photo currently shown in the lightbox (for delete)
 
+  // ---------- Visit grouping ("independent detection events") ----------
+  // The counting problem: a busy trail camera fires many frames of ONE animal in
+  // one instance. Counted per-photo, that one visit masquerades as dozens of
+  // sightings and skews any analytics. The fix (standard in camera-trap science):
+  // collapse consecutive photos of the SAME species at the SAME site within a
+  // quiet-period gap into ONE visit with a duration (first frame = arrival, last
+  // frame = departure). This is purely a COUNT view — every photo stays, full
+  // quality, fully browsable; nothing is deleted, merged, or hidden. Fully derived
+  // from data already on each photo, so it applies retroactively to everything.
+  var galleryGroupVisits = false;
+  var galleryVisitGapMin = 30; // tunable quiet-period threshold (minutes)
+  function visitSpeciesOf(p){
+    if (p.ai && p.ai.hasAnimal) return p.ai.primarySpecies || 'animal';
+    if (p.ai && !p.ai.hasAnimal) return 'empty';
+    return 'untagged';
+  }
+  // Best frame to represent a visit: a buck beats any animal beats empty/untagged,
+  // and higher AI confidence wins ties — so the visit's cover promotes the keeper
+  // shot rather than burying it behind an early blurry trigger frame.
+  function pickCoverPhoto(photos){
+    var rank = { high:3, medium:2, low:1 };
+    var best = photos[0], bestScore = -1;
+    photos.forEach(function(p){
+      var s = 0;
+      if (p.ai && p.ai.isBuck) s += 100;
+      else if (p.ai && p.ai.hasAnimal) s += 50;
+      if (p.ai && p.ai.confidence) s += (rank[p.ai.confidence] || 0);
+      if (s > bestScore){ bestScore = s; best = p; }
+    });
+    return best;
+  }
+  function computeVisits(photos, gapMs){
+    var withTs = photos.filter(function(p){ return p.timestamp; });
+    var groups = {};
+    withTs.forEach(function(p){
+      // Location grain is the SITE (a spot can hold more than one camera, and it's
+      // one visit to the spot); fall back to the camera, then a catch-all bucket.
+      var loc = p.matchedSiteId || (p.cameraId ? 'cam:' + p.cameraId : 'unknown');
+      var k = loc + '|' + visitSpeciesOf(p);
+      (groups[k] = groups[k] || []).push(p);
+    });
+    var visits = [];
+    Object.keys(groups).forEach(function(k){
+      var arr = groups[k].sort(function(a,b){ return a.timestamp - b.timestamp; });
+      var cur = null;
+      arr.forEach(function(p){
+        if (cur && (p.timestamp - cur.lastTs) <= gapMs){
+          cur.photos.push(p); cur.lastTs = p.timestamp;
+        } else {
+          cur = { photos:[p], firstTs:p.timestamp, lastTs:p.timestamp,
+                  siteId:p.matchedSiteId||null, siteName:p.matchedSiteName||null,
+                  species:visitSpeciesOf(p) };
+          visits.push(cur);
+        }
+      });
+    });
+    visits.forEach(function(v){
+      v.durationMs = v.lastTs - v.firstTs;
+      v.count = v.photos.length;
+      // Abundance = the PEAK headcount in any single frame, never the sum across
+      // frames (the same two deer in 10 photos are 2 animals, not 20).
+      v.peakCount = v.photos.reduce(function(m,p){ return Math.max(m, (p.ai && p.ai.count) || 0); }, 0);
+      v.isBuck = v.photos.some(function(p){ return p.ai && p.ai.isBuck; });
+      v.cover = pickCoverPhoto(v.photos);
+    });
+    return visits;
+  }
+  function formatVisitDuration(ms){
+    var mins = Math.round(ms / 60000);
+    if (mins < 1) return '<1 min';
+    if (mins < 60) return mins + ' min';
+    var h = Math.floor(mins / 60), m = mins % 60;
+    return h + 'h' + (m ? (' ' + m + 'm') : '');
+  }
+
   function galleryPhotoList(){
     var camF = document.getElementById('galleryCameraFilter').value;
     var siteF = document.getElementById('gallerySiteFilter').value;
@@ -3643,8 +3736,9 @@
     }
     var list = galleryPhotoList();
     empty.style.display = 'none';
-    count.textContent = list.length + ' of ' + importedPhotos.length + ' photo' + (importedPhotos.length===1?'':'s');
     grid.innerHTML = '';
+    if (galleryGroupVisits){ renderGalleryVisits(list, grid, count); return; }
+    count.textContent = list.length + ' of ' + importedPhotos.length + ' photo' + (importedPhotos.length===1?'':'s');
     list.forEach(function(p){
       var card = document.createElement('div');
       card.className = 'import-photo-card';
@@ -3661,6 +3755,42 @@
           (p.buckProfileId ? (function(){ var b = buckProfiles.filter(function(x){ return x.id === p.buckProfileId; })[0]; return b ? '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#ffb066;">🦌 ' + escapeHtml(b.name) + '</div>' : ''; })() : '') +
         '</div>';
       card.addEventListener('click', function(){ showGalleryPhoto(p); });
+      grid.appendChild(card);
+    });
+  }
+  function renderGalleryVisits(list, grid, count){
+    var visits = computeVisits(list, galleryVisitGapMin * 60000);
+    var sortNewest = document.getElementById('gallerySort').value !== 'oldest';
+    visits.sort(function(a,b){ return sortNewest ? b.firstTs - a.firstTs : a.firstTs - b.firstTs; });
+    count.textContent = list.length + ' photo' + (list.length===1?'':'s') + ' → ' + visits.length + ' visit' + (visits.length===1?'':'s');
+    visits.forEach(function(v){
+      var p = v.cover;
+      var card = document.createElement('div');
+      card.className = 'import-photo-card visit-card' + (v.isBuck ? ' is-buck' : '');
+      var src = p.thumb || p.downloadURL || '';
+      var start = new Date(v.firstTs);
+      var dateStr = start.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+      var spLabel = v.species === 'untagged' ? 'Not tagged' : (v.species === 'empty' ? 'Empty' : v.species);
+      var spText = (v.isBuck ? '♂ ' : '') + spLabel + (v.peakCount > 1 ? ' ×' + v.peakCount : '');
+      var durHtml;
+      if (v.durationMs > 0){
+        var end = new Date(v.lastTs);
+        var range = start.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}) + '–' + end.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+        durHtml = '⏱ ' + formatVisitDuration(v.durationMs) + ' · ' + range;
+      } else {
+        durHtml = 'single frame';
+      }
+      card.innerHTML =
+        '<img src="' + src + '" alt="">' +
+        '<span class="visit-count">' + v.count + ' 📷</span>' +
+        '<div class="meta">' +
+          '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
+          '<div class="site' + (v.siteName ? '' : ' unmatched') + '">' + (v.siteName ? escapeHtml(v.siteName) : 'No site match') + '</div>' +
+          '<div class="sp' + (v.isBuck ? ' buck' : '') + '">' + escapeHtml(spText) + '</div>' +
+          '<div class="dur">' + escapeHtml(durHtml) + '</div>' +
+        '</div>';
+      card.title = v.count + ' photo' + (v.count===1?'':'s') + ' in this visit — opens the best frame';
+      card.addEventListener('click', function(){ showGalleryPhoto(v.cover); });
       grid.appendChild(card);
     });
   }
@@ -3902,6 +4032,15 @@
   });
   ['galleryCameraFilter','gallerySiteFilter','gallerySpeciesFilter','gallerySort'].forEach(function(id){
     document.getElementById(id).addEventListener('change', function(){ renderGallery(); refreshTagAllButton(); });
+  });
+  document.getElementById('galleryGroupVisits').addEventListener('change', function(){
+    galleryGroupVisits = this.checked;
+    document.getElementById('galleryVisitGap').style.display = this.checked ? '' : 'none';
+    renderGallery();
+  });
+  document.getElementById('galleryVisitGap').addEventListener('change', function(){
+    galleryVisitGapMin = parseInt(this.value, 10) || 30;
+    if (galleryGroupVisits) renderGallery();
   });
 
   // ---------- Batch AI tagging: tag every untagged photo in the current view ----------
