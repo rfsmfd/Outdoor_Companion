@@ -1775,10 +1775,6 @@
   <div class="oc-modal-backdrop" id="importLocModalBackdrop">
     <div class="oc-modal" id="importLocReviewModal">
       <h3>Set Photo Location <button class="close-x" id="importLocModalClose">&times;</button></h3>
-      <div class="form-pop" style="margin-bottom:10px;">
-        <label>Name this location <em style="color:var(--text-dim);font-style:normal;">(so you can reuse it next time)</em></label>
-        <input type="text" id="importLocName" placeholder="e.g. Creek Cam" />
-      </div>
       <div id="importLocPropRow" class="form-pop" style="margin-bottom:10px;display:none;">
         <label id="importLocPropLabel">Jump to a property</label>
         <select id="importLocPropSelect"><option value="">— Select to jump the map —</option></select>
@@ -1803,6 +1799,10 @@
         </div>
       </div>
       <div id="importLocDragHint">Use road names to find the area, then pan/zoom so the crosshair sits on the camera's real spot</div>
+      <div class="form-pop" style="margin-bottom:10px;">
+        <label>Name this camera site <em style="color:var(--text-dim);font-style:normal;">— saved for future reference &amp; reuse</em></label>
+        <input type="text" id="importLocName" placeholder="e.g. Creek Cam" />
+      </div>
       <button class="btn-primary" id="importLocSaveBtn" style="width:100%;margin-bottom:8px;">Use This Location</button>
       <button class="btn-ghost" id="importLocCancelBtn" style="width:100%;">Cancel</button>
     </div>
