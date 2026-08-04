@@ -1701,7 +1701,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 105</div>
+    <div id="buildBadge">BUILD 106</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4925,6 +4925,21 @@
           (cam.lastDeployedAt ? '<div class="coords">Deployed ' + relTime(cam.lastDeployedAt) + '</div>' : '');
       }
     }
+    // Per-item sharing: a member viewing the group sees others' items read-only; the
+    // owner gets a Share control (whose label shows how many groups it's shared with).
+    var myUid = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+    var isMine = !s.__ownerUid || s.__ownerUid === myUid;
+    var sharedCount = (s.__sharedGroups || []).length;
+    var actionRow;
+    if (activeScope.type === 'group' && !isMine){
+      actionRow = '<div class="ty" style="opacity:.75;font-size:11px;">🤝 Shared by another member · view only</div>';
+    } else {
+      var shareLabel = sharedCount ? ('🤝 Shared (' + sharedCount + ')') : '🤝 Share';
+      actionRow = '<div class="row">' +
+        (myGroups.length ? '<button class="btn-ghost" data-act="share" data-id="'+s.id+'">'+shareLabel+'</button>' : '') +
+        '<button class="btn-ghost" data-act="delete" data-id="'+s.id+'">Delete</button>' +
+      '</div>';
+    }
     return '' +
       '<div class="pop">' +
         '<h3>'+escapeHtml(s.name)+'</h3>' +
@@ -4932,9 +4947,7 @@
         camInfo +
         (s.notes ? '<div class="notes">'+escapeHtml(s.notes)+'</div>' : '') +
         '<div class="coords">'+fmtCoord(s.lat)+', '+fmtCoord(s.lng)+'</div>' +
-        '<div class="row">' +
-          '<button class="btn-ghost" data-act="delete" data-id="'+s.id+'">Delete</button>' +
-        '</div>' +
+        actionRow +
       '</div>';
   }
 
@@ -4943,6 +4956,11 @@
     if (!node) return;
     var delBtn = node.querySelector('[data-act="delete"]');
     if (delBtn) delBtn.addEventListener('click', function(){ removeSite(id); map.closePopup(); });
+    var shareBtn = node.querySelector('[data-act="share"]');
+    if (shareBtn) shareBtn.addEventListener('click', function(){
+      var s = sites.filter(function(x){ return x.id === id; })[0];
+      if (s) openSharePicker('site:' + id, s.name, s.__sharedGroups || []);
+    });
   }
 
   function renderList(){
@@ -7340,51 +7358,127 @@
   // group's collections use the same names and the same opaque {data} shape. The
   // `cache` is a fresh closure per adapter, so rebuilding the adapter on a scope
   // switch guarantees no stale records bleed across from the previous scope.
+  // Collections that can be shared into a group (Phase 3b-1: sites only; extend later).
+  var SHAREABLE_COLLECTIONS = { sites: true };
+
   function makeCloudStorage(scope){
     // Back-compat: a bare uid string means the user's private scope.
     if (typeof scope === 'string') scope = { type: 'user', id: scope };
     var db = firebase.firestore();
-    var baseRef = (scope && scope.type === 'group')
-      ? db.collection('groups').doc(scope.id)
-      : db.collection('users').doc(scope.id);
-    var cache = {}; // key -> data string; filled by list() so get() needs no extra read
+    var isGroup = !!(scope && scope.type === 'group');
+    var myUid = (firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : scope.id;
+    var baseRef = db.collection('users').doc(scope.id); // private tree (user scope)
+    var cache = {};  // key -> data string (with __ownerUid/__sharedGroups injected)
+    var owners = {}; // key -> ownerUid (group-scope write routing + read-only signal)
+
+    // Fold the sharing metadata (ownerUid from the doc PATH, sharedGroups from a
+    // top-level field) INTO the record's JSON, so the app's existing JSON.parse
+    // loaders surface __ownerUid/__sharedGroups with zero loader changes.
+    function injectMeta(dataStr, ownerUid, sharedGroups){
+      try{
+        var obj = JSON.parse(dataStr);
+        if (obj && typeof obj === 'object'){
+          obj.__ownerUid = ownerUid || null;
+          obj.__sharedGroups = sharedGroups || [];
+          return JSON.stringify(obj);
+        }
+      }catch(e){}
+      return dataStr;
+    }
+    // Never let the injected __* fields leak back into the stored `data` blob.
+    function stripMeta(value){
+      try{
+        var obj = JSON.parse(value);
+        if (obj && typeof obj === 'object'){ delete obj.__ownerUid; delete obj.__sharedGroups; return JSON.stringify(obj); }
+      }catch(e){}
+      return value;
+    }
+
     return {
       list: async function(prefix){
         var coll = cloudCollName(prefix);
         var p = String(prefix).replace(/:$/, '');
-        var snap = await baseRef.collection(coll).get();
         var keys = [];
+        if (isGroup){
+          // The group view aggregates every member's items shared to this group. Only
+          // shareable collections are queried; others simply have nothing shared yet.
+          if (!SHAREABLE_COLLECTIONS[coll]) return { keys: [] };
+          var qs = await db.collectionGroup(coll).where('sharedGroups', 'array-contains', scope.id).get();
+          qs.forEach(function(doc){
+            var ownerUid = (doc.ref.parent && doc.ref.parent.parent) ? doc.ref.parent.parent.id : null;
+            var k = p + ':' + doc.id;
+            var d = doc.data() || {};
+            var raw = (typeof d.data === 'string') ? d.data : JSON.stringify(d);
+            cache[k] = injectMeta(raw, ownerUid, d.sharedGroups || []);
+            owners[k] = ownerUid;
+            keys.push(k);
+          });
+          return { keys: keys };
+        }
+        var snap = await baseRef.collection(coll).get();
         snap.forEach(function(doc){
           var k = p + ':' + doc.id;
+          var d = doc.data() || {};
+          var raw = (typeof d.data === 'string') ? d.data : JSON.stringify(d);
+          cache[k] = injectMeta(raw, (d.ownerUid || myUid), d.sharedGroups || []);
+          owners[k] = d.ownerUid || myUid;
           keys.push(k);
-          var d = doc.data();
-          cache[k] = (d && typeof d.data === 'string') ? d.data : JSON.stringify(d || {});
         });
         return { keys: keys };
       },
       get: async function(key){
         if (Object.prototype.hasOwnProperty.call(cache, key)) return { value: cache[key] };
+        // In group scope a cold get() can't be routed (owner unknown until list()); the
+        // loaders always list() first, so treat a cold miss as absent rather than guess.
+        if (isGroup) return null;
         var pk = cloudParseKey(key);
         var doc = await baseRef.collection(pk.coll).doc(pk.id).get();
         if (!doc.exists) return null;
-        var d = doc.data();
-        var val = (d && typeof d.data === 'string') ? d.data : JSON.stringify(d || {});
-        cache[key] = val;
+        var d = doc.data() || {};
+        var raw = (typeof d.data === 'string') ? d.data : JSON.stringify(d);
+        var val = injectMeta(raw, (d.ownerUid || myUid), d.sharedGroups || []);
+        cache[key] = val; owners[key] = d.ownerUid || myUid;
         return { value: val };
       },
       set: async function(key, value){
         var pk = cloudParseKey(key);
-        cache[key] = value;
-        await baseRef.collection(pk.coll).doc(pk.id).set({
-          data: value,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        // Writes ALWAYS target the writer's own tree — never a group tree, never another
+        // member's item. This guard stops a stray edit from forking a copy under the
+        // wrong owner (silent corruption of the single-source-of-truth invariant).
+        if (isGroup && owners[key] && owners[key] !== myUid){
+          throw new Error('That item belongs to another group member — you can view it but not edit it.');
+        }
+        var ref = db.collection('users').doc(myUid).collection(pk.coll).doc(pk.id);
+        var payload = {
+          data: stripMeta(value),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          ownerUid: myUid
+        };
+        // Editing/creating while viewing a group keeps the item shared with that group.
+        if (isGroup) payload.sharedGroups = firebase.firestore.FieldValue.arrayUnion(scope.id);
+        await ref.set(payload, { merge: true });
+        cache[key] = value; owners[key] = myUid;
       },
       delete: async function(key){
         var pk = cloudParseKey(key);
-        delete cache[key];
-        await baseRef.collection(pk.coll).doc(pk.id).delete();
-      }
+        if (isGroup && owners[key] && owners[key] !== myUid){
+          throw new Error('That item belongs to another group member — you can view it but not delete it.');
+        }
+        delete cache[key]; delete owners[key];
+        await db.collection('users').doc(myUid).collection(pk.coll).doc(pk.id).delete();
+      },
+      // Owner-only: set which groups an item is shared with (the top-level queryable
+      // field the group view + rules read). A plain owner write to their own doc.
+      setSharing: async function(key, groupsArray){
+        var pk = cloudParseKey(key);
+        await db.collection('users').doc(myUid).collection(pk.coll).doc(pk.id).set({
+          sharedGroups: groupsArray || [],
+          ownerUid: myUid,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+      },
+      // Read-only signal for the UI: who owns the item behind this key.
+      ownerOf: function(key){ return owners[key] || null; }
     };
   }
 
@@ -7431,18 +7525,12 @@
     }catch(e){ return false; } // read denied == not a member
   }
 
-  // Client-side create is allowed by the security rules (owner is the sole initial member).
+  // Create runs server-side so it can also seed the function-only membership mirror
+  // (memberships/{uid}) that the per-item sharing rules read.
   async function createGroup(name, uid){
-    var db = firebase.firestore();
-    var ref = db.collection('groups').doc();
-    var code = genInviteCode();
-    var members = {};
-    members[uid] = { name: (firebase.auth().currentUser.email || ''), role: 'owner', joinedAt: Date.now() };
-    await ref.set({
-      name: name, ownerUid: uid, memberUids: [uid], members: members,
-      inviteCode: code, createdAt: Date.now()
-    });
-    return { gid: ref.id, code: code };
+    var callable = firebase.app().functions('us-east1').httpsCallable('createGroup');
+    var res = await callable({ name: name });
+    return { gid: res.data.gid, code: res.data.code };
   }
 
   // The switch primitive: point window.storage at the new scope and reload+redraw. The
@@ -7525,6 +7613,51 @@
       await applyScope({ type: 'user', id: uid });
       showToast('Left the group');
     }catch(e){ alert('Could not leave the group:\n' + ((e && e.message) || e)); }
+  }
+
+  // ---- Per-item sharing (Phase 3b): tag an item with the groups it's shared to ----
+  // A small overlay of checkboxes (one per group). Saving writes the item's top-level
+  // sharedGroups via the owner-only setSharing(); the group view then picks it up live.
+  function openSharePicker(storageKey, itemName, currentGroups){
+    if (!myGroups.length){ showToast('Create or join a group first, then you can share.'); return; }
+    var current = {}; (currentGroups || []).forEach(function(g){ current[g] = true; });
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:320px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    var rows = myGroups.map(function(g){
+      return '<label style="display:flex;align-items:center;gap:9px;padding:7px 0;cursor:pointer;font-size:14px;">' +
+        '<input type="checkbox" data-gid="' + g.id + '"' + (current[g.id] ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:#FF6A13;">' +
+        '🤝 ' + escapeHtml(g.name) + '</label>';
+    }).join('');
+    card.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px;">Share “' + escapeHtml(itemName || 'this item') + '”</div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;line-height:1.4;">Pick which groups can see it. It stays in your own data either way — uncheck to make it private again.</div>' +
+      rows +
+      '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        '<button id="sharePickCancel" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
+        '<button id="sharePickSave" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">Save</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.querySelector('#sharePickCancel').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('#sharePickSave').addEventListener('click', async function(){
+      var chosen = [];
+      Array.prototype.forEach.call(card.querySelectorAll('input[data-gid]'), function(cb){ if (cb.checked) chosen.push(cb.getAttribute('data-gid')); });
+      this.disabled = true;
+      try{
+        await window.storage.setSharing(storageKey, chosen);
+        close();
+        await reloadAfterSharing(storageKey);
+        showToast(chosen.length ? ('Shared with ' + chosen.length + ' group' + (chosen.length > 1 ? 's' : '')) : 'Made private');
+      }catch(e){ alert('Could not update sharing:\n' + ((e && e.message) || e)); this.disabled = false; }
+    });
+  }
+  async function reloadAfterSharing(storageKey){
+    var prefix = String(storageKey).split(':')[0];
+    if (prefix === 'site'){ await loadSites(); }
+    // Phase 3b-2: cameras / trails / bucks reload branches here.
   }
 
   // One-time upload of anything already in THIS browser's localStorage into the user's

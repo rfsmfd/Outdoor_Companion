@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Private per-user data: the owner can do anything with their own tree. ----
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ---- Cross-member READ of a shared item (Phase 3b) ----
+    // A member may read another member's item if that item is shared with any group
+    // the reader belongs to. This OR-combines with the owner rule above, so it never
+    // weakens owner access and never grants write. Membership is checked against the
+    // function-only mirror doc memberships/{uid}. We use .get(field, []) everywhere so
+    // a doc missing the field can't raise an error — an erroring rule on ANY doc a
+    // collectionGroup query returns would fail the entire query (blank group view).
+    match /users/{uid}/{coll}/{docId} {
+      allow read: if request.auth != null
+        && exists(/databases/$(database)/documents/memberships/$(request.auth.uid))
+        && resource.data.get('sharedGroups', []).hasAny(
+             get(/databases/$(database)/documents/memberships/$(request.auth.uid)).data.get('groups', []));
+    }
+
+    // ---- Membership mirror: readable by the user, written ONLY by Cloud Functions ----
+    // Must live at the top level (not under users/{uid}) — the recursive owner rule
+    // above would otherwise let a user forge their own group list and read any group's
+    // shared items. Admin SDK (create/join/leave functions) bypasses write:false.
+    match /memberships/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // ---- Group metadata: members read; all mutations are function-only ----
+    match /groups/{gid} {
+      allow read: if request.auth != null && request.auth.uid in resource.data.memberUids;
+      allow create: if false; // createGroup function only (also seeds the membership mirror)
+      allow delete: if false; // leaveGroup function only
+      // A future owner-side rename could use this; membership/owner/code stay frozen.
+      allow update: if request.auth != null
+                    && request.auth.uid == resource.data.ownerUid
+                    && request.resource.data.memberUids == resource.data.memberUids
+                    && request.resource.data.ownerUid == resource.data.ownerUid
+                    && request.resource.data.inviteCode == resource.data.inviteCode;
+
+      // The Phase-3a shared sub-tree is no longer written, but keep it members-only so
+      // any leftover 3a test data is never world-readable. (Safe to remove later.)
+      match /{coll}/{docId} {
+        allow read, write: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/groups/$(gid)).data.memberUids;
+      }
+    }
+  }
+}
