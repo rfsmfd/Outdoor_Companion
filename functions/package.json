@@ -1,0 +1,14 @@
+{
+  "name": "outdoor-companion-functions",
+  "description": "Cloud Functions for Outdoor Companion (AI photo tagging)",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.1.0"
+  }
+}
