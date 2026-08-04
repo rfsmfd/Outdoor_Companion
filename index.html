@@ -1680,7 +1680,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 101</div>
+    <div id="buildBadge">BUILD 102</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2091,6 +2091,7 @@
       <option value="empty">Empty (no animal)</option>
       <option value="other">Other…</option>
     </select>
+    <select id="photoLightboxBuck" style="display:none;position:absolute;top:92px;left:16px;background:rgba(0,0,0,0.65);color:#fff;border:1px solid rgba(255,176,102,0.55);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px;max-width:60vw;"></select>
     <button class="close-x" id="photoLightboxClose" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;">&times;</button>
   </div>
 
@@ -3513,6 +3514,7 @@
     document.getElementById('photoLightboxDelete').style.display = 'none';
     document.getElementById('photoLightboxAiBtn').style.display = 'none';
     document.getElementById('photoLightboxCorrect').style.display = 'none';
+    document.getElementById('photoLightboxBuck').style.display = 'none';
     // Deliberately does NOT call closeAllModals() — the lightbox should layer on top of
     // whatever's already open (e.g. the Journal), not replace it, so that closing the
     // lightbox correctly reveals what was open underneath rather than dumping back to
@@ -3624,6 +3626,7 @@
           '<div class="site' + (p.matchedSiteName ? '' : ' unmatched') + '">' + (p.matchedSiteName ? escapeHtml(p.matchedSiteName) : 'No site match') + '</div>' +
           '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(p) + '</div>' +
           photoAiBadgeHtml(p) +
+          (p.buckProfileId ? (function(){ var b = buckProfiles.filter(function(x){ return x.id === p.buckProfileId; })[0]; return b ? '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#ffb066;">🦌 ' + escapeHtml(b.name) + '</div>' : ''; })() : '') +
         '</div>';
       card.addEventListener('click', function(){ showGalleryPhoto(p); });
       grid.appendChild(card);
@@ -3639,6 +3642,10 @@
     if (line2) parts.push(line2);
     var cond = photoConditionHtml(doc); if (cond) parts.push(cond);
     var aiLine = aiSummaryHtml(doc); if (aiLine) parts.push(aiLine);
+    if (doc.buckProfileId){
+      var linkedBuck = buckProfiles.filter(function(b){ return b.id === doc.buckProfileId; })[0];
+      if (linkedBuck) parts.push('<span style="color:#ffb066;">🦌 ' + escapeHtml(linkedBuck.name) + '</span>');
+    }
     var cap = document.getElementById('photoLightboxCaption');
     cap.innerHTML = parts.join('<br>'); cap.style.display = 'block';
     document.getElementById('photoLightboxDelete').style.display = 'block';
@@ -3648,6 +3655,9 @@
     var corr = document.getElementById('photoLightboxCorrect');
     corr.style.display = cloudPhotosAvailable() ? 'block' : 'none';
     corr.value = '';
+    var buckSel = document.getElementById('photoLightboxBuck');
+    if (cloudPhotosAvailable() && activeModule === 'hunting'){ populateLightboxBuckSelect(doc); buckSel.style.display = 'block'; }
+    else { buckSel.style.display = 'none'; }
     document.getElementById('photoLightboxBackdrop').classList.add('show');
   }
   // Compact, readable summary of a photo's AI classification (empty until tagged).
@@ -3794,6 +3804,41 @@
     if (galleryLightboxDoc === doc) showGalleryPhoto(doc);
     renderGallery(); populateGalleryFilters(); refreshTagAllButton();
     showToast('Corrected → ' + (doc.ai.hasAnimal ? (doc.ai.isBuck ? 'buck' : doc.ai.primarySpecies) : 'empty'));
+  });
+
+  // Link a photo to a named Buck Profile (same buckProfileId pattern sightings use, so a
+  // buck's gallery shows his sightings AND his photos together).
+  function populateLightboxBuckSelect(doc){
+    var sel = document.getElementById('photoLightboxBuck');
+    var opts = ['<option value="">🦌 Link to buck…</option>'];
+    buckProfiles.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
+      .forEach(function(b){ opts.push('<option value="' + b.id + '">' + escapeHtml(b.name) + '</option>'); });
+    opts.push('<option value="__new__">＋ New buck…</option>');
+    if (doc.buckProfileId) opts.push('<option value="__unlink__">✕ Unlink</option>');
+    sel.innerHTML = opts.join('');
+    sel.value = doc.buckProfileId || '';
+  }
+  document.getElementById('photoLightboxBuck').addEventListener('change', async function(){
+    var val = this.value;
+    var doc = galleryLightboxDoc;
+    if (!doc) return;
+    if (val === '__new__'){
+      var name = (window.prompt('Name this buck (e.g. Droptine 8):') || '').trim();
+      if (!name){ this.value = doc.buckProfileId || ''; return; }
+      var profile = { id: uid(), name: name, notes: '', createdAt: Date.now() };
+      buckProfiles.push(profile);
+      try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
+      doc.buckProfileId = profile.id;
+    } else if (val === '__unlink__'){
+      doc.buckProfileId = null;
+    } else {
+      doc.buckProfileId = val || null;
+    }
+    if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
+    if (galleryLightboxDoc === doc) showGalleryPhoto(doc);
+    renderGallery();
+    var bp = buckProfiles.filter(function(b){ return b.id === doc.buckProfileId; })[0];
+    showToast(doc.buckProfileId ? ('Linked to ' + (bp ? bp.name : 'buck')) : 'Unlinked');
   });
 
   document.getElementById('photoLightboxDelete').addEventListener('click', async function(){
@@ -5280,6 +5325,25 @@
 
   var editingBuckProfileId = null; // null = form creates a new profile; set = form is editing this one
 
+  // A linked trail-cam photo shown inside a buck's profile (parallel to renderBuckGalleryEntry
+  // for sightings). Shows the AI read (BUCK · N pt / species) + the capture-time conditions.
+  function renderBuckPhotoEntry(p){
+    var dateStr = p.timestamp ? new Date(p.timestamp).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) : 'Unknown date';
+    var src = p.thumb || p.downloadURL || '';
+    var title = 'Photo';
+    if (p.ai){
+      if (p.ai.isBuck){ var pts = buckPointsLabel(p.ai.antlerNotes); title = 'BUCK' + (pts ? ' · ' + pts : ''); }
+      else if (p.ai.hasAnimal){ title = (p.ai.primarySpecies || 'animal'); }
+    }
+    var cond = photoConditionHtml(p);
+    var html = '<div style="display:flex;gap:8px;padding:8px 0;border-top:1px solid var(--line);align-items:flex-start;">';
+    if (src) html += '<img src="' + src + '" class="buck-photo-thumb" data-photo-id="' + p.id + '" data-full="' + (p.downloadURL || src) + '" style="width:52px;height:52px;object-fit:cover;border-radius:5px;flex-shrink:0;cursor:pointer;" />';
+    html += '<div style="flex:1;min-width:0;">';
+    html += '<div style="font-size:12px;font-weight:600;color:#ffb066;">📷 ' + escapeHtml(title) + ' <span style="font-weight:400;color:var(--text-dim);">· ' + escapeHtml(dateStr) + '</span></div>';
+    if (cond) html += '<div style="font-size:10px;color:var(--text-dim);margin-top:2px;">' + cond + '</div>';
+    html += '</div></div>';
+    return html;
+  }
   function renderBuckProfilesList(){
     var listEl = document.getElementById('buckProfilesList');
     if (buckProfiles.length === 0){
@@ -5290,27 +5354,37 @@
     buckProfiles.forEach(function(profile){
       var linkedObs = observations.filter(function(o){ return o.buckProfileId === profile.id; })
         .sort(function(a,b){ return b.createdAt - a.createdAt; });
+      var linkedPhotos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return p.buckProfileId === profile.id; })
+        .sort(function(a,b){ return (b.timestamp||0) - (a.timestamp||0); });
+      var totalLinked = linkedObs.length + linkedPhotos.length;
       var mostRecentPhoto = linkedObs.filter(function(o){ return o.photoThumb; })[0];
+      var coverThumb = mostRecentPhoto ? mostRecentPhoto.photoThumb : null;
+      var coverTime = mostRecentPhoto ? (mostRecentPhoto.createdAt||0) : -1;
+      if (linkedPhotos[0] && (linkedPhotos[0].timestamp||0) >= coverTime){ coverThumb = linkedPhotos[0].thumb || linkedPhotos[0].downloadURL; }
       var row = document.createElement('div');
       row.className = 'history-row';
       row.style.cursor = 'pointer';
       row.innerHTML =
-        (mostRecentPhoto ? '<img src="'+mostRecentPhoto.photoThumb+'" class="journal-photo-thumb buck-list-thumb" style="width:80px;height:80px;object-fit:cover;border-radius:6px;flex-shrink:0;cursor:pointer;" />'
+        (coverThumb ? '<img src="'+coverThumb+'" class="journal-photo-thumb buck-list-thumb" style="width:80px;height:80px;object-fit:cover;border-radius:6px;flex-shrink:0;cursor:pointer;" />'
                           : '<div style="width:80px;height:80px;border-radius:6px;flex-shrink:0;background:var(--panel-alt);display:flex;align-items:center;justify-content:center;font-size:30px;">🦌</div>') +
         '<div class="info">' +
           '<div class="dt" style="display:flex;align-items:center;justify-content:space-between;">' +
             '<span>' + escapeHtml(profile.name) + '</span>' +
             '<span class="detail-chevron" style="color:var(--accent);font-size:14px;">▸</span>' +
           '</div>' +
-          '<div class="co">' + linkedObs.length + ' ' + (linkedObs.length === 1 ? 'sighting' : 'sightings') + '</div>' +
+          '<div class="co">' + linkedObs.length + ' ' + (linkedObs.length === 1 ? 'sighting' : 'sightings') + (linkedPhotos.length ? ' · ' + linkedPhotos.length + ' photo' + (linkedPhotos.length === 1 ? '' : 's') : '') + '</div>' +
           (profile.notes ? '<div class="co" style="color:var(--text-dim);font-style:italic;">' + escapeHtml(profile.notes) + '</div>' : '') +
         '</div>';
       var galleryWrap = document.createElement('div');
       galleryWrap.style.display = 'none';
-      if (linkedObs.length === 0){
-        galleryWrap.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:8px 0;">No sightings linked yet.</div>';
+      if (totalLinked === 0){
+        galleryWrap.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:8px 0;">Nothing linked yet. Link photos from the Photo Gallery (open a photo → 🦌 Link to buck), or sightings from their detail popup.</div>';
       } else {
-        linkedObs.forEach(function(o){ galleryWrap.innerHTML += renderBuckGalleryEntry(o); });
+        var items = [];
+        linkedPhotos.forEach(function(p){ items.push({ t:(p.timestamp||0), html: renderBuckPhotoEntry(p) }); });
+        linkedObs.forEach(function(o){ items.push({ t:(o.createdAt||0), html: renderBuckGalleryEntry(o) }); });
+        items.sort(function(a,b){ return b.t - a.t; });
+        galleryWrap.innerHTML = items.map(function(i){ return i.html; }).join('');
       }
       var actionsRow = document.createElement('div');
       actionsRow.style.cssText = 'margin-top:8px;';
@@ -5348,6 +5422,15 @@
           showPhotoLightbox(img.getAttribute('src'));
         });
       });
+      galleryWrap.querySelectorAll('.buck-photo-thumb').forEach(function(img){
+        img.addEventListener('click', function(e){
+          e.stopPropagation();
+          var pid = img.getAttribute('data-photo-id');
+          var pdoc = importedPhotos.filter(function(x){ return x.id === pid; })[0];
+          if (pdoc) showGalleryPhoto(pdoc);
+          else showPhotoLightbox(img.getAttribute('data-full') || img.getAttribute('src'));
+        });
+      });
       actionsRow.querySelector('[data-act="edit-buck"]').addEventListener('click', function(e){
         e.stopPropagation();
         editingBuckProfileId = profile.id;
@@ -5373,6 +5456,14 @@
           toClear[i].buckProfileId = null;
           try{ await saveObservation(toClear[i]); }catch(err){ console.error('Outdoor Companion: failed to unlink sighting after profile delete', err); }
         }
+        // Also unlink any trail-cam photos tagged to this buck — never delete the
+        // photos themselves (they are valuable cloud data), just clear the link so
+        // the "becomes unlinked" promise holds and no photo carries a dangling id.
+        var photosToClear = importedPhotos.filter(function(p){ return p.buckProfileId === profile.id; });
+        for (var j=0; j<photosToClear.length; j++){
+          photosToClear[j].buckProfileId = null;
+          if (hasChatStorage){ try{ await window.storage.set('photo:' + photosToClear[j].id, JSON.stringify(photosToClear[j]), false); }catch(err){} }
+        }
         renderAll();
         renderBuckProfilesList();
       });
@@ -5386,6 +5477,13 @@
         var toDelete = observations.filter(function(o){ return o.buckProfileId === profile.id; });
         for (var i=0; i<toDelete.length; i++){
           try{ await removeObservation(toDelete[i].id); }catch(err){ console.error('Outdoor Companion: failed to delete linked sighting', err); }
+        }
+        // Sightings are true field-log entries and get deleted; trail-cam photos are
+        // not — we only unlink them so the actual cloud photos survive a profile wipe.
+        var photosToUnlink = importedPhotos.filter(function(p){ return p.buckProfileId === profile.id; });
+        for (var k=0; k<photosToUnlink.length; k++){
+          photosToUnlink[k].buckProfileId = null;
+          if (hasChatStorage){ try{ await window.storage.set('photo:' + photosToUnlink[k].id, JSON.stringify(photosToUnlink[k]), false); }catch(err){} }
         }
         renderAll();
         renderBuckProfilesList();
