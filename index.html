@@ -1701,7 +1701,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 108</div>
+    <div id="buildBadge">BUILD 109</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2040,6 +2040,7 @@
         <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
         <button type="button" class="btn-ghost" id="galleryCleanupBtn" style="width:100%;margin-top:6px;display:none;">🧹 Clean up empty frames</button>
         <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
+        <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
       </div>
       <div id="galleryGrid"></div>
       <div id="galleryEmpty" style="display:none;font-size:12.5px;color:var(--text-dim);text-align:center;padding:22px 10px;"></div>
@@ -4065,7 +4066,38 @@
     btn.textContent = n === 0 ? '🧠 Everything in view is tagged' : ('🧠 Tag all untagged with AI (' + n + ')');
     refreshCleanupButton();
     refreshAssignLocButton();
+    refreshWeatherButton();
   }
+
+  // ---------- Fetch weather for located photos that are missing it (right in the gallery) ----------
+  function galleryNeedsWeatherInView(){
+    return galleryPhotoList().filter(function(p){ return photoNeedsConditions(p) && photoSiteLatLng(p); });
+  }
+  function refreshWeatherButton(){
+    var btn = document.getElementById('galleryWeatherBtn');
+    if (!btn) return;
+    var n = cloudPhotosAvailable() ? galleryNeedsWeatherInView().length : 0;
+    btn.style.display = n === 0 ? 'none' : 'block';
+    btn.disabled = false;
+    btn.textContent = '⛅ Fetch weather for ' + n + ' photo' + (n === 1 ? '' : 's') + ' missing it';
+  }
+  document.getElementById('galleryWeatherBtn').addEventListener('click', async function(){
+    var needy = galleryNeedsWeatherInView();
+    if (!needy.length) return;
+    var btn = this;
+    btn.disabled = true;
+    var startText = btn.textContent;
+    try{
+      var updated = await enrichPhotoDocs(needy, function(done, total){
+        btn.textContent = '⛅ Fetching… ' + done + ' of ' + total;
+      });
+      renderGallery(); refreshTagAllButton();
+      showToast(updated ? ('Weather added to ' + updated + ' photo' + (updated === 1 ? '' : 's')) : 'Weather not available for those dates/spots');
+    }catch(e){
+      btn.textContent = startText; btn.disabled = false;
+      alert('Could not fetch weather:\n' + ((e && e.message) || e));
+    }
+  });
 
   // ---------- Fix "No site match": stamp a location onto already-imported photos ----------
   // Photos imported via "scanned camera" get no site when no deployment covers their date
