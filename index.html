@@ -1286,6 +1286,9 @@
     filter:drop-shadow(0 1px 3px rgba(0,0,0,0.8));
   }
   #importLocDragHint{ font-size:11px; color:var(--text-dim); text-align:center; margin-bottom:14px; }
+  .import-loc-baselayers{ display:flex; gap:6px; margin-bottom:8px; }
+  .import-loc-baselayers button{ flex:1; padding:6px 4px; font-size:11.5px; background:rgba(255,255,255,0.05); color:var(--text-dim); border:1px solid var(--line); border-radius:5px; cursor:pointer; }
+  .import-loc-baselayers button.active{ background:var(--accent); color:#1A1204; border-color:var(--accent); font-weight:700; }
   .import-loc-mode{ display:flex; flex-direction:column; gap:7px; margin:4px 0 10px 0; }
   .import-loc-mode .loc-opt{ display:flex; align-items:flex-start; gap:8px; font-size:12.5px; cursor:pointer; line-height:1.35; }
   .import-loc-mode .loc-opt em{ color:var(--text-dim); font-style:normal; }
@@ -1777,6 +1780,12 @@
         <input type="text" id="importLocName" placeholder="e.g. Creek Cam" />
       </div>
       <div id="importLocCoords" style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">—</div>
+      <div class="import-loc-baselayers">
+        <button type="button" data-loclayer="hybrid" class="active">Aerial + Roads</button>
+        <button type="button" data-loclayer="aerial">Aerial</button>
+        <button type="button" data-loclayer="usgstopo">Topo</button>
+        <button type="button" data-loclayer="street">Street</button>
+      </div>
       <div id="importLocMiniMapWrap">
         <div id="importLocMiniMap"></div>
         <div id="importLocCrosshair">
@@ -1789,7 +1798,7 @@
           </svg>
         </div>
       </div>
-      <div id="importLocDragHint">Pan or pinch-zoom the map so the crosshair sits on the camera's real spot</div>
+      <div id="importLocDragHint">Use road names to find the area, then pan/zoom so the crosshair sits on the camera's real spot</div>
       <button class="btn-primary" id="importLocSaveBtn" style="width:100%;margin-bottom:8px;">Use This Location</button>
       <button class="btn-ghost" id="importLocCancelBtn" style="width:100%;">Cancel</button>
     </div>
@@ -8002,6 +8011,9 @@
   // The "drop a new pin" crosshair map — same pan-under-fixed-crosshair pattern as Deploy.
   var importLocMap = null;
   var importLocPos = null;
+  var importLocLayers = null;        // base tile layers, keyed
+  var importLocRoadsOverlay = null;  // transparent roads + place labels, for the hybrid view
+  var importLocCurrentBase = 'hybrid';
   function ensureImportLocMap(){
     if (importLocMap) return;
     importLocMap = L.map('importLocMiniMap', {
@@ -8010,13 +8022,53 @@
       doubleClickZoom:false, boxZoom:false, keyboard:false,
       zoomSnap:0, zoomDelta:0.25, zoomAnimation:false
     });
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:22 }).addTo(importLocMap);
+    importLocLayers = {
+      usgstopo: L.tileLayer('https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}', { maxZoom:22, maxNativeZoom:16 }),
+      street:   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom:22 }),
+      aerial:   L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:22 })
+    };
+    // Transparent Esri reference tiles (roads + place labels) designed to overlay imagery.
+    // This is the "Aerial + Roads" hybrid: real tree lines with road names painted on top —
+    // the fix for placing a pin far from home, where bare aerial has nothing to orient by.
+    importLocRoadsOverlay = L.layerGroup([
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', { maxZoom:22 }),
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', { maxZoom:22 })
+    ]);
+    applyImportLocBase(importLocCurrentBase);
+
     importLocMap.on('move', function(){
       var c = importLocMap.getCenter();
       importLocPos = {lat:c.lat, lng:c.lng};
       document.getElementById('importLocCoords').textContent = fmtCoord(c.lat) + ', ' + fmtCoord(c.lng);
     });
   }
+  function clearImportLocBaseLayers(){
+    if (!importLocLayers) return;
+    ['usgstopo','street','aerial'].forEach(function(k){
+      if (importLocMap.hasLayer(importLocLayers[k])) importLocMap.removeLayer(importLocLayers[k]);
+    });
+    if (importLocRoadsOverlay && importLocMap.hasLayer(importLocRoadsOverlay)) importLocMap.removeLayer(importLocRoadsOverlay);
+  }
+  function applyImportLocBase(layer){
+    clearImportLocBaseLayers();
+    if (layer === 'hybrid'){
+      importLocLayers.aerial.addTo(importLocMap);
+      importLocRoadsOverlay.addTo(importLocMap); // added last → roads/labels sit above imagery
+    } else {
+      (importLocLayers[layer] || importLocLayers.aerial).addTo(importLocMap);
+    }
+    importLocCurrentBase = layer;
+    Array.prototype.forEach.call(document.querySelectorAll('.import-loc-baselayers button'), function(b){
+      b.classList.toggle('active', b.getAttribute('data-loclayer') === layer);
+    });
+  }
+  function setImportLocBase(layer){
+    if (!importLocLayers || layer === importLocCurrentBase) return;
+    applyImportLocBase(layer);
+  }
+  Array.prototype.forEach.call(document.querySelectorAll('.import-loc-baselayers button'), function(b){
+    b.addEventListener('click', function(){ setImportLocBase(b.getAttribute('data-loclayer')); });
+  });
   function openImportLocPicker(){
     // Prefill the name from the chosen camera; anchor the map on the main map's current view
     // (importing usually happens at home, so the phone's GPS isn't the right starting point).
@@ -8030,7 +8082,7 @@
     closeAllModals();
     document.getElementById('importLocModalBackdrop').classList.add('show');
     ensureImportLocMap();
-    setTimeout(function(){ importLocMap.invalidateSize(); importLocMap.setView([importLocPos.lat, importLocPos.lng], 16); }, 50);
+    setTimeout(function(){ importLocMap.invalidateSize(); importLocMap.setView([importLocPos.lat, importLocPos.lng], Math.min(map.getZoom(), 16)); }, 50);
   }
   function closeImportLocPicker(reopenImport){
     document.getElementById('importLocModalBackdrop').classList.remove('show');
