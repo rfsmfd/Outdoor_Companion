@@ -1236,6 +1236,19 @@
   .import-photo-card .cond{ font-size:9.5px; color:var(--text-dim); line-height:1.35; margin-top:3px; }
   .import-photo-card .cond .cond-pending{ color:var(--accent); opacity:0.85; }
   .import-photo-card .cond .cond-dim{ opacity:0.6; }
+  /* Bulk cleanup review grid — reuses the gallery card look, adds a select box. */
+  #cleanupGrid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(130px, 1fr));
+    gap:10px;
+    max-height:58vh;
+    overflow-y:auto;
+  }
+  .cleanup-card{ position:relative; cursor:pointer; display:block; opacity:0.55; transition:opacity .12s, outline-color .12s; outline:2px solid transparent; }
+  .cleanup-card:has(.cleanup-cb:checked){ opacity:1; outline:2px solid #D94A2E; outline-offset:-2px; }
+  .cleanup-card .cleanup-cb{ position:absolute; top:6px; left:6px; width:20px; height:20px; z-index:2; cursor:pointer; accent-color:#D94A2E; }
+  .cleanup-card .keep-badge{ position:absolute; top:6px; right:6px; z-index:2; font-size:9px; font-weight:700; background:rgba(0,0,0,0.6); color:#7CCB7C; padding:1px 5px; border-radius:8px; display:none; }
+  .cleanup-card:not(:has(.cleanup-cb:checked)) .keep-badge{ display:block; }
   #historyList{ max-height:50vh; overflow-y:auto; }
   .history-row{
     display:flex;
@@ -1680,7 +1693,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 102</div>
+    <div id="buildBadge">BUILD 103</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2007,9 +2020,28 @@
       <div id="galleryAiRow" style="margin:0 0 10px 0;">
         <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
         <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
+        <button type="button" class="btn-ghost" id="galleryCleanupBtn" style="width:100%;margin-top:6px;display:none;">🧹 Clean up empty frames</button>
       </div>
       <div id="galleryGrid"></div>
       <div id="galleryEmpty" style="display:none;font-size:12.5px;color:var(--text-dim);text-align:center;padding:22px 10px;"></div>
+    </div>
+  </div>
+
+  <!-- Bulk cleanup: review + delete AI-flagged empty/misfire photos to free storage -->
+  <div class="oc-modal-backdrop" id="photoCleanupModalBackdrop">
+    <div class="oc-modal" id="photoCleanupModal">
+      <h3>🧹 Clean Up Empty Frames <button class="close-x" id="photoCleanupClose">&times;</button></h3>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.45;">
+        These are photos the AI flagged as <strong>empty / no game</strong> — misfires, wind, a passing car. <strong style="color:#D94A2E;">Checked photos will be permanently deleted</strong> and their cloud storage freed; this can't be undone. Spot a real animal the AI missed? Just uncheck it to keep it.
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <button type="button" class="btn-ghost" id="cleanupSelectAll" style="flex:1;">Select all</button>
+        <button type="button" class="btn-ghost" id="cleanupSelectNone" style="flex:1;">Keep all</button>
+      </div>
+      <div id="cleanupGrid"></div>
+      <div id="cleanupEmpty" style="display:none;font-size:12.5px;color:var(--text-dim);text-align:center;padding:22px 10px;"></div>
+      <div id="cleanupStatus" style="font-size:11px;color:var(--text-dim);margin-top:8px;text-align:center;"></div>
+      <button class="btn-primary" id="cleanupDeleteBtn" style="width:100%;margin-top:8px;background:#B3382F;border-color:#B3382F;">🗑 Delete selected</button>
     </div>
   </div>
 
@@ -3885,7 +3917,100 @@
     var n = galleryUntaggedInView().length;
     btn.disabled = (n === 0);
     btn.textContent = n === 0 ? '🧠 Everything in view is tagged' : ('🧠 Tag all untagged with AI (' + n + ')');
+    refreshCleanupButton();
   }
+
+  // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
+  // Every photo the AI tagged hasAnimal:false is a cleanup candidate. We never
+  // auto-delete — the user reviews a grid (all pre-selected) and unchecks any real
+  // animal the AI missed before a final confirm. Frees Storage + Firestore for good.
+  function galleryEmptiesInView(){
+    return galleryPhotoList().filter(function(p){ return p.ai && !p.ai.hasAnimal; });
+  }
+  function refreshCleanupButton(){
+    var btn = document.getElementById('galleryCleanupBtn');
+    if (!btn) return;
+    var n = galleryEmptiesInView().length;
+    btn.style.display = n === 0 ? 'none' : 'block';
+    btn.textContent = '🧹 Clean up empty frames (' + n + ')';
+  }
+  function updateCleanupDeleteBtn(){
+    var n = document.querySelectorAll('#cleanupGrid .cleanup-cb:checked').length;
+    var btn = document.getElementById('cleanupDeleteBtn');
+    btn.disabled = (n === 0);
+    btn.textContent = n === 0 ? '🗑 Nothing selected' : ('🗑 Delete ' + n + ' selected');
+  }
+  function openCleanupModal(){
+    var grid = document.getElementById('cleanupGrid');
+    var emptyMsg = document.getElementById('cleanupEmpty');
+    document.getElementById('cleanupStatus').textContent = '';
+    var list = galleryEmptiesInView();
+    grid.innerHTML = '';
+    if (!list.length){
+      emptyMsg.style.display = 'block';
+      emptyMsg.textContent = 'No empty frames in the current view. Tag some photos with AI first, or widen your filters.';
+    } else {
+      emptyMsg.style.display = 'none';
+      grid.innerHTML = list.map(function(p){
+        var src = p.thumb || p.downloadURL || '';
+        var dateStr = p.timestamp ? new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : '';
+        var conf = (p.ai && p.ai.confidence) ? (escapeHtml(p.ai.confidence) + ' confidence') : '';
+        return '<label class="cleanup-card import-photo-card">' +
+          '<input type="checkbox" class="cleanup-cb" data-photo-id="' + p.id + '" checked>' +
+          '<span class="keep-badge">✓ keep</span>' +
+          '<img src="' + src + '" alt="" loading="lazy">' +
+          '<div class="meta"><div class="dt">' + escapeHtml(dateStr) + '</div>' +
+          (conf ? '<div class="cond">' + conf + '</div>' : '') + '</div>' +
+        '</label>';
+      }).join('');
+      Array.prototype.forEach.call(grid.querySelectorAll('.cleanup-cb'), function(cb){
+        cb.addEventListener('change', updateCleanupDeleteBtn);
+      });
+    }
+    updateCleanupDeleteBtn();
+    closeAllModals();
+    document.getElementById('photoCleanupModalBackdrop').classList.add('show');
+  }
+  function closeCleanupModal(reopenGallery){
+    document.getElementById('photoCleanupModalBackdrop').classList.remove('show');
+    if (reopenGallery) openPhotoGallery();
+  }
+  document.getElementById('galleryCleanupBtn').addEventListener('click', openCleanupModal);
+  document.getElementById('photoCleanupClose').addEventListener('click', function(){ closeCleanupModal(true); });
+  document.getElementById('photoCleanupModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) closeCleanupModal(true);
+  });
+  document.getElementById('cleanupSelectAll').addEventListener('click', function(){
+    Array.prototype.forEach.call(document.querySelectorAll('#cleanupGrid .cleanup-cb'), function(cb){ cb.checked = true; });
+    updateCleanupDeleteBtn();
+  });
+  document.getElementById('cleanupSelectNone').addEventListener('click', function(){
+    Array.prototype.forEach.call(document.querySelectorAll('#cleanupGrid .cleanup-cb'), function(cb){ cb.checked = false; });
+    updateCleanupDeleteBtn();
+  });
+  document.getElementById('cleanupDeleteBtn').addEventListener('click', async function(){
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('#cleanupGrid .cleanup-cb:checked'));
+    if (!boxes.length) return;
+    if (!confirm('Permanently delete ' + boxes.length + ' empty photo' + (boxes.length===1?'':'s') + '?\n\nThis frees their cloud storage and cannot be undone. Any photo you unchecked stays.')) return;
+    var btn = this; btn.disabled = true;
+    document.getElementById('cleanupSelectAll').disabled = true;
+    document.getElementById('cleanupSelectNone').disabled = true;
+    var status = document.getElementById('cleanupStatus');
+    var ids = boxes.map(function(b){ return b.getAttribute('data-photo-id'); });
+    var done = 0;
+    for (var i=0; i<ids.length; i++){
+      var doc = importedPhotos.filter(function(p){ return p.id === ids[i]; })[0];
+      if (!doc) continue;
+      status.textContent = 'Deleting ' + (done+1) + ' of ' + ids.length + '…';
+      await deletePhotoStorage(doc);
+      importedPhotos = importedPhotos.filter(function(p){ return p.id !== doc.id; });
+      done++;
+    }
+    document.getElementById('cleanupSelectAll').disabled = false;
+    document.getElementById('cleanupSelectNone').disabled = false;
+    closeCleanupModal(true);
+    showToast('Removed ' + done + ' empty photo' + (done===1?'':'s'));
+  });
   document.getElementById('galleryTagAllBtn').addEventListener('click', async function(){
     var status = document.getElementById('galleryTagAllStatus');
     var btn = this;
