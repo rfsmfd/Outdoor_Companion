@@ -1680,7 +1680,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 95</div>
+    <div id="buildBadge">BUILD 101</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1997,12 +1997,17 @@
       <div class="photo-gallery-filters">
         <select id="galleryCameraFilter"><option value="">All cameras</option></select>
         <select id="gallerySiteFilter"><option value="">All sites</option></select>
+        <select id="gallerySpeciesFilter"><option value="">All photos</option></select>
         <select id="gallerySort">
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
         </select>
       </div>
-      <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 10px 0;"></div>
+      <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 6px 0;"></div>
+      <div id="galleryAiRow" style="margin:0 0 10px 0;">
+        <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
+        <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
+      </div>
       <div id="galleryGrid"></div>
       <div id="galleryEmpty" style="display:none;font-size:12.5px;color:var(--text-dim);text-align:center;padding:22px 10px;"></div>
     </div>
@@ -2068,7 +2073,24 @@
   <div class="oc-modal-backdrop" id="photoLightboxBackdrop" style="background:rgba(0,0,0,0.88);z-index:3500;">
     <img id="photoLightboxImg" src="" style="max-width:92vw;max-height:85vh;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.6);" />
     <div id="photoLightboxCaption" style="display:none;position:absolute;left:50%;transform:translateX(-50%);bottom:24px;max-width:92vw;padding:10px 14px;background:rgba(0,0,0,0.7);color:#fff;font-size:12.5px;border-radius:8px;line-height:1.5;text-align:center;"></div>
-    <button id="photoLightboxDelete" style="display:none;position:absolute;top:16px;left:16px;background:rgba(180,42,30,0.9);color:#fff;border:none;border-radius:6px;padding:7px 13px;cursor:pointer;font-size:12px;">🗑 Delete</button>
+    <button id="photoLightboxAiBtn" style="display:none;position:absolute;top:16px;left:16px;background:rgba(107,143,92,0.92);color:#fff;border:none;border-radius:6px;padding:7px 13px;cursor:pointer;font-size:12px;">🧠 Tag with AI</button>
+    <button id="photoLightboxDelete" style="display:none;position:absolute;top:16px;left:132px;background:rgba(180,42,30,0.9);color:#fff;border:none;border-radius:6px;padding:7px 13px;cursor:pointer;font-size:12px;">🗑 Delete</button>
+    <select id="photoLightboxCorrect" style="display:none;position:absolute;top:54px;left:16px;background:rgba(0,0,0,0.65);color:#fff;border:1px solid rgba(255,255,255,0.35);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px;">
+      <option value="">✏️ Correct…</option>
+      <option value="deer">Doe / deer</option>
+      <option value="buck">Buck</option>
+      <option value="turkey">Turkey</option>
+      <option value="bear">Bear</option>
+      <option value="coyote">Coyote</option>
+      <option value="fox">Fox</option>
+      <option value="bobcat">Bobcat</option>
+      <option value="raccoon">Raccoon</option>
+      <option value="hog">Hog</option>
+      <option value="squirrel">Squirrel</option>
+      <option value="bird">Bird</option>
+      <option value="empty">Empty (no animal)</option>
+      <option value="other">Other…</option>
+    </select>
     <button class="close-x" id="photoLightboxClose" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;">&times;</button>
   </div>
 
@@ -2265,6 +2287,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-storage-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-functions-compat.js"></script>
 <script>
   (function(){
     try{
@@ -3488,6 +3511,8 @@
     galleryLightboxDoc = null;
     document.getElementById('photoLightboxCaption').style.display = 'none';
     document.getElementById('photoLightboxDelete').style.display = 'none';
+    document.getElementById('photoLightboxAiBtn').style.display = 'none';
+    document.getElementById('photoLightboxCorrect').style.display = 'none';
     // Deliberately does NOT call closeAllModals() — the lightbox should layer on top of
     // whatever's already open (e.g. the Journal), not replace it, so that closing the
     // lightbox correctly reveals what was open underneath rather than dumping back to
@@ -3507,11 +3532,21 @@
   function galleryPhotoList(){
     var camF = document.getElementById('galleryCameraFilter').value;
     var siteF = document.getElementById('gallerySiteFilter').value;
+    var spF = document.getElementById('gallerySpeciesFilter').value;
     var sort = document.getElementById('gallerySort').value;
     var list = importedPhotos.slice();
     if (camF) list = list.filter(function(p){ return p.cameraId === camF; });
     if (siteF === '__none__') list = list.filter(function(p){ return !p.matchedSiteId; });
     else if (siteF) list = list.filter(function(p){ return p.matchedSiteId === siteF; });
+    if (spF === '__untagged__') list = list.filter(function(p){ return !p.ai; });
+    else if (spF === '__animal__') list = list.filter(function(p){ return p.ai && p.ai.hasAnimal; });
+    else if (spF === '__buck__') list = list.filter(function(p){ return p.ai && p.ai.isBuck; });
+    else if (spF === '__empty__') list = list.filter(function(p){ return p.ai && !p.ai.hasAnimal; });
+    else if (spF) list = list.filter(function(p){
+      if (!p.ai || !p.ai.hasAnimal) return false;
+      if ((p.ai.primarySpecies || '') === spF) return true;
+      return Array.isArray(p.ai.allSpecies) && p.ai.allSpecies.indexOf(spF) !== -1;
+    });
     list.sort(function(a,b){ return sort === 'oldest' ? (a.timestamp||0)-(b.timestamp||0) : (b.timestamp||0)-(a.timestamp||0); });
     return list;
   }
@@ -3532,6 +3567,30 @@
       .forEach(function(s){ if (siteIds[s.id]) siteOpts.push('<option value="'+s.id+'">'+escapeHtml(s.name||'(unnamed)')+'</option>'); });
     if (hasUnlocated) siteOpts.push('<option value="__none__">No site match</option>');
     var prevSite = siteSel.value; siteSel.innerHTML = siteOpts.join(''); siteSel.value = prevSite;
+
+    // Species filter — built from whatever the AI has tagged so far.
+    var spSel = document.getElementById('gallerySpeciesFilter');
+    if (spSel){
+      var speciesSet = {}, anyTagged = false, anyUntagged = false, anyBuck = false, anyEmpty = false;
+      importedPhotos.forEach(function(p){
+        if (p.ai){
+          anyTagged = true;
+          if (p.ai.hasAnimal){
+            if (p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true;
+            if (Array.isArray(p.ai.allSpecies)) p.ai.allSpecies.forEach(function(sp){ if (sp) speciesSet[sp] = true; });
+            if (p.ai.isBuck) anyBuck = true;
+          }
+          else anyEmpty = true;
+        } else { anyUntagged = true; }
+      });
+      var spOpts = ['<option value="">All photos</option>'];
+      Object.keys(speciesSet).sort().forEach(function(sp){ spOpts.push('<option value="' + escapeHtml(sp) + '">' + escapeHtml(sp) + '</option>'); });
+      if (anyBuck) spOpts.push('<option value="__buck__">Bucks only ♂</option>');
+      if (anyEmpty) spOpts.push('<option value="__empty__">Empty frames</option>');
+      if (anyTagged) spOpts.push('<option value="__animal__">Any animal</option>');
+      if (anyUntagged) spOpts.push('<option value="__untagged__">Not yet tagged</option>');
+      var prevSp = spSel.value; spSel.innerHTML = spOpts.join(''); spSel.value = prevSp;
+    }
   }
   function renderGallery(){
     var grid = document.getElementById('galleryGrid');
@@ -3564,6 +3623,7 @@
           '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
           '<div class="site' + (p.matchedSiteName ? '' : ' unmatched') + '">' + (p.matchedSiteName ? escapeHtml(p.matchedSiteName) : 'No site match') + '</div>' +
           '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(p) + '</div>' +
+          photoAiBadgeHtml(p) +
         '</div>';
       card.addEventListener('click', function(){ showGalleryPhoto(p); });
       grid.appendChild(card);
@@ -3578,17 +3638,164 @@
     var parts = ['<strong>' + escapeHtml(dateStr) + '</strong>'];
     if (line2) parts.push(line2);
     var cond = photoConditionHtml(doc); if (cond) parts.push(cond);
+    var aiLine = aiSummaryHtml(doc); if (aiLine) parts.push(aiLine);
     var cap = document.getElementById('photoLightboxCaption');
     cap.innerHTML = parts.join('<br>'); cap.style.display = 'block';
     document.getElementById('photoLightboxDelete').style.display = 'block';
+    var aiBtn = document.getElementById('photoLightboxAiBtn');
+    aiBtn.style.display = cloudPhotosAvailable() ? 'block' : 'none';
+    aiBtn.disabled = false; aiBtn.textContent = doc.ai ? '🧠 Re-tag' : '🧠 Tag with AI';
+    var corr = document.getElementById('photoLightboxCorrect');
+    corr.style.display = cloudPhotosAvailable() ? 'block' : 'none';
+    corr.value = '';
     document.getElementById('photoLightboxBackdrop').classList.add('show');
   }
+  // Compact, readable summary of a photo's AI classification (empty until tagged).
+  function aiSummaryHtml(doc){
+    var ai = doc && doc.ai; if (!ai) return '';
+    var s;
+    if (ai.hasAnimal){
+      s = '🧠 ' + escapeHtml(ai.primarySpecies || 'animal');
+      var others = (Array.isArray(ai.allSpecies) ? ai.allSpecies.filter(function(sp){ return sp && sp !== ai.primarySpecies; }) : []);
+      if (others.length) s += ' + ' + others.map(function(sp){ return escapeHtml(sp); }).join(' + ');
+      if (ai.count && ai.count > 1) s += ' ×' + ai.count;
+      if (ai.isBuck){ s += ' — BUCK'; if (ai.antlerNotes) s += ' (' + escapeHtml(ai.antlerNotes) + ')'; }
+    } else {
+      s = '🧠 empty frame';
+    }
+    if (ai.corrected) s += ' · ✔ corrected by you';
+    else if (ai.confidence) s += ' · ' + escapeHtml(ai.confidence) + ' confidence';
+    if (ai.notes && !ai.corrected) s += '<br><span style="opacity:0.85;">' + escapeHtml(ai.notes) + '</span>';
+    return '<span style="color:#9fc98a;">' + s + '</span>';
+  }
+  // Pulls a point-count label out of the AI's free-text antler description
+  // (e.g. "6-8 point buck" -> "6-8 pt", "8-point" -> "8 pt"). '' if none found.
+  function buckPointsLabel(notes){
+    if (!notes) return '';
+    var m = notes.match(/(\d+)\s*(?:-|–|to)\s*(\d+)\s*-?\s*(?:point|pt)\b/i);
+    if (m) return m[1] + '–' + m[2] + ' pt';
+    m = notes.match(/(\d+)\s*-?\s*(?:point|pt)\b/i);
+    if (m) return m[1] + ' pt';
+    return '';
+  }
+  // The AI badge shown on a gallery card. Bucks get a bold gold "🦌 BUCK · N pt".
+  // Extra species beyond the primary (for multi-animal photos, e.g. a buck AND a turkey).
+  function photoAiExtraSpecies(ai){
+    if (!ai || !ai.hasAnimal || !Array.isArray(ai.allSpecies)) return '';
+    var others = ai.allSpecies.filter(function(sp){ return sp && sp !== ai.primarySpecies; });
+    if (!others.length) return '';
+    return ' +' + others.map(function(sp){ return escapeHtml(sp); }).join(' +');
+  }
+  // Small colored confidence label for the thumbnail (AI tags only; corrections are certain).
+  function photoConfidenceChip(ai){
+    if (!ai || ai.corrected || !ai.confidence) return '';
+    var color = ai.confidence === 'high' ? '#7bbf6a' : ai.confidence === 'medium' ? '#e0b24a' : '#e0784a';
+    var label = ai.confidence === 'medium' ? 'med' : ai.confidence;
+    return '<div style="font-size:9px;font-weight:700;margin-top:2px;color:' + color + ';">' + escapeHtml(label) + ' confidence</div>';
+  }
+  function photoAiBadgeHtml(p){
+    if (!p.ai) return '';
+    var ai = p.ai;
+    var chk = ai.corrected ? '✔ ' : '';
+    var extra = photoAiExtraSpecies(ai);
+    var badge;
+    if (ai.hasAnimal && ai.isBuck){
+      var pts = buckPointsLabel(ai.antlerNotes);
+      badge = '<div style="font-size:9.5px;font-weight:800;margin-top:3px;padding:2px 6px;border-radius:4px;display:inline-block;background:rgba(255,106,19,0.28);color:#ffb066;">' + escapeHtml(chk + '🦌 BUCK' + (pts ? ' · ' + pts : '')) + extra + '</div>';
+    } else {
+      var animal = ai.hasAnimal;
+      var bg = animal ? 'rgba(107,143,92,0.25);color:#9fc98a' : 'rgba(122,138,148,0.2);color:#9fb0bc';
+      var lead = ai.corrected ? '✔ ' : '🧠 ';
+      badge = '<div style="font-size:9.5px;font-weight:700;margin-top:3px;padding:2px 5px;border-radius:4px;display:inline-block;background:' + bg + ';">' + lead + escapeHtml(animal ? (ai.primarySpecies || 'animal') : 'empty') + extra + '</div>';
+    }
+    return badge + photoConfidenceChip(ai);
+  }
+  // Calls the tagPhoto Cloud Function on one photo and persists the result on its record.
+  async function tagPhotoWithAI(doc){
+    if (!cloudPhotosAvailable() || typeof firebase === 'undefined' || !firebase.functions){
+      throw new Error('Sign in to use AI tagging.');
+    }
+    var callable = firebase.app().functions('us-east1').httpsCallable('tagPhoto');
+    var res = await callable({ photoId: doc.id });
+    doc.ai = res.data || {};
+    if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
+    return doc.ai;
+  }
+  document.getElementById('photoLightboxAiBtn').addEventListener('click', async function(){
+    if (!galleryLightboxDoc) return;
+    var doc = galleryLightboxDoc;
+    var btn = this; btn.disabled = true; btn.textContent = '🧠 Analyzing…';
+    try {
+      await tagPhotoWithAI(doc);
+      if (galleryLightboxDoc === doc) showGalleryPhoto(doc); // rebuild caption with the AI line
+      renderGallery(); populateGalleryFilters(); refreshTagAllButton();
+      showToast('AI: ' + (doc.ai && doc.ai.hasAnimal ? (doc.ai.primarySpecies || 'animal') : 'empty frame'));
+    } catch(e){
+      alert('AI tagging failed:\n' + (e && e.message ? e.message : 'unknown error'));
+      btn.disabled = false; btn.textContent = doc.ai ? '🧠 Re-tag' : '🧠 Tag with AI';
+    }
+  });
   async function deletePhotoStorage(doc){
     if (hasChatStorage){ try{ await window.storage.delete('photo:' + doc.id, false); }catch(e){} }
     if (doc.storagePath && typeof firebase !== 'undefined' && firebase.storage){
       try{ await firebase.storage().ref(doc.storagePath).delete(); }catch(e){ /* file may already be gone */ }
     }
   }
+  // Manual correction — a human label that overrides the AI and is trusted over it.
+  var CORRECTION_MAP = {
+    deer:     { hasAnimal:true, primarySpecies:'whitetail deer', isBuck:false },
+    buck:     { hasAnimal:true, primarySpecies:'whitetail deer', isBuck:true },
+    turkey:   { hasAnimal:true, primarySpecies:'wild turkey',    isBuck:false },
+    bear:     { hasAnimal:true, primarySpecies:'black bear',     isBuck:false },
+    coyote:   { hasAnimal:true, primarySpecies:'coyote',         isBuck:false },
+    fox:      { hasAnimal:true, primarySpecies:'fox',            isBuck:false },
+    bobcat:   { hasAnimal:true, primarySpecies:'bobcat',         isBuck:false },
+    raccoon:  { hasAnimal:true, primarySpecies:'raccoon',        isBuck:false },
+    hog:      { hasAnimal:true, primarySpecies:'wild hog',       isBuck:false },
+    squirrel: { hasAnimal:true, primarySpecies:'squirrel',       isBuck:false },
+    bird:     { hasAnimal:true, primarySpecies:'bird',           isBuck:false },
+    empty:    { hasAnimal:false, primarySpecies:'none',          isBuck:false }
+  };
+  async function applyCorrection(doc, choice){
+    var base;
+    if (choice === 'other'){
+      var name = (window.prompt('What is it? (species name)') || '').trim();
+      if (!name) return false;
+      base = { hasAnimal:true, primarySpecies:name.toLowerCase(), isBuck:false };
+    } else {
+      base = CORRECTION_MAP[choice];
+      if (!base) return false;
+    }
+    var ai = doc.ai ? Object.assign({}, doc.ai) : {};
+    ai.hasAnimal = base.hasAnimal;
+    ai.primarySpecies = base.primarySpecies;
+    ai.isBuck = base.isBuck;
+    ai.allSpecies = base.hasAnimal ? [base.primarySpecies] : [];
+    if (!base.hasAnimal){ ai.count = 0; ai.isBuck = false; ai.antlerNotes = ''; }
+    else if (ai.count == null || ai.count < 1){ ai.count = 1; }
+    if (choice === 'buck'){
+      var pts = (window.prompt('How many points? (optional — e.g. 8 or 6-8)') || '').trim();
+      if (pts) ai.antlerNotes = pts + '-point (your count)';
+    }
+    ai.corrected = true;
+    ai.source = 'user';
+    ai.correctedAt = Date.now();
+    doc.ai = ai;
+    if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
+    return true;
+  }
+  document.getElementById('photoLightboxCorrect').addEventListener('change', async function(){
+    var choice = this.value;
+    this.value = '';
+    if (!choice || !galleryLightboxDoc) return;
+    var doc = galleryLightboxDoc;
+    var ok = await applyCorrection(doc, choice);
+    if (!ok) return;
+    if (galleryLightboxDoc === doc) showGalleryPhoto(doc);
+    renderGallery(); populateGalleryFilters(); refreshTagAllButton();
+    showToast('Corrected → ' + (doc.ai.hasAnimal ? (doc.ai.isBuck ? 'buck' : doc.ai.primarySpecies) : 'empty'));
+  });
+
   document.getElementById('photoLightboxDelete').addEventListener('click', async function(){
     if (!galleryLightboxDoc) return;
     var doc = galleryLightboxDoc;
@@ -3605,6 +3812,7 @@
   function openPhotoGallery(){
     populateGalleryFilters();
     renderGallery();
+    refreshTagAllButton();
     closeAllModals();
     document.getElementById('photoGalleryModalBackdrop').classList.add('show');
   }
@@ -3615,8 +3823,42 @@
   document.getElementById('photoGalleryModalBackdrop').addEventListener('click', function(e){
     if (e.target === this) this.classList.remove('show');
   });
-  ['galleryCameraFilter','gallerySiteFilter','gallerySort'].forEach(function(id){
-    document.getElementById(id).addEventListener('change', renderGallery);
+  ['galleryCameraFilter','gallerySiteFilter','gallerySpeciesFilter','gallerySort'].forEach(function(id){
+    document.getElementById(id).addEventListener('change', function(){ renderGallery(); refreshTagAllButton(); });
+  });
+
+  // ---------- Batch AI tagging: tag every untagged photo in the current view ----------
+  function galleryUntaggedInView(){
+    return galleryPhotoList().filter(function(p){ return !p.ai; });
+  }
+  function refreshTagAllButton(){
+    var row = document.getElementById('galleryAiRow');
+    var btn = document.getElementById('galleryTagAllBtn');
+    if (!row || !btn) return;
+    if (!cloudPhotosAvailable()){ row.style.display = 'none'; return; }
+    row.style.display = 'block';
+    var n = galleryUntaggedInView().length;
+    btn.disabled = (n === 0);
+    btn.textContent = n === 0 ? '🧠 Everything in view is tagged' : ('🧠 Tag all untagged with AI (' + n + ')');
+  }
+  document.getElementById('galleryTagAllBtn').addEventListener('click', async function(){
+    var status = document.getElementById('galleryTagAllStatus');
+    var btn = this;
+    var list = galleryUntaggedInView();
+    if (!list.length) return;
+    if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nThis calls Claude once per photo (about half a cent each). You can keep using the app while it runs.')) return;
+    btn.disabled = true;
+    var done = 0, failed = 0;
+    for (var i=0; i<list.length; i++){
+      status.textContent = 'Analyzing ' + (i+1) + ' of ' + list.length + '…' + (failed ? ' (' + failed + ' failed)' : '');
+      try{ await tagPhotoWithAI(list[i]); }
+      catch(e){ failed++; }
+      done++;
+      renderGallery(); // badges appear as each one finishes
+    }
+    populateGalleryFilters(); // new species may now exist to filter by
+    refreshTagAllButton();
+    status.textContent = 'Done — tagged ' + (done - failed) + ' photo' + ((done-failed)===1?'':'s') + (failed ? ', ' + failed + ' failed (try again)' : '') + '.';
   });
 
   function showPrompt(message, defaultValue){
