@@ -1701,7 +1701,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 107</div>
+    <div id="buildBadge">BUILD 108</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3239,7 +3239,13 @@
     if (historicalDayCache[key]) return historicalDayCache[key];
     var p = (async function(){
       try{
-        var url = 'https://archive-api.open-meteo.com/v1/archive?latitude=' + lat + '&longitude=' + lng +
+        // The ERA5 archive lags ~5 days, so recent captures (including today) aren't in it
+        // yet. For those, hit the forecast endpoint instead — it serves recent past hours
+        // plus the current day — using the SAME date-range + hourly params, so everything
+        // downstream (closest-hour pick, parsing) is identical regardless of source.
+        var isRecent = (Date.now() - targetMs) < (7 * 86400000);
+        var host = isRecent ? 'https://api.open-meteo.com/v1/forecast' : 'https://archive-api.open-meteo.com/v1/archive';
+        var url = host + '?latitude=' + lat + '&longitude=' + lng +
           '&start_date=' + dateStr + '&end_date=' + dateStr +
           '&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation,cloud_cover,relative_humidity_2m' +
           '&daily=sunrise,sunset' +
@@ -4082,8 +4088,11 @@
       if (cameraId) p.cameraId = cameraId;   // correct the camera the batch was filed under
       p.matchedSiteId = site.id;
       p.matchedSiteName = site.name;
+      // Now that they have a location, let weather (re)fetch — clear any earlier
+      // 'unavailable' that was set only because there was no site to key weather off.
+      if (p.weatherStatus !== 'ok'){ p.weatherStatus = 'pending'; }
       if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); done++; }catch(e){} }
-      updateCardCondition(p); // a located photo can now show/fetch conditions
+      updateCardCondition(p);
     }
     populateGalleryFilters();
     // Jump the camera filter to the corrected camera so the fixed photos stay in view
@@ -4091,6 +4100,16 @@
     if (cameraId){ var cf = document.getElementById('galleryCameraFilter'); if (cf) cf.value = cameraId; }
     renderGallery(); refreshTagAllButton();
     showToast('Fixed ' + done + ' photo' + (done === 1 ? '' : 's'));
+    // Auto-fetch weather/solunar for the freshly-located photos (day-cached, so a whole
+    // batch at one spot on one day is a single network call). No need to run backfill.
+    var needy = photos.filter(photoNeedsConditions);
+    if (needy.length){
+      showToast('Fetching weather for ' + needy.length + ' photo' + (needy.length === 1 ? '' : 's') + '…');
+      enrichPhotoDocs(needy).then(function(n){
+        renderGallery();
+        showToast(n ? ('Weather added to ' + n + ' photo' + (n === 1 ? '' : 's')) : 'Weather not available for those dates yet');
+      });
+    }
   }
   function openAssignLocPicker(){
     var targets = galleryUnlocatedInView();
@@ -8872,6 +8891,10 @@
     if (!doc || !doc.timestamp) return false;
     if (!doc.moonPhase) return true;
     if (doc.weatherStatus == null || doc.weatherStatus === 'pending') return true;
+    // Retry weather that came back 'unavailable' ONLY if the photo now has a location to key
+    // off (e.g. a site was assigned after import, or a recent date is now fetchable). Without
+    // a location it's correctly unavailable and we don't want an endless retry.
+    if (doc.weatherStatus === 'unavailable' && photoSiteLatLng(doc)) return true;
     return false;
   }
   async function enrichPhotoDoc(doc){
@@ -8882,9 +8905,13 @@
       doc.solunarPeriod = classifyEventSolunarPeriod(new Date(doc.timestamp), loc.lat, loc.lng);
       changed = true;
     }
-    if ((doc.weatherStatus == null || doc.weatherStatus === 'pending') && doc.timestamp){
-      if (!loc){ doc.weatherStatus = 'unavailable'; changed = true; } // no location → no weather (moon still set)
-      else {
+    // Fetch when weather is missing/pending, OR retry an earlier 'unavailable' now that the
+    // photo has a location (assigned after import, or a recent date the archive lacked).
+    var wantsWeather = (doc.weatherStatus == null || doc.weatherStatus === 'pending' || (doc.weatherStatus === 'unavailable' && loc));
+    if (wantsWeather && doc.timestamp){
+      if (!loc){
+        if (doc.weatherStatus !== 'unavailable'){ doc.weatherStatus = 'unavailable'; changed = true; } // no location → no weather (moon still set)
+      } else {
         var w = await fetchHistoricalWeather(loc.lat, loc.lng, doc.timestamp);
         doc.weather = w;
         doc.weatherStatus = w ? 'ok' : 'unavailable';
