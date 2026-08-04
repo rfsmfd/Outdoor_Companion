@@ -1701,7 +1701,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 109</div>
+    <div id="buildBadge">BUILD 110</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2122,8 +2122,8 @@
        Note: the stored photo itself is a compressed 500px copy (no separate full-res
        original is retained), so this shows the same image larger/clearer, not
        additional detail beyond what's already stored. -->
-  <div class="oc-modal-backdrop" id="photoLightboxBackdrop" style="background:rgba(0,0,0,0.88);z-index:3500;">
-    <img id="photoLightboxImg" src="" style="max-width:92vw;max-height:85vh;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.6);" />
+  <div class="oc-modal-backdrop" id="photoLightboxBackdrop" style="background:rgba(0,0,0,0.88);z-index:99995;">
+    <img id="photoLightboxImg" src="" title="Tap to close" style="max-width:92vw;max-height:85vh;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,0.6);cursor:zoom-out;" />
     <div id="photoLightboxCaption" style="display:none;position:absolute;left:50%;transform:translateX(-50%);bottom:24px;max-width:92vw;padding:10px 14px;background:rgba(0,0,0,0.7);color:#fff;font-size:12.5px;border-radius:8px;line-height:1.5;text-align:center;"></div>
     <button id="photoLightboxAiBtn" style="display:none;position:absolute;top:16px;left:16px;background:rgba(107,143,92,0.92);color:#fff;border:none;border-radius:6px;padding:7px 13px;cursor:pointer;font-size:12px;">🧠 Tag with AI</button>
     <button id="photoLightboxDelete" style="display:none;position:absolute;top:16px;left:132px;background:rgba(180,42,30,0.9);color:#fff;border:none;border-radius:6px;padding:7px 13px;cursor:pointer;font-size:12px;">🗑 Delete</button>
@@ -2144,7 +2144,7 @@
       <option value="other">Other…</option>
     </select>
     <select id="photoLightboxBuck" style="display:none;position:absolute;top:92px;left:16px;background:rgba(0,0,0,0.65);color:#fff;border:1px solid rgba(255,176,102,0.55);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px;max-width:60vw;"></select>
-    <button class="close-x" id="photoLightboxClose" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;">&times;</button>
+    <button class="close-x" id="photoLightboxClose" title="Close (Esc)" style="position:absolute;top:14px;right:14px;width:46px;height:46px;padding:0;font-size:30px;line-height:44px;text-align:center;background:rgba(0,0,0,0.62);color:#fff;border:1.5px solid rgba(255,255,255,0.5);border-radius:50%;cursor:pointer;z-index:3;">&times;</button>
   </div>
 
   <!-- Edit Weather — shared between Quick Log observations/catches and Hunt/Trip events.
@@ -3584,6 +3584,17 @@
   });
   document.getElementById('photoLightboxBackdrop').addEventListener('click', function(e){
     if (e.target === this) this.classList.remove('show');
+  });
+  // Extra escape hatches so nobody ever gets stuck on an enlarged photo: tap the photo
+  // itself, or press Escape. (The X can sit under the fixed sign-out bar on some screens.)
+  document.getElementById('photoLightboxImg').addEventListener('click', function(){
+    document.getElementById('photoLightboxBackdrop').classList.remove('show');
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape'){
+      var lb = document.getElementById('photoLightboxBackdrop');
+      if (lb && lb.classList.contains('show')) lb.classList.remove('show');
+    }
   });
 
   // ---------- Photo Gallery ----------
