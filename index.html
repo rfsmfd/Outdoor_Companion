@@ -1680,7 +1680,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 98</div>
+    <div id="buildBadge">BUILD 99</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3598,7 +3598,7 @@
           '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
           '<div class="site' + (p.matchedSiteName ? '' : ' unmatched') + '">' + (p.matchedSiteName ? escapeHtml(p.matchedSiteName) : 'No site match') + '</div>' +
           '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(p) + '</div>' +
-          (p.ai ? '<div style="font-size:9.5px;font-weight:700;margin-top:3px;padding:2px 5px;border-radius:4px;display:inline-block;background:' + (p.ai.hasAnimal ? 'rgba(107,143,92,0.25);color:#9fc98a' : 'rgba(122,138,148,0.2);color:#9fb0bc') + ';">🧠 ' + escapeHtml(p.ai.hasAnimal ? ((p.ai.primarySpecies || 'animal') + (p.ai.isBuck ? ' ♂' : '')) : 'empty') + '</div>' : '') +
+          photoAiBadgeHtml(p) +
         '</div>';
       card.addEventListener('click', function(){ showGalleryPhoto(p); });
       grid.appendChild(card);
@@ -3636,6 +3636,28 @@
     if (ai.confidence) s += ' · ' + escapeHtml(ai.confidence) + ' confidence';
     if (ai.notes) s += '<br><span style="opacity:0.85;">' + escapeHtml(ai.notes) + '</span>';
     return '<span style="color:#9fc98a;">' + s + '</span>';
+  }
+  // Pulls a point-count label out of the AI's free-text antler description
+  // (e.g. "6-8 point buck" -> "6-8 pt", "8-point" -> "8 pt"). '' if none found.
+  function buckPointsLabel(notes){
+    if (!notes) return '';
+    var m = notes.match(/(\d+)\s*(?:-|–|to)\s*(\d+)\s*-?\s*(?:point|pt)\b/i);
+    if (m) return m[1] + '–' + m[2] + ' pt';
+    m = notes.match(/(\d+)\s*-?\s*(?:point|pt)\b/i);
+    if (m) return m[1] + ' pt';
+    return '';
+  }
+  // The AI badge shown on a gallery card. Bucks get a bold gold "🦌 BUCK · N pt".
+  function photoAiBadgeHtml(p){
+    if (!p.ai) return '';
+    if (p.ai.hasAnimal && p.ai.isBuck){
+      var pts = buckPointsLabel(p.ai.antlerNotes);
+      var label = '🦌 BUCK' + (pts ? ' · ' + pts : '');
+      return '<div style="font-size:9.5px;font-weight:800;margin-top:3px;padding:2px 6px;border-radius:4px;display:inline-block;background:rgba(255,106,19,0.28);color:#ffb066;">' + escapeHtml(label) + '</div>';
+    }
+    var animal = p.ai.hasAnimal;
+    var bg = animal ? 'rgba(107,143,92,0.25);color:#9fc98a' : 'rgba(122,138,148,0.2);color:#9fb0bc';
+    return '<div style="font-size:9.5px;font-weight:700;margin-top:3px;padding:2px 5px;border-radius:4px;display:inline-block;background:' + bg + ';">🧠 ' + escapeHtml(animal ? (p.ai.primarySpecies || 'animal') : 'empty') + '</div>';
   }
   // Calls the tagPhoto Cloud Function on one photo and persists the result on its record.
   async function tagPhotoWithAI(doc){
