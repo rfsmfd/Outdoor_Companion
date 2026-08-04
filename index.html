@@ -1680,7 +1680,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 97</div>
+    <div id="buildBadge">BUILD 98</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1997,12 +1997,17 @@
       <div class="photo-gallery-filters">
         <select id="galleryCameraFilter"><option value="">All cameras</option></select>
         <select id="gallerySiteFilter"><option value="">All sites</option></select>
+        <select id="gallerySpeciesFilter"><option value="">All photos</option></select>
         <select id="gallerySort">
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
         </select>
       </div>
-      <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 10px 0;"></div>
+      <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 6px 0;"></div>
+      <div id="galleryAiRow" style="margin:0 0 10px 0;">
+        <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
+        <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
+      </div>
       <div id="galleryGrid"></div>
       <div id="galleryEmpty" style="display:none;font-size:12.5px;color:var(--text-dim);text-align:center;padding:22px 10px;"></div>
     </div>
@@ -3510,11 +3515,17 @@
   function galleryPhotoList(){
     var camF = document.getElementById('galleryCameraFilter').value;
     var siteF = document.getElementById('gallerySiteFilter').value;
+    var spF = document.getElementById('gallerySpeciesFilter').value;
     var sort = document.getElementById('gallerySort').value;
     var list = importedPhotos.slice();
     if (camF) list = list.filter(function(p){ return p.cameraId === camF; });
     if (siteF === '__none__') list = list.filter(function(p){ return !p.matchedSiteId; });
     else if (siteF) list = list.filter(function(p){ return p.matchedSiteId === siteF; });
+    if (spF === '__untagged__') list = list.filter(function(p){ return !p.ai; });
+    else if (spF === '__animal__') list = list.filter(function(p){ return p.ai && p.ai.hasAnimal; });
+    else if (spF === '__buck__') list = list.filter(function(p){ return p.ai && p.ai.isBuck; });
+    else if (spF === '__empty__') list = list.filter(function(p){ return p.ai && !p.ai.hasAnimal; });
+    else if (spF) list = list.filter(function(p){ return p.ai && p.ai.hasAnimal && (p.ai.primarySpecies || '') === spF; });
     list.sort(function(a,b){ return sort === 'oldest' ? (a.timestamp||0)-(b.timestamp||0) : (b.timestamp||0)-(a.timestamp||0); });
     return list;
   }
@@ -3535,6 +3546,26 @@
       .forEach(function(s){ if (siteIds[s.id]) siteOpts.push('<option value="'+s.id+'">'+escapeHtml(s.name||'(unnamed)')+'</option>'); });
     if (hasUnlocated) siteOpts.push('<option value="__none__">No site match</option>');
     var prevSite = siteSel.value; siteSel.innerHTML = siteOpts.join(''); siteSel.value = prevSite;
+
+    // Species filter — built from whatever the AI has tagged so far.
+    var spSel = document.getElementById('gallerySpeciesFilter');
+    if (spSel){
+      var speciesSet = {}, anyTagged = false, anyUntagged = false, anyBuck = false, anyEmpty = false;
+      importedPhotos.forEach(function(p){
+        if (p.ai){
+          anyTagged = true;
+          if (p.ai.hasAnimal){ if (p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true; if (p.ai.isBuck) anyBuck = true; }
+          else anyEmpty = true;
+        } else { anyUntagged = true; }
+      });
+      var spOpts = ['<option value="">All photos</option>'];
+      Object.keys(speciesSet).sort().forEach(function(sp){ spOpts.push('<option value="' + escapeHtml(sp) + '">' + escapeHtml(sp) + '</option>'); });
+      if (anyBuck) spOpts.push('<option value="__buck__">Bucks only ♂</option>');
+      if (anyEmpty) spOpts.push('<option value="__empty__">Empty frames</option>');
+      if (anyTagged) spOpts.push('<option value="__animal__">Any animal</option>');
+      if (anyUntagged) spOpts.push('<option value="__untagged__">Not yet tagged</option>');
+      var prevSp = spSel.value; spSel.innerHTML = spOpts.join(''); spSel.value = prevSp;
+    }
   }
   function renderGallery(){
     var grid = document.getElementById('galleryGrid');
@@ -3624,7 +3655,7 @@
     try {
       await tagPhotoWithAI(doc);
       if (galleryLightboxDoc === doc) showGalleryPhoto(doc); // rebuild caption with the AI line
-      renderGallery();
+      renderGallery(); populateGalleryFilters(); refreshTagAllButton();
       showToast('AI: ' + (doc.ai && doc.ai.hasAnimal ? (doc.ai.primarySpecies || 'animal') : 'empty frame'));
     } catch(e){
       alert('AI tagging failed:\n' + (e && e.message ? e.message : 'unknown error'));
@@ -3653,6 +3684,7 @@
   function openPhotoGallery(){
     populateGalleryFilters();
     renderGallery();
+    refreshTagAllButton();
     closeAllModals();
     document.getElementById('photoGalleryModalBackdrop').classList.add('show');
   }
@@ -3663,8 +3695,42 @@
   document.getElementById('photoGalleryModalBackdrop').addEventListener('click', function(e){
     if (e.target === this) this.classList.remove('show');
   });
-  ['galleryCameraFilter','gallerySiteFilter','gallerySort'].forEach(function(id){
-    document.getElementById(id).addEventListener('change', renderGallery);
+  ['galleryCameraFilter','gallerySiteFilter','gallerySpeciesFilter','gallerySort'].forEach(function(id){
+    document.getElementById(id).addEventListener('change', function(){ renderGallery(); refreshTagAllButton(); });
+  });
+
+  // ---------- Batch AI tagging: tag every untagged photo in the current view ----------
+  function galleryUntaggedInView(){
+    return galleryPhotoList().filter(function(p){ return !p.ai; });
+  }
+  function refreshTagAllButton(){
+    var row = document.getElementById('galleryAiRow');
+    var btn = document.getElementById('galleryTagAllBtn');
+    if (!row || !btn) return;
+    if (!cloudPhotosAvailable()){ row.style.display = 'none'; return; }
+    row.style.display = 'block';
+    var n = galleryUntaggedInView().length;
+    btn.disabled = (n === 0);
+    btn.textContent = n === 0 ? '🧠 Everything in view is tagged' : ('🧠 Tag all untagged with AI (' + n + ')');
+  }
+  document.getElementById('galleryTagAllBtn').addEventListener('click', async function(){
+    var status = document.getElementById('galleryTagAllStatus');
+    var btn = this;
+    var list = galleryUntaggedInView();
+    if (!list.length) return;
+    if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nThis calls Claude once per photo (about half a cent each). You can keep using the app while it runs.')) return;
+    btn.disabled = true;
+    var done = 0, failed = 0;
+    for (var i=0; i<list.length; i++){
+      status.textContent = 'Analyzing ' + (i+1) + ' of ' + list.length + '…' + (failed ? ' (' + failed + ' failed)' : '');
+      try{ await tagPhotoWithAI(list[i]); }
+      catch(e){ failed++; }
+      done++;
+      renderGallery(); // badges appear as each one finishes
+    }
+    populateGalleryFilters(); // new species may now exist to filter by
+    refreshTagAllButton();
+    status.textContent = 'Done — tagged ' + (done - failed) + ' photo' + ((done-failed)===1?'':'s') + (failed ? ', ' + failed + ' failed (try again)' : '') + '.';
   });
 
   function showPrompt(message, defaultValue){
