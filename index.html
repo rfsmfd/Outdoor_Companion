@@ -1221,6 +1221,9 @@
   .import-photo-card .dt{ font-size:10px; color:var(--text-dim); }
   .import-photo-card .site{ font-size:10.5px; font-weight:600; }
   .import-photo-card .site.unmatched{ color:#D94A2E; }
+  .import-photo-card .cond{ font-size:9.5px; color:var(--text-dim); line-height:1.35; margin-top:3px; }
+  .import-photo-card .cond .cond-pending{ color:var(--accent); opacity:0.85; }
+  .import-photo-card .cond .cond-dim{ opacity:0.6; }
   #historyList{ max-height:50vh; overflow-y:auto; }
   .history-row{
     display:flex;
@@ -1664,7 +1667,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 93</div>
+    <div id="buildBadge">BUILD 94</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1846,7 +1849,12 @@
   <div class="oc-modal-backdrop" id="importPhotosModalBackdrop">
     <div class="oc-modal" id="importPhotosModal">
       <h3>Import Photos <button class="close-x" id="importPhotosClose">&times;</button></h3>
-      <div id="importPreviewNotice">☁ Photos are saved to your cloud account (full quality, kept for antler comparison) and synced across your devices. Each photo is matched to the site its camera was on at capture time.</div>
+      <div id="importPreviewNotice">☁ Photos are saved to your cloud account (full quality, kept for antler comparison) and synced across your devices. Each photo is matched to a site, and stamped with the moon, solunar &amp; weather <strong>from its own date &amp; time</strong>.</div>
+
+      <div id="photoBackfillRow" style="display:none;margin:0 0 12px 0;padding:9px 11px;background:rgba(255,106,19,0.08);border:1px solid var(--line);border-radius:6px;">
+        <div style="font-size:12px;margin-bottom:7px;" id="photoBackfillMsg"></div>
+        <button type="button" class="btn-ghost" id="photoBackfillBtn" style="width:100%;">Add conditions to those photos</button>
+      </div>
 
       <div class="form-pop" id="importPickerArea">
         <label>Which camera are these photos from?</label>
@@ -3113,21 +3121,36 @@
   // friend's forwarded buck photo with a known date), not just "unavailable." One honest,
   // confirmed limitation: the archive API doesn't offer UV index or visibility as hourly
   // variables (forecast-only concepts) — those come back null here, unlike current weather.
+  // Fetches (and caches) a whole day of archive data for a location. Batch-enriching many
+  // photos from the same camera on the same day then hits the network once, not once each.
+  var historicalDayCache = {}; // 'lat|lng|date' -> Promise<parsedJson|null>
+  function fetchHistoricalDayCached(lat, lng, targetMs){
+    var d = new Date(targetMs);
+    var dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    var key = Number(lat).toFixed(4) + '|' + Number(lng).toFixed(4) + '|' + dateStr;
+    if (historicalDayCache[key]) return historicalDayCache[key];
+    var p = (async function(){
+      try{
+        var url = 'https://archive-api.open-meteo.com/v1/archive?latitude=' + lat + '&longitude=' + lng +
+          '&start_date=' + dateStr + '&end_date=' + dateStr +
+          '&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation,cloud_cover,relative_humidity_2m' +
+          '&daily=sunrise,sunset' +
+          '&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto';
+        var controller = new AbortController();
+        var timeoutId = setTimeout(function(){ controller.abort(); }, 10000);
+        var res = await fetch(url, {signal: controller.signal});
+        clearTimeout(timeoutId);
+        if (!res.ok) return null;
+        return await res.json();
+      }catch(e){ return null; }
+    })();
+    historicalDayCache[key] = p;
+    return p;
+  }
+
   async function fetchHistoricalWeather(lat, lng, targetMs){
     try{
-      var d = new Date(targetMs);
-      var dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-      var url = 'https://archive-api.open-meteo.com/v1/archive?latitude=' + lat + '&longitude=' + lng +
-        '&start_date=' + dateStr + '&end_date=' + dateStr +
-        '&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure,precipitation,cloud_cover,relative_humidity_2m' +
-        '&daily=sunrise,sunset' +
-        '&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto';
-      var controller = new AbortController();
-      var timeoutId = setTimeout(function(){ controller.abort(); }, 10000);
-      var res = await fetch(url, {signal: controller.signal});
-      clearTimeout(timeoutId);
-      if (!res.ok) return null;
-      var data = await res.json();
+      var data = await fetchHistoricalDayCached(lat, lng, targetMs);
       if (!data || !data.hourly || !data.hourly.time || data.hourly.time.length === 0) return null;
       // Find the hourly entry closest to the actual event time (archive data is hourly,
       // not to-the-minute, so this finds the nearest available hour).
@@ -7773,6 +7796,10 @@
       await ref.put(analysisBlob, { contentType: 'image/jpeg' });
       var downloadURL = await ref.getDownloadURL();
       var thumb = await compressImageToBase64(photoRecord.blob, 400, 0.7);
+      // Moon + solunar are pure math — stamp them instantly at import; weather is fetched
+      // right after in the background (see enrichPhotoDocs), keyed to this photo's timestamp.
+      var condSite = sites.filter(function(s){ return s.id === (photoRecord.matchedSiteId || null); })[0];
+      var condHasLoc = condSite && typeof condSite.lat === 'number';
       var doc = {
         id: photoRecord.id,
         cameraId: photoRecord.cameraId,
@@ -7786,7 +7813,11 @@
         downloadURL: downloadURL,
         thumb: thumb,
         antler: null, // reserved for Phase 2.5 (auto-tagging & antler comparison)
-        createdAt: photoRecord.timestamp || null
+        createdAt: photoRecord.timestamp || null,
+        moonPhase: photoRecord.timestamp ? getMoonPhase(new Date(photoRecord.timestamp)) : null,
+        solunarPeriod: (condHasLoc && photoRecord.timestamp) ? classifyEventSolunarPeriod(new Date(photoRecord.timestamp), condSite.lat, condSite.lng) : null,
+        weather: null,
+        weatherStatus: 'pending' // 'pending' | 'ok' | 'unavailable' — filled by background enrichment
       };
       await window.storage.set('photo:' + photoRecord.id, JSON.stringify(doc), false);
       importedPhotos.push(doc);
@@ -7810,6 +7841,95 @@
     }catch(e){ importedPhotos = []; }
   }
 
+  // ---------- Photo condition enrichment (moon/solunar/weather at capture time & place) ----------
+  // Moon phase is pure math (works for ANY past date). Solunar + historical weather need the
+  // photo's site coordinates. Weather comes from Open-Meteo's ARCHIVE — the real conditions on
+  // that date — never the live "current" feed, since these are last-season photos.
+  function photoSiteLatLng(doc){
+    if (!doc || !doc.matchedSiteId) return null;
+    var s = sites.filter(function(x){ return x.id === doc.matchedSiteId; })[0];
+    return (s && typeof s.lat === 'number') ? {lat:s.lat, lng:s.lng} : null;
+  }
+  function photoNeedsConditions(doc){
+    if (!doc || !doc.timestamp) return false;
+    if (!doc.moonPhase) return true;
+    if (doc.weatherStatus == null || doc.weatherStatus === 'pending') return true;
+    return false;
+  }
+  async function enrichPhotoDoc(doc){
+    var changed = false;
+    if (!doc.moonPhase && doc.timestamp){ doc.moonPhase = getMoonPhase(new Date(doc.timestamp)); changed = true; }
+    var loc = photoSiteLatLng(doc);
+    if (!doc.solunarPeriod && loc && doc.timestamp){
+      doc.solunarPeriod = classifyEventSolunarPeriod(new Date(doc.timestamp), loc.lat, loc.lng);
+      changed = true;
+    }
+    if ((doc.weatherStatus == null || doc.weatherStatus === 'pending') && doc.timestamp){
+      if (!loc){ doc.weatherStatus = 'unavailable'; changed = true; } // no location → no weather (moon still set)
+      else {
+        var w = await fetchHistoricalWeather(loc.lat, loc.lng, doc.timestamp);
+        doc.weather = w;
+        doc.weatherStatus = w ? 'ok' : 'unavailable';
+        changed = true;
+      }
+    }
+    return changed;
+  }
+  // Enrich a list of photo docs sequentially (gentle on the archive API + day-cached), saving
+  // each changed doc to the cloud and refreshing its card as it resolves.
+  async function enrichPhotoDocs(docs, onProgress){
+    var done = 0, updated = 0;
+    for (var i=0; i<docs.length; i++){
+      var doc = docs[i];
+      try{
+        var changed = await enrichPhotoDoc(doc);
+        if (changed){
+          updated++;
+          if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
+          updateCardCondition(doc);
+        }
+      }catch(e){}
+      done++;
+      if (onProgress) onProgress(done, docs.length, updated);
+    }
+    return updated;
+  }
+
+  // Compact condition readout for a photo card — always reflects the photo's own timestamp/place.
+  function photoConditionHtml(doc){
+    if (!doc) return '';
+    var bits = [];
+    if (doc.moonPhase && doc.moonPhase.name){
+      bits.push('🌙 ' + escapeHtml(doc.moonPhase.name) + (doc.moonPhase.illumination != null ? ' ' + doc.moonPhase.illumination + '%' : ''));
+    }
+    if (doc.solunarPeriod){ bits.push('🎣 ' + escapeHtml(doc.solunarPeriod)); }
+    if (doc.weatherStatus === 'ok' && doc.weather){
+      bits.push('🌡 ' + formatWeatherLine(doc.weather).replace(/<[^>]+>/g, ''));
+    } else if (doc.weatherStatus === 'pending' || doc.weatherStatus == null){
+      bits.push('<span class="cond-pending">checking weather…</span>');
+    } else if (doc.weatherStatus === 'unavailable'){
+      bits.push('<span class="cond-dim">weather n/a</span>');
+    }
+    if (bits.length === 0) return '<span class="cond-pending">checking conditions…</span>';
+    return bits.join(' · ');
+  }
+  function updateCardCondition(doc){
+    if (!doc) return;
+    var els = document.querySelectorAll('.import-photo-card[data-photo-id="' + doc.id + '"] .cond');
+    Array.prototype.forEach.call(els, function(el){ el.innerHTML = photoConditionHtml(doc); });
+  }
+  // Shows/hides the "backfill older photos" button based on how many stored photos still
+  // lack condition data (only meaningful when signed in, where photos live in the cloud).
+  function refreshBackfillRow(){
+    var row = document.getElementById('photoBackfillRow');
+    var msg = document.getElementById('photoBackfillMsg');
+    if (!row) return;
+    var needy = hasChatStorage ? importedPhotos.filter(photoNeedsConditions) : [];
+    if (needy.length === 0){ row.style.display = 'none'; return; }
+    if (msg) msg.textContent = needy.length + ' saved photo' + (needy.length===1?'':'s') + ' from before this feature ' + (needy.length===1?'is':'are') + ' missing moon/weather data.';
+    row.style.display = 'block';
+  }
+
   // Renders already-saved trail-cam photos into the import modal's grid, so the backlog is
   // visible and confirmed to persist across sessions. Newest first; optional camera filter.
   function renderSavedPhotosGrid(cameraId){
@@ -7823,6 +7943,7 @@
     list.forEach(function(p){
       var card = document.createElement('div');
       card.className = 'import-photo-card';
+      card.setAttribute('data-photo-id', p.id);
       var dateStr = new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
       var src = p.thumb || p.downloadURL || '';
       card.innerHTML =
@@ -7830,6 +7951,7 @@
         '<div class="meta">' +
           '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
           '<div class="site' + (p.matchedSiteName ? '' : ' unmatched') + '">' + (p.matchedSiteName ? escapeHtml(p.matchedSiteName) : 'No site match') + '</div>' +
+          '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(p) + '</div>' +
         '</div>';
       grid.appendChild(card);
     });
@@ -7840,6 +7962,7 @@
     sel.innerHTML = cameras.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
       .map(function(c){ return '<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>'; }).join('');
     renderSavedPhotosGrid();
+    refreshBackfillRow();
     populateImportLocSelect();
     resetImportLocUI();
     document.getElementById('importProgress').style.display = 'none';
@@ -7852,6 +7975,23 @@
     document.getElementById('importPhotosModalBackdrop').classList.add('show');
     document.getElementById('importPhotosFixedClose').classList.add('show');
   });
+  document.getElementById('photoBackfillBtn').addEventListener('click', async function(){
+    if (!hasChatStorage) return;
+    var btn = this;
+    var msg = document.getElementById('photoBackfillMsg');
+    var needy = importedPhotos.filter(photoNeedsConditions);
+    if (needy.length === 0){ refreshBackfillRow(); return; }
+    btn.disabled = true;
+    var total = needy.length;
+    await enrichPhotoDocs(needy, function(done){
+      if (msg) msg.textContent = 'Adding conditions… ' + done + ' of ' + total;
+    });
+    btn.disabled = false;
+    showToast('Conditions added to ' + total + ' photo' + (total===1?'':'s'));
+    renderSavedPhotosGrid(); // reflect the freshly-added data
+    refreshBackfillRow();
+  });
+
   function closeImportPhotosModal(){
     document.getElementById('importPhotosModalBackdrop').classList.remove('show');
     document.getElementById('importPhotosFixedClose').classList.remove('show');
@@ -8284,18 +8424,32 @@
     results.forEach(function(r){
       var card = document.createElement('div');
       card.className = 'import-photo-card';
+      card.setAttribute('data-photo-id', r.id);
+      var pdoc = importedPhotos.filter(function(d){ return d.id === r.id; })[0] || r; // conditions live on the stored doc
       var dateStr = new Date(r.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
       card.innerHTML =
         '<img src="' + r.objectUrl + '" alt="' + escapeHtml(r.filename) + '">' +
         '<div class="meta">' +
           '<div class="dt">' + escapeHtml(dateStr) + (r.usedFallbackDate ? ' <em>(file date — unreliable)</em>' : '') + '</div>' +
           '<div class="site' + (r.matchedSiteName ? '' : ' unmatched') + '">' + (r.matchedSiteName ? escapeHtml(r.matchedSiteName) : 'No site match') + '</div>' +
+          '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(pdoc) + '</div>' +
         '</div>';
       grid.appendChild(card);
     });
 
     resetImportLocUI();
     populateImportLocSelect(); // pick up a location just created this session
+
+    // Fill in historical weather for the just-imported photos in the background (moon+solunar
+    // are already set). Cards update in place as each resolves; nothing here blocks the UI.
+    var newDocs = importedPhotos.filter(function(d){ return results.some(function(r){ return r.id === d.id; }); });
+    if (newDocs.length){
+      enrichPhotoDocs(newDocs, function(done, total){
+        progress.textContent = 'Done — ' + results.length + ' processed. Adding conditions ' + done + '/' + total + '…';
+      }).then(function(){
+        progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed, conditions added.';
+      });
+    }
   });
 
   async function deleteCameraFlow(camId){
