@@ -1701,7 +1701,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 104</div>
+    <div id="buildBadge">BUILD 105</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7334,15 +7334,25 @@
     return { coll: cloudCollName(key.slice(0, i)), id: key.slice(i + 1) };
   }
 
-  function makeCloudStorage(uid){
+  // Build a cloud-storage adapter for a SCOPE — either the signed-in user's private
+  // tree (users/{uid}) or a shared group tree (groups/{gid}). The ONLY difference is
+  // the base reference; every read/write/list/delete below is identical, because a
+  // group's collections use the same names and the same opaque {data} shape. The
+  // `cache` is a fresh closure per adapter, so rebuilding the adapter on a scope
+  // switch guarantees no stale records bleed across from the previous scope.
+  function makeCloudStorage(scope){
+    // Back-compat: a bare uid string means the user's private scope.
+    if (typeof scope === 'string') scope = { type: 'user', id: scope };
     var db = firebase.firestore();
-    var userRef = db.collection('users').doc(uid);
+    var baseRef = (scope && scope.type === 'group')
+      ? db.collection('groups').doc(scope.id)
+      : db.collection('users').doc(scope.id);
     var cache = {}; // key -> data string; filled by list() so get() needs no extra read
     return {
       list: async function(prefix){
         var coll = cloudCollName(prefix);
         var p = String(prefix).replace(/:$/, '');
-        var snap = await userRef.collection(coll).get();
+        var snap = await baseRef.collection(coll).get();
         var keys = [];
         snap.forEach(function(doc){
           var k = p + ':' + doc.id;
@@ -7355,7 +7365,7 @@
       get: async function(key){
         if (Object.prototype.hasOwnProperty.call(cache, key)) return { value: cache[key] };
         var pk = cloudParseKey(key);
-        var doc = await userRef.collection(pk.coll).doc(pk.id).get();
+        var doc = await baseRef.collection(pk.coll).doc(pk.id).get();
         if (!doc.exists) return null;
         var d = doc.data();
         var val = (d && typeof d.data === 'string') ? d.data : JSON.stringify(d || {});
@@ -7365,7 +7375,7 @@
       set: async function(key, value){
         var pk = cloudParseKey(key);
         cache[key] = value;
-        await userRef.collection(pk.coll).doc(pk.id).set({
+        await baseRef.collection(pk.coll).doc(pk.id).set({
           data: value,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -7373,9 +7383,148 @@
       delete: async function(key){
         var pk = cloudParseKey(key);
         delete cache[key];
-        await userRef.collection(pk.coll).doc(pk.id).delete();
+        await baseRef.collection(pk.coll).doc(pk.id).delete();
       }
     };
+  }
+
+  // ================= Group sharing (Phase 3a) — private + switchable group scope =========
+  // A user keeps their private data (users/{uid}) AND can switch into a shared group tree
+  // (groups/{gid}). Switching rebuilds window.storage's base ref and reloads everything.
+  // Nothing private is ever exposed; the group starts empty and fills as members add data.
+  var activeScope = { type: 'user', id: null }; // the data scope currently in view
+  var myGroups = [];                            // groups this user belongs to
+  var scopeSeq = 0;                             // monotonic guard against reload races
+
+  function loadStoredScope(){
+    try{ var s = JSON.parse(localStorage.getItem('oc_active_scope') || 'null'); if (s && s.type) return s; }catch(e){}
+    return null;
+  }
+  function storeScope(scope){ try{ localStorage.setItem('oc_active_scope', JSON.stringify(scope)); }catch(e){} }
+  function currentScopeValue(){ return activeScope.type === 'group' ? ('group:' + activeScope.id) : 'user'; }
+
+  // Codes are shared out-of-band and looked up (admin-side) by the joinGroup function, so
+  // they must be hard to guess. 8 chars from a 31-symbol alphabet (no confusable 0/O/1/I/L).
+  function genInviteCode(){
+    var chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789', s = '';
+    for (var i = 0; i < 8; i++){ s += chars.charAt(Math.floor(Math.random() * chars.length)); }
+    return s;
+  }
+
+  async function loadMyGroups(uid){
+    try{
+      var snap = await firebase.firestore().collection('groups').where('memberUids', 'array-contains', uid).get();
+      myGroups = [];
+      snap.forEach(function(d){
+        var x = d.data() || {};
+        myGroups.push({ id: d.id, name: x.name || 'Group', inviteCode: x.inviteCode, ownerUid: x.ownerUid, memberUids: x.memberUids || [] });
+      });
+      myGroups.sort(function(a, b){ return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }); });
+    }catch(e){ myGroups = []; }
+    return myGroups;
+  }
+
+  async function userIsMemberOf(uid, gid){
+    try{
+      var snap = await firebase.firestore().collection('groups').doc(gid).get();
+      return snap.exists && (snap.data().memberUids || []).indexOf(uid) !== -1;
+    }catch(e){ return false; } // read denied == not a member
+  }
+
+  // Client-side create is allowed by the security rules (owner is the sole initial member).
+  async function createGroup(name, uid){
+    var db = firebase.firestore();
+    var ref = db.collection('groups').doc();
+    var code = genInviteCode();
+    var members = {};
+    members[uid] = { name: (firebase.auth().currentUser.email || ''), role: 'owner', joinedAt: Date.now() };
+    await ref.set({
+      name: name, ownerUid: uid, memberUids: [uid], members: members,
+      inviteCode: code, createdAt: Date.now()
+    });
+    return { gid: ref.id, code: code };
+  }
+
+  // The switch primitive: point window.storage at the new scope and reload+redraw. The
+  // scopeSeq guard means if two switches race, only the latest one's render lands.
+  async function applyScope(scope){
+    var seq = ++scopeSeq;
+    activeScope = scope;
+    storeScope(scope);
+    window.storage = makeCloudStorage(scope);
+    hasChatStorage = true;
+    var sel = document.getElementById('oc-scope-select');
+    if (sel) sel.disabled = true;
+    renderScopeSwitcher();
+    try{ await initLoadAndUrlCheck(); }catch(e){ console.warn('Outdoor Companion: scope load issue', e); }
+    if (seq !== scopeSeq) return; // a newer switch superseded this one — drop the stale render
+    try{ renderAll(); }catch(e){}
+    updatePhotoImportAvailability();
+    if (sel) sel.disabled = false;
+  }
+
+  function renderScopeSwitcher(){
+    var sel = document.getElementById('oc-scope-select');
+    if (!sel) return;
+    var opts = ['<option value="user"' + (activeScope.type === 'user' ? ' selected' : '') + '>📁 My Data</option>'];
+    myGroups.forEach(function(g){
+      var v = 'group:' + g.id;
+      var isSel = (activeScope.type === 'group' && activeScope.id === g.id) ? ' selected' : '';
+      opts.push('<option value="' + v + '"' + isSel + '>🤝 ' + escapeHtml(g.name || 'Group') + '</option>');
+    });
+    opts.push('<option value="__create__">＋ Create a group…</option>');
+    opts.push('<option value="__join__">🔑 Join with a code…</option>');
+    if (activeScope.type === 'group') opts.push('<option value="__leave__">🚪 Leave this group…</option>');
+    sel.innerHTML = opts.join('');
+  }
+
+  async function onScopeSelectChange(){
+    var sel = this;
+    var v = sel.value;
+    var uid = firebase.auth().currentUser && firebase.auth().currentUser.uid;
+    if (!uid){ return; }
+    if (v === '__create__'){ sel.value = currentScopeValue(); await doCreateGroup(uid); return; }
+    if (v === '__join__'){ sel.value = currentScopeValue(); await doJoinGroup(uid); return; }
+    if (v === '__leave__'){ sel.value = currentScopeValue(); await doLeaveGroup(uid); return; }
+    if (v === 'user'){ await applyScope({ type: 'user', id: uid }); return; }
+    if (v.indexOf('group:') === 0){ await applyScope({ type: 'group', id: v.slice(6) }); return; }
+  }
+
+  async function doCreateGroup(uid){
+    var name = (window.prompt('Name your hunting group (e.g. "Camp Whitetail")') || '').trim();
+    if (!name) return;
+    try{
+      var res = await createGroup(name, uid);
+      await loadMyGroups(uid);
+      await applyScope({ type: 'group', id: res.gid });
+      window.prompt('Group "' + name + '" created!\n\nShare this invite code with your group so they can join (tap and copy):', res.code);
+    }catch(e){ alert('Could not create the group:\n' + ((e && e.message) || e)); }
+  }
+
+  async function doJoinGroup(uid){
+    var code = (window.prompt('Enter the invite code your group shared with you:') || '').trim().toUpperCase();
+    if (!code) return;
+    try{
+      var callable = firebase.app().functions('us-east1').httpsCallable('joinGroup');
+      var res = await callable({ code: code, name: (firebase.auth().currentUser.email || '') });
+      await loadMyGroups(uid);
+      await applyScope({ type: 'group', id: res.data.gid });
+      showToast('Joined "' + (res.data.name || 'group') + '"');
+    }catch(e){ alert('Could not join that group:\n' + ((e && e.message) || e)); }
+  }
+
+  async function doLeaveGroup(uid){
+    if (activeScope.type !== 'group') return;
+    var gid = activeScope.id;
+    var g = myGroups.filter(function(x){ return x.id === gid; })[0];
+    if (!window.confirm('Leave "' + ((g && g.name) || 'this group') + '"? You\'ll stop seeing its shared data. Anything the group added stays with the group.')) return;
+    try{
+      var callable = firebase.app().functions('us-east1').httpsCallable('leaveGroup');
+      await callable({ gid: gid });
+      await loadMyGroups(uid);
+      await applyScope({ type: 'user', id: uid });
+      showToast('Left the group');
+    }catch(e){ alert('Could not leave the group:\n' + ((e && e.message) || e)); }
   }
 
   // One-time upload of anything already in THIS browser's localStorage into the user's
@@ -7437,7 +7586,9 @@
       '#oc-auth-msg{margin-top:12px;min-height:16px;text-align:center;font-size:13px;color:#ff8f6b;line-height:1.4;}' +
       '#oc-auth-msg.ok{color:#7fd6a2;}' +
       '#oc-signout{position:fixed;top:8px;right:8px;z-index:99990;display:none;align-items:center;gap:8px;background:rgba(30,43,35,.9);border:1px solid #35443A;border-radius:20px;padding:5px 10px;color:#c7d4cc;font-size:12px;font-family:inherit;}' +
-      '#oc-signout button{background:#FF6A13;color:#fff;border:none;border-radius:14px;padding:4px 10px;font-size:12px;cursor:pointer;}';
+      '#oc-signout button{background:#FF6A13;color:#fff;border:none;border-radius:14px;padding:4px 10px;font-size:12px;cursor:pointer;}' +
+      '#oc-scope-select{background:#1E2B23;color:#fff;border:1px solid #3c4d42;border-radius:12px;padding:4px 8px;font-size:12px;font-family:inherit;cursor:pointer;max-width:150px;}' +
+      '#oc-scope-select:disabled{opacity:.6;cursor:default;}';
     document.head.appendChild(style);
 
     var overlay = document.createElement('div');
@@ -7459,7 +7610,7 @@
 
     var signout = document.createElement('div');
     signout.id = 'oc-signout';
-    signout.innerHTML = '<span id="oc-signout-email"></span><button type="button">Sign out</button>';
+    signout.innerHTML = '<select id="oc-scope-select" title="Switch between your private data and a shared group"></select><span id="oc-signout-email"></span><button type="button">Sign out</button>';
     document.body.appendChild(signout);
 
     var mode = 'signin';
@@ -7514,6 +7665,7 @@
       catch(e){ setMsg(humanError(e)); }
     });
     signout.querySelector('button').addEventListener('click', function(){ firebase.auth().signOut(); });
+    document.getElementById('oc-scope-select').addEventListener('change', onScopeSelectChange);
   }
 
   function showAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o){ o.style.display = 'flex'; var b=document.getElementById('oc-auth-btn'); if(b) b.disabled=false; } }
@@ -7535,19 +7687,35 @@
     var didInitForUid = null;
     firebase.auth().onAuthStateChanged(function(user){
       if (user){
-        window.storage = makeCloudStorage(user.uid);
+        // Provisional private adapter so window.storage is ready synchronously; the async
+        // block below swaps in the real (possibly group) scope once membership is known.
+        window.storage = makeCloudStorage({ type: 'user', id: user.uid });
         hasChatStorage = true;
         hideAuthOverlay();
         showSignoutButton(user.email);
-        if (didInitForUid === user.uid) return; // don't reload on token refresh
+        if (didInitForUid === user.uid){
+          // Token refresh — DON'T clobber an active group scope. Rebuild the adapter for
+          // whatever scope is currently in view (this was the silent data-flip bug).
+          window.storage = makeCloudStorage(activeScope.id ? activeScope : { type: 'user', id: user.uid });
+          return;
+        }
         didInitForUid = user.uid;
         (async function(){
           try{ await migrateLocalToCloudIfNeeded(user.uid); }catch(e){ console.warn('Migration issue:', e); }
-          try{ await initLoadAndUrlCheck(); }catch(e){ console.warn('Cloud load issue:', e); }
+          try{ await loadMyGroups(user.uid); }catch(e){}
+          // Restore the last-used scope if it was a group the user still belongs to;
+          // otherwise fall back to private data (e.g. they were removed from the group).
+          var scope = { type: 'user', id: user.uid };
+          var stored = loadStoredScope();
+          if (stored && stored.type === 'group' && stored.id){
+            try{ if (await userIsMemberOf(user.uid, stored.id)) scope = { type: 'group', id: stored.id }; }catch(e){}
+          }
+          try{ await applyScope(scope); }catch(e){ console.warn('Cloud load issue:', e); }
         })();
       } else {
         hasChatStorage = false;
         didInitForUid = null;
+        activeScope = { type: 'user', id: null };
         hideSignoutButton();
         showAuthOverlay();
       }
@@ -8546,6 +8714,9 @@
   // list for immediate preview. If the cloud is unavailable, it still previews locally.
   async function persistImportedPhoto(photoRecord){
     importedPhotosSession.push(photoRecord);
+    // Safety: never persist a photo into a group scope yet (Increment 2). The button is
+    // already gated, but this guard makes it impossible to create a half-shared record.
+    if (activeScope.type === 'group'){ return; }
     if (!cloudPhotosAvailable() || !photoRecord.blob){ return; }
     try{
       var uid = firebase.auth().currentUser.uid;
@@ -8716,7 +8887,21 @@
     });
   }
 
+  // Photo sharing for groups is Increment 2 — importing while in a group scope would
+  // write the photo doc to the group tree but the image to the uploader's PRIVATE
+  // Storage (which other members can't read), producing broken shared records. Block it.
+  function updatePhotoImportAvailability(){
+    var btn = document.getElementById('importPhotosBtn');
+    if (!btn) return;
+    var groupScope = (activeScope.type === 'group');
+    btn.style.opacity = groupScope ? '0.55' : '';
+    btn.title = groupScope ? 'Group photo sharing is coming soon — switch to “My Data” to import photos.' : '';
+  }
   document.getElementById('importPhotosBtn').addEventListener('click', function(){
+    if (activeScope.type === 'group'){
+      showToast('Group photo sharing is coming soon — switch to “My Data” to import photos.');
+      return;
+    }
     var sel = document.getElementById('importCameraSelect');
     sel.innerHTML = cameras.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
       .map(function(c){ return '<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>'; }).join('');

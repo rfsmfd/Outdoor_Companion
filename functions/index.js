@@ -167,3 +167,89 @@ exports.tagPhoto = onCall(
     return Object.assign({}, parsed, { model: MODEL, taggedAt: Date.now() });
   }
 );
+
+/**
+ * Group sharing (Phase 3a) — membership mutations that clients can't do safely.
+ *
+ * Data model: groups/{gid} = { name, ownerUid, memberUids:[...],
+ * members:{uid:{name,role,joinedAt}}, inviteCode, createdAt }. Shared records
+ * live at groups/{gid}/{collection}/{id}. Security rules make a group readable
+ * only by its members — which is exactly why JOINING needs a function: a
+ * not-yet-member cannot read or query the group by its invite code under those
+ * rules. The admin SDK here bypasses rules, looks the group up by code, and adds
+ * the caller. leaveGroup is a function for the same reason the client update rule
+ * freezes membership: self-removal (and owner hand-off) must be validated server
+ * side so a member can't rewrite the roster.
+ */
+const REGION = "us-east1";
+
+exports.joinGroup = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to join a group.");
+  }
+  const code = String((request.data && request.data.code) || "").trim().toUpperCase();
+  if (!code) {
+    throw new HttpsError("invalid-argument", "An invite code is required.");
+  }
+  const memberName = String((request.data && request.data.name) || "").slice(0, 120);
+
+  const db = admin.firestore();
+  const snap = await db.collection("groups").where("inviteCode", "==", code).limit(1).get();
+  if (snap.empty) {
+    throw new HttpsError("not-found", "That invite code didn't match any group.");
+  }
+  const doc = snap.docs[0];
+  const data = doc.data() || {};
+  const members = data.memberUids || [];
+
+  if (members.indexOf(uid) === -1) {
+    const update = { memberUids: admin.firestore.FieldValue.arrayUnion(uid) };
+    update["members." + uid] = { name: memberName, role: "member", joinedAt: Date.now() };
+    await doc.ref.update(update);
+  }
+  return { gid: doc.id, name: data.name || "" };
+});
+
+exports.leaveGroup = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in.");
+  }
+  const gid = String((request.data && request.data.gid) || "").trim();
+  if (!gid) {
+    throw new HttpsError("invalid-argument", "A group id is required.");
+  }
+
+  const ref = admin.firestore().collection("groups").doc(gid);
+  const snap = await ref.get();
+  if (!snap.exists) {
+    return { left: true }; // already gone
+  }
+  const data = snap.data() || {};
+  const members = data.memberUids || [];
+  if (members.indexOf(uid) === -1) {
+    return { left: true }; // not a member; nothing to do
+  }
+
+  const remaining = members.filter((u) => u !== uid);
+  if (remaining.length === 0) {
+    // Last member out — remove the group doc. Its shared subcollection records
+    // become inaccessible (rules require a member), which is the intended clean slate.
+    await ref.delete();
+    return { left: true, deleted: true };
+  }
+
+  const update = {
+    memberUids: admin.firestore.FieldValue.arrayRemove(uid),
+  };
+  update["members." + uid] = admin.firestore.FieldValue.delete();
+  // If the owner leaves, hand ownership to the next remaining member so the group
+  // never ends up ownerless (which would freeze name edits / deletion).
+  if (data.ownerUid === uid) {
+    update.ownerUid = remaining[0];
+    update["members." + remaining[0] + ".role"] = "owner";
+  }
+  await ref.update(update);
+  return { left: true };
+});
