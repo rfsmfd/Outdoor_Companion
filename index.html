@@ -1680,7 +1680,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 100</div>
+    <div id="buildBadge">BUILD 101</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3542,7 +3542,11 @@
     else if (spF === '__animal__') list = list.filter(function(p){ return p.ai && p.ai.hasAnimal; });
     else if (spF === '__buck__') list = list.filter(function(p){ return p.ai && p.ai.isBuck; });
     else if (spF === '__empty__') list = list.filter(function(p){ return p.ai && !p.ai.hasAnimal; });
-    else if (spF) list = list.filter(function(p){ return p.ai && p.ai.hasAnimal && (p.ai.primarySpecies || '') === spF; });
+    else if (spF) list = list.filter(function(p){
+      if (!p.ai || !p.ai.hasAnimal) return false;
+      if ((p.ai.primarySpecies || '') === spF) return true;
+      return Array.isArray(p.ai.allSpecies) && p.ai.allSpecies.indexOf(spF) !== -1;
+    });
     list.sort(function(a,b){ return sort === 'oldest' ? (a.timestamp||0)-(b.timestamp||0) : (b.timestamp||0)-(a.timestamp||0); });
     return list;
   }
@@ -3571,7 +3575,11 @@
       importedPhotos.forEach(function(p){
         if (p.ai){
           anyTagged = true;
-          if (p.ai.hasAnimal){ if (p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true; if (p.ai.isBuck) anyBuck = true; }
+          if (p.ai.hasAnimal){
+            if (p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true;
+            if (Array.isArray(p.ai.allSpecies)) p.ai.allSpecies.forEach(function(sp){ if (sp) speciesSet[sp] = true; });
+            if (p.ai.isBuck) anyBuck = true;
+          }
           else anyEmpty = true;
         } else { anyUntagged = true; }
       });
@@ -3648,6 +3656,8 @@
     var s;
     if (ai.hasAnimal){
       s = '🧠 ' + escapeHtml(ai.primarySpecies || 'animal');
+      var others = (Array.isArray(ai.allSpecies) ? ai.allSpecies.filter(function(sp){ return sp && sp !== ai.primarySpecies; }) : []);
+      if (others.length) s += ' + ' + others.map(function(sp){ return escapeHtml(sp); }).join(' + ');
       if (ai.count && ai.count > 1) s += ' ×' + ai.count;
       if (ai.isBuck){ s += ' — BUCK'; if (ai.antlerNotes) s += ' (' + escapeHtml(ai.antlerNotes) + ')'; }
     } else {
@@ -3669,18 +3679,36 @@
     return '';
   }
   // The AI badge shown on a gallery card. Bucks get a bold gold "🦌 BUCK · N pt".
+  // Extra species beyond the primary (for multi-animal photos, e.g. a buck AND a turkey).
+  function photoAiExtraSpecies(ai){
+    if (!ai || !ai.hasAnimal || !Array.isArray(ai.allSpecies)) return '';
+    var others = ai.allSpecies.filter(function(sp){ return sp && sp !== ai.primarySpecies; });
+    if (!others.length) return '';
+    return ' +' + others.map(function(sp){ return escapeHtml(sp); }).join(' +');
+  }
+  // Small colored confidence label for the thumbnail (AI tags only; corrections are certain).
+  function photoConfidenceChip(ai){
+    if (!ai || ai.corrected || !ai.confidence) return '';
+    var color = ai.confidence === 'high' ? '#7bbf6a' : ai.confidence === 'medium' ? '#e0b24a' : '#e0784a';
+    var label = ai.confidence === 'medium' ? 'med' : ai.confidence;
+    return '<div style="font-size:9px;font-weight:700;margin-top:2px;color:' + color + ';">' + escapeHtml(label) + ' confidence</div>';
+  }
   function photoAiBadgeHtml(p){
     if (!p.ai) return '';
-    var chk = p.ai.corrected ? '✔ ' : '';
-    if (p.ai.hasAnimal && p.ai.isBuck){
-      var pts = buckPointsLabel(p.ai.antlerNotes);
-      var label = chk + '🦌 BUCK' + (pts ? ' · ' + pts : '');
-      return '<div style="font-size:9.5px;font-weight:800;margin-top:3px;padding:2px 6px;border-radius:4px;display:inline-block;background:rgba(255,106,19,0.28);color:#ffb066;">' + escapeHtml(label) + '</div>';
+    var ai = p.ai;
+    var chk = ai.corrected ? '✔ ' : '';
+    var extra = photoAiExtraSpecies(ai);
+    var badge;
+    if (ai.hasAnimal && ai.isBuck){
+      var pts = buckPointsLabel(ai.antlerNotes);
+      badge = '<div style="font-size:9.5px;font-weight:800;margin-top:3px;padding:2px 6px;border-radius:4px;display:inline-block;background:rgba(255,106,19,0.28);color:#ffb066;">' + escapeHtml(chk + '🦌 BUCK' + (pts ? ' · ' + pts : '')) + extra + '</div>';
+    } else {
+      var animal = ai.hasAnimal;
+      var bg = animal ? 'rgba(107,143,92,0.25);color:#9fc98a' : 'rgba(122,138,148,0.2);color:#9fb0bc';
+      var lead = ai.corrected ? '✔ ' : '🧠 ';
+      badge = '<div style="font-size:9.5px;font-weight:700;margin-top:3px;padding:2px 5px;border-radius:4px;display:inline-block;background:' + bg + ';">' + lead + escapeHtml(animal ? (ai.primarySpecies || 'animal') : 'empty') + extra + '</div>';
     }
-    var animal = p.ai.hasAnimal;
-    var bg = animal ? 'rgba(107,143,92,0.25);color:#9fc98a' : 'rgba(122,138,148,0.2);color:#9fb0bc';
-    var lead = p.ai.corrected ? '✔ ' : '🧠 ';
-    return '<div style="font-size:9.5px;font-weight:700;margin-top:3px;padding:2px 5px;border-radius:4px;display:inline-block;background:' + bg + ';">' + lead + escapeHtml(animal ? (p.ai.primarySpecies || 'animal') : 'empty') + '</div>';
+    return badge + photoConfidenceChip(ai);
   }
   // Calls the tagPhoto Cloud Function on one photo and persists the result on its record.
   async function tagPhotoWithAI(doc){
