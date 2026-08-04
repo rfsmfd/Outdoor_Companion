@@ -169,19 +169,57 @@ exports.tagPhoto = onCall(
 );
 
 /**
- * Group sharing (Phase 3a) — membership mutations that clients can't do safely.
+ * Group sharing — membership mutations that clients can't do safely.
  *
  * Data model: groups/{gid} = { name, ownerUid, memberUids:[...],
- * members:{uid:{name,role,joinedAt}}, inviteCode, createdAt }. Shared records
- * live at groups/{gid}/{collection}/{id}. Security rules make a group readable
- * only by its members — which is exactly why JOINING needs a function: a
- * not-yet-member cannot read or query the group by its invite code under those
- * rules. The admin SDK here bypasses rules, looks the group up by code, and adds
- * the caller. leaveGroup is a function for the same reason the client update rule
- * freezes membership: self-removal (and owner hand-off) must be validated server
- * side so a member can't rewrite the roster.
+ * members:{uid:{name,role,joinedAt}}, inviteCode, createdAt }.
+ *
+ * Phase 3b (per-item sharing): items stay in their owner's tree
+ * (users/{uid}/{coll}/{id}) and carry a top-level `sharedGroups:[gid]`. The group
+ * view is a collectionGroup query across members. The security rule that lets a
+ * member read another member's shared item checks membership against a top-level,
+ * FUNCTION-ONLY mirror doc `memberships/{uid} = { groups:[gid,...] }`. That mirror
+ * MUST be maintained here (never client-writable) — so create/join/leave each keep
+ * it in sync. Group create/join/leave all run server-side: create so it can also
+ * seed the mirror; join because a non-member can't read a group by code under
+ * members-only rules; leave so self-removal / owner hand-off is validated.
  */
 const REGION = "us-east1";
+
+// Server-side invite code: 8 non-confusable chars (no 0/O/1/I/L).
+function genCode() {
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  let s = "";
+  for (let i = 0; i < 8; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+  return s;
+}
+
+exports.createGroup = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "You must be signed in to create a group.");
+  }
+  const name = String((request.data && request.data.name) || "").trim().slice(0, 120);
+  if (!name) {
+    throw new HttpsError("invalid-argument", "A group name is required.");
+  }
+  const email = (request.auth.token && request.auth.token.email) || "";
+
+  const db = admin.firestore();
+  const ref = db.collection("groups").doc();
+  const code = genCode();
+  const members = {};
+  members[uid] = { name: email, role: "owner", joinedAt: Date.now() };
+  await ref.set({
+    name: name, ownerUid: uid, memberUids: [uid], members: members,
+    inviteCode: code, createdAt: Date.now(),
+  });
+  // Seed the membership mirror the security rules read.
+  await db.collection("memberships").doc(uid).set(
+    { groups: admin.firestore.FieldValue.arrayUnion(ref.id) }, { merge: true });
+
+  return { gid: ref.id, code: code, name: name };
+});
 
 exports.joinGroup = onCall({ region: REGION }, async (request) => {
   const uid = request.auth && request.auth.uid;
@@ -208,6 +246,10 @@ exports.joinGroup = onCall({ region: REGION }, async (request) => {
     update["members." + uid] = { name: memberName, role: "member", joinedAt: Date.now() };
     await doc.ref.update(update);
   }
+  // Keep the membership mirror in sync (idempotent).
+  await db.collection("memberships").doc(uid).set(
+    { groups: admin.firestore.FieldValue.arrayUnion(doc.id) }, { merge: true });
+
   return { gid: doc.id, name: data.name || "" };
 });
 
@@ -221,8 +263,13 @@ exports.leaveGroup = onCall({ region: REGION }, async (request) => {
     throw new HttpsError("invalid-argument", "A group id is required.");
   }
 
-  const ref = admin.firestore().collection("groups").doc(gid);
+  const db = admin.firestore();
+  const ref = db.collection("groups").doc(gid);
   const snap = await ref.get();
+  // Always drop the group from the leaver's membership mirror, even if the group is
+  // already gone, so the rules never grant read via a stale membership entry.
+  await db.collection("memberships").doc(uid).set(
+    { groups: admin.firestore.FieldValue.arrayRemove(gid) }, { merge: true });
   if (!snap.exists) {
     return { left: true }; // already gone
   }
