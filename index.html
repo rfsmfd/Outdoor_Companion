@@ -1779,6 +1779,10 @@
         <label>Name this location <em style="color:var(--text-dim);font-style:normal;">(so you can reuse it next time)</em></label>
         <input type="text" id="importLocName" placeholder="e.g. Creek Cam" />
       </div>
+      <div id="importLocPropRow" class="form-pop" style="margin-bottom:10px;display:none;">
+        <label id="importLocPropLabel">Jump to a property</label>
+        <select id="importLocPropSelect"><option value="">— Select to jump the map —</option></select>
+      </div>
       <div id="importLocCoords" style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">—</div>
       <div class="import-loc-baselayers">
         <button type="button" data-loclayer="hybrid" class="active">Aerial + Roads</button>
@@ -7980,6 +7984,7 @@
     // Reset to the safe default so a location chosen for one batch can't silently carry
     // over onto a different camera's next import.
     importBatchLocation = null;
+    importLocSelectedPropertyId = null;
     var scanned = document.querySelector('input[name="importLocModeRadio"][value="scanned"]');
     if (scanned) scanned.checked = true;
     var manual = document.getElementById('importManualLoc');
@@ -8014,6 +8019,7 @@
   var importLocLayers = null;        // base tile layers, keyed
   var importLocRoadsOverlay = null;  // transparent roads + place labels, for the hybrid view
   var importLocCurrentBase = 'hybrid';
+  var importLocSelectedPropertyId = null; // property chosen to jump to; also files the new site
   function ensureImportLocMap(){
     if (importLocMap) return;
     importLocMap = L.map('importLocMiniMap', {
@@ -8069,6 +8075,33 @@
   Array.prototype.forEach.call(document.querySelectorAll('.import-loc-baselayers button'), function(b){
     b.addEventListener('click', function(){ setImportLocBase(b.getAttribute('data-loclayer')); });
   });
+
+  // Property jump: when home is many miles from the property, one tap flies the pin map
+  // straight to that property's saved view. Only shown when the active module has properties.
+  function populateImportLocPropSelect(){
+    var row = document.getElementById('importLocPropRow');
+    var sel = document.getElementById('importLocPropSelect');
+    var label = document.getElementById('importLocPropLabel');
+    if (!row || !sel) return;
+    var mine = properties.filter(function(p){ return p.module === activeModule && typeof p.centerLat === 'number'; })
+      .sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); });
+    if (mine.length === 0){ row.style.display = 'none'; sel.innerHTML = '<option value="">— Select to jump the map —</option>'; return; }
+    if (label) label.textContent = activeModule === 'fishing' ? 'Jump to a lake' : 'Jump to a property';
+    var opts = ['<option value="">— Select to jump the map —</option>'];
+    mine.forEach(function(p){ opts.push('<option value="' + p.id + '">' + escapeHtml(p.name || '(unnamed)') + '</option>'); });
+    sel.innerHTML = opts.join('');
+    sel.value = '';
+    row.style.display = 'block';
+  }
+  document.getElementById('importLocPropSelect').addEventListener('change', function(){
+    importLocSelectedPropertyId = this.value || null;
+    if (!importLocSelectedPropertyId || !importLocMap) return;
+    var prop = properties.filter(function(p){ return p.id === importLocSelectedPropertyId; })[0];
+    if (prop && typeof prop.centerLat === 'number'){
+      importLocMap.flyTo([prop.centerLat, prop.centerLng], prop.zoom || 15);
+    }
+  });
+
   function openImportLocPicker(){
     // Prefill the name from the chosen camera; anchor the map on the main map's current view
     // (importing usually happens at home, so the phone's GPS isn't the right starting point).
@@ -8076,6 +8109,8 @@
     var cam = cameras.filter(function(c){ return c.id === camSel.value; })[0];
     var nameInput = document.getElementById('importLocName');
     if (!nameInput.value && cam) nameInput.value = cam.name;
+    importLocSelectedPropertyId = null;
+    populateImportLocPropSelect();
     var c = map.getCenter();
     importLocPos = {lat:c.lat, lng:c.lng};
     document.getElementById('importLocCoords').textContent = fmtCoord(c.lat) + ', ' + fmtCoord(c.lng);
@@ -8170,7 +8205,8 @@
           lat: importBatchLocation.lat,
           lng: importBatchLocation.lng,
           createdAt: Date.now(),
-          lastActivityAt: Date.now()
+          lastActivityAt: Date.now(),
+          propertyId: importLocSelectedPropertyId || null // file under the property they jumped to
         };
         sites.push(manualSite);
         createdNewSite = true;
