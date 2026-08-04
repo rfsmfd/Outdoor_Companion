@@ -1680,7 +1680,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 99</div>
+    <div id="buildBadge">BUILD 100</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2075,6 +2075,22 @@
     <div id="photoLightboxCaption" style="display:none;position:absolute;left:50%;transform:translateX(-50%);bottom:24px;max-width:92vw;padding:10px 14px;background:rgba(0,0,0,0.7);color:#fff;font-size:12.5px;border-radius:8px;line-height:1.5;text-align:center;"></div>
     <button id="photoLightboxAiBtn" style="display:none;position:absolute;top:16px;left:16px;background:rgba(107,143,92,0.92);color:#fff;border:none;border-radius:6px;padding:7px 13px;cursor:pointer;font-size:12px;">🧠 Tag with AI</button>
     <button id="photoLightboxDelete" style="display:none;position:absolute;top:16px;left:132px;background:rgba(180,42,30,0.9);color:#fff;border:none;border-radius:6px;padding:7px 13px;cursor:pointer;font-size:12px;">🗑 Delete</button>
+    <select id="photoLightboxCorrect" style="display:none;position:absolute;top:54px;left:16px;background:rgba(0,0,0,0.65);color:#fff;border:1px solid rgba(255,255,255,0.35);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px;">
+      <option value="">✏️ Correct…</option>
+      <option value="deer">Doe / deer</option>
+      <option value="buck">Buck</option>
+      <option value="turkey">Turkey</option>
+      <option value="bear">Bear</option>
+      <option value="coyote">Coyote</option>
+      <option value="fox">Fox</option>
+      <option value="bobcat">Bobcat</option>
+      <option value="raccoon">Raccoon</option>
+      <option value="hog">Hog</option>
+      <option value="squirrel">Squirrel</option>
+      <option value="bird">Bird</option>
+      <option value="empty">Empty (no animal)</option>
+      <option value="other">Other…</option>
+    </select>
     <button class="close-x" id="photoLightboxClose" style="position:absolute;top:16px;right:16px;background:rgba(0,0,0,0.5);color:#fff;border-radius:50%;">&times;</button>
   </div>
 
@@ -3496,6 +3512,7 @@
     document.getElementById('photoLightboxCaption').style.display = 'none';
     document.getElementById('photoLightboxDelete').style.display = 'none';
     document.getElementById('photoLightboxAiBtn').style.display = 'none';
+    document.getElementById('photoLightboxCorrect').style.display = 'none';
     // Deliberately does NOT call closeAllModals() — the lightbox should layer on top of
     // whatever's already open (e.g. the Journal), not replace it, so that closing the
     // lightbox correctly reveals what was open underneath rather than dumping back to
@@ -3620,6 +3637,9 @@
     var aiBtn = document.getElementById('photoLightboxAiBtn');
     aiBtn.style.display = cloudPhotosAvailable() ? 'block' : 'none';
     aiBtn.disabled = false; aiBtn.textContent = doc.ai ? '🧠 Re-tag' : '🧠 Tag with AI';
+    var corr = document.getElementById('photoLightboxCorrect');
+    corr.style.display = cloudPhotosAvailable() ? 'block' : 'none';
+    corr.value = '';
     document.getElementById('photoLightboxBackdrop').classList.add('show');
   }
   // Compact, readable summary of a photo's AI classification (empty until tagged).
@@ -3633,8 +3653,9 @@
     } else {
       s = '🧠 empty frame';
     }
-    if (ai.confidence) s += ' · ' + escapeHtml(ai.confidence) + ' confidence';
-    if (ai.notes) s += '<br><span style="opacity:0.85;">' + escapeHtml(ai.notes) + '</span>';
+    if (ai.corrected) s += ' · ✔ corrected by you';
+    else if (ai.confidence) s += ' · ' + escapeHtml(ai.confidence) + ' confidence';
+    if (ai.notes && !ai.corrected) s += '<br><span style="opacity:0.85;">' + escapeHtml(ai.notes) + '</span>';
     return '<span style="color:#9fc98a;">' + s + '</span>';
   }
   // Pulls a point-count label out of the AI's free-text antler description
@@ -3650,14 +3671,16 @@
   // The AI badge shown on a gallery card. Bucks get a bold gold "🦌 BUCK · N pt".
   function photoAiBadgeHtml(p){
     if (!p.ai) return '';
+    var chk = p.ai.corrected ? '✔ ' : '';
     if (p.ai.hasAnimal && p.ai.isBuck){
       var pts = buckPointsLabel(p.ai.antlerNotes);
-      var label = '🦌 BUCK' + (pts ? ' · ' + pts : '');
+      var label = chk + '🦌 BUCK' + (pts ? ' · ' + pts : '');
       return '<div style="font-size:9.5px;font-weight:800;margin-top:3px;padding:2px 6px;border-radius:4px;display:inline-block;background:rgba(255,106,19,0.28);color:#ffb066;">' + escapeHtml(label) + '</div>';
     }
     var animal = p.ai.hasAnimal;
     var bg = animal ? 'rgba(107,143,92,0.25);color:#9fc98a' : 'rgba(122,138,148,0.2);color:#9fb0bc';
-    return '<div style="font-size:9.5px;font-weight:700;margin-top:3px;padding:2px 5px;border-radius:4px;display:inline-block;background:' + bg + ';">🧠 ' + escapeHtml(animal ? (p.ai.primarySpecies || 'animal') : 'empty') + '</div>';
+    var lead = p.ai.corrected ? '✔ ' : '🧠 ';
+    return '<div style="font-size:9.5px;font-weight:700;margin-top:3px;padding:2px 5px;border-radius:4px;display:inline-block;background:' + bg + ';">' + lead + escapeHtml(animal ? (p.ai.primarySpecies || 'animal') : 'empty') + '</div>';
   }
   // Calls the tagPhoto Cloud Function on one photo and persists the result on its record.
   async function tagPhotoWithAI(doc){
@@ -3690,6 +3713,61 @@
       try{ await firebase.storage().ref(doc.storagePath).delete(); }catch(e){ /* file may already be gone */ }
     }
   }
+  // Manual correction — a human label that overrides the AI and is trusted over it.
+  var CORRECTION_MAP = {
+    deer:     { hasAnimal:true, primarySpecies:'whitetail deer', isBuck:false },
+    buck:     { hasAnimal:true, primarySpecies:'whitetail deer', isBuck:true },
+    turkey:   { hasAnimal:true, primarySpecies:'wild turkey',    isBuck:false },
+    bear:     { hasAnimal:true, primarySpecies:'black bear',     isBuck:false },
+    coyote:   { hasAnimal:true, primarySpecies:'coyote',         isBuck:false },
+    fox:      { hasAnimal:true, primarySpecies:'fox',            isBuck:false },
+    bobcat:   { hasAnimal:true, primarySpecies:'bobcat',         isBuck:false },
+    raccoon:  { hasAnimal:true, primarySpecies:'raccoon',        isBuck:false },
+    hog:      { hasAnimal:true, primarySpecies:'wild hog',       isBuck:false },
+    squirrel: { hasAnimal:true, primarySpecies:'squirrel',       isBuck:false },
+    bird:     { hasAnimal:true, primarySpecies:'bird',           isBuck:false },
+    empty:    { hasAnimal:false, primarySpecies:'none',          isBuck:false }
+  };
+  async function applyCorrection(doc, choice){
+    var base;
+    if (choice === 'other'){
+      var name = (window.prompt('What is it? (species name)') || '').trim();
+      if (!name) return false;
+      base = { hasAnimal:true, primarySpecies:name.toLowerCase(), isBuck:false };
+    } else {
+      base = CORRECTION_MAP[choice];
+      if (!base) return false;
+    }
+    var ai = doc.ai ? Object.assign({}, doc.ai) : {};
+    ai.hasAnimal = base.hasAnimal;
+    ai.primarySpecies = base.primarySpecies;
+    ai.isBuck = base.isBuck;
+    ai.allSpecies = base.hasAnimal ? [base.primarySpecies] : [];
+    if (!base.hasAnimal){ ai.count = 0; ai.isBuck = false; ai.antlerNotes = ''; }
+    else if (ai.count == null || ai.count < 1){ ai.count = 1; }
+    if (choice === 'buck'){
+      var pts = (window.prompt('How many points? (optional — e.g. 8 or 6-8)') || '').trim();
+      if (pts) ai.antlerNotes = pts + '-point (your count)';
+    }
+    ai.corrected = true;
+    ai.source = 'user';
+    ai.correctedAt = Date.now();
+    doc.ai = ai;
+    if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
+    return true;
+  }
+  document.getElementById('photoLightboxCorrect').addEventListener('change', async function(){
+    var choice = this.value;
+    this.value = '';
+    if (!choice || !galleryLightboxDoc) return;
+    var doc = galleryLightboxDoc;
+    var ok = await applyCorrection(doc, choice);
+    if (!ok) return;
+    if (galleryLightboxDoc === doc) showGalleryPhoto(doc);
+    renderGallery(); populateGalleryFilters(); refreshTagAllButton();
+    showToast('Corrected → ' + (doc.ai.hasAnimal ? (doc.ai.isBuck ? 'buck' : doc.ai.primarySpecies) : 'empty'));
+  });
+
   document.getElementById('photoLightboxDelete').addEventListener('click', async function(){
     if (!galleryLightboxDoc) return;
     var doc = galleryLightboxDoc;
