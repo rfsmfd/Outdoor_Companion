@@ -1266,6 +1266,33 @@
     margin-bottom:14px;
   }
 
+  /* Photo-import "drop a pin" locator — mirrors the deploy crosshair map */
+  #importLocMiniMapWrap{
+    position:relative;
+    width:100%;
+    height:420px;
+    border-radius:6px;
+    overflow:hidden;
+    border:1px solid var(--line);
+    margin-bottom:10px;
+  }
+  #importLocMiniMap{ width:100%; height:100%; background:#0e1712; }
+  #importLocCrosshair{
+    position:absolute;
+    top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    z-index:500;
+    filter:drop-shadow(0 1px 3px rgba(0,0,0,0.8));
+  }
+  #importLocDragHint{ font-size:11px; color:var(--text-dim); text-align:center; margin-bottom:14px; }
+  .import-loc-mode{ display:flex; flex-direction:column; gap:7px; margin:4px 0 10px 0; }
+  .import-loc-mode .loc-opt{ display:flex; align-items:flex-start; gap:8px; font-size:12.5px; cursor:pointer; line-height:1.35; }
+  .import-loc-mode .loc-opt em{ color:var(--text-dim); font-style:normal; }
+  .loc-or{ text-align:center; font-size:11px; color:var(--text-dim); margin:8px 0; }
+  #importChosenLoc{ margin-top:10px; font-size:12.5px; background:rgba(255,106,19,0.08); border:1px solid var(--line); border-radius:6px; padding:8px 10px; }
+  .link-btn{ background:none; border:none; color:var(--accent); cursor:pointer; text-decoration:underline; font-size:12px; padding:0 0 0 4px; }
+
   #logLocationModal{ width:480px; max-width:94vw; }
   #logLocationMiniMapWrap{
     position:relative;
@@ -1741,6 +1768,33 @@
     </div>
   </div>
 
+  <!-- Locate imported photos: drop a pin for a batch from a camera that wasn't QR-scanned -->
+  <div class="oc-modal-backdrop" id="importLocModalBackdrop">
+    <div class="oc-modal" id="importLocReviewModal">
+      <h3>Set Photo Location <button class="close-x" id="importLocModalClose">&times;</button></h3>
+      <div class="form-pop" style="margin-bottom:10px;">
+        <label>Name this location <em style="color:var(--text-dim);font-style:normal;">(so you can reuse it next time)</em></label>
+        <input type="text" id="importLocName" placeholder="e.g. Creek Cam" />
+      </div>
+      <div id="importLocCoords" style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">—</div>
+      <div id="importLocMiniMapWrap">
+        <div id="importLocMiniMap"></div>
+        <div id="importLocCrosshair">
+          <svg width="44" height="44" viewBox="0 0 44 44">
+            <circle cx="22" cy="22" r="9" fill="none" stroke="#FF6A13" stroke-width="3"/>
+            <line x1="22" y1="0" x2="22" y2="10" stroke="#FF6A13" stroke-width="3"/>
+            <line x1="22" y1="34" x2="22" y2="44" stroke="#FF6A13" stroke-width="3"/>
+            <line x1="0" y1="22" x2="10" y2="22" stroke="#FF6A13" stroke-width="3"/>
+            <line x1="34" y1="22" x2="44" y2="22" stroke="#FF6A13" stroke-width="3"/>
+          </svg>
+        </div>
+      </div>
+      <div id="importLocDragHint">Pan or pinch-zoom the map so the crosshair sits on the camera's real spot</div>
+      <button class="btn-primary" id="importLocSaveBtn" style="width:100%;margin-bottom:8px;">Use This Location</button>
+      <button class="btn-ghost" id="importLocCancelBtn" style="width:100%;">Cancel</button>
+    </div>
+  </div>
+
   <!-- Export format chooser -->
   <div class="oc-modal-backdrop" id="exportModalBackdrop">
     <div class="oc-modal">
@@ -1784,6 +1838,20 @@
       <div class="form-pop" id="importPickerArea">
         <label>Which camera are these photos from?</label>
         <select id="importCameraSelect"></select>
+
+        <label style="margin-top:12px;">Where were these photos taken?</label>
+        <div id="importLocMode" class="import-loc-mode">
+          <label class="loc-opt"><input type="radio" name="importLocModeRadio" value="scanned" checked> <span>From a scanned camera site <em>— match automatically by deployment</em></span></label>
+          <label class="loc-opt"><input type="radio" name="importLocModeRadio" value="manual"> <span>Set the location for this batch <em>— for cameras you didn't QR-scan</em></span></label>
+        </div>
+        <div id="importManualLoc" style="display:none;">
+          <label>Reuse a saved location</label>
+          <select id="importLocSiteSelect"><option value="">— Choose a saved location —</option></select>
+          <div class="loc-or">— or —</div>
+          <button type="button" class="btn-ghost" id="importDropPinBtn" style="width:100%;">📍 Drop a new pin on the map</button>
+          <div id="importChosenLoc" style="display:none;">📍 This batch → <strong id="importChosenLocName">—</strong> <button type="button" id="importClearLocBtn" class="link-btn">change</button></div>
+        </div>
+
         <label>Photos (ZIP export from Reveal/WiseEye, or select image files directly)</label>
         <input type="file" id="importFileInput" accept=".zip,image/*" multiple />
         <button class="btn-primary" id="importProcessBtn" style="width:100%;margin-top:12px;">Process Photos</button>
@@ -7759,6 +7827,8 @@
     sel.innerHTML = cameras.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
       .map(function(c){ return '<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>'; }).join('');
     renderSavedPhotosGrid();
+    populateImportLocSelect();
+    resetImportLocUI();
     document.getElementById('importProgress').style.display = 'none';
     document.getElementById('importPickerArea').style.display = 'block';
     document.getElementById('importFileInput').value = '';
@@ -7861,6 +7931,129 @@
     return sites.filter(function(s){ return s.id === latest.siteId; })[0] || null;
   }
 
+  // ---------- Manual batch location (photos NOT from a scanned/deployed camera) ----------
+  // Holds the batch's chosen location: {type:'existing', site} or {type:'new', lat,lng,name}.
+  // null = default behavior (auto-match each photo by deployment). Because cameras sit at
+  // one spot all season, reusing an existing camera Site is the common path — hence it leads.
+  var importBatchLocation = null;
+
+  function getImportLocMode(){
+    var r = document.querySelector('input[name="importLocModeRadio"]:checked');
+    return r ? r.value : 'scanned';
+  }
+  function cameraLocationSites(){
+    return sites.filter(function(s){ return s.type === 'camera'; })
+      .sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); });
+  }
+  function populateImportLocSelect(){
+    var sel = document.getElementById('importLocSiteSelect');
+    if (!sel) return;
+    var opts = ['<option value="">— Choose a saved location —</option>'];
+    cameraLocationSites().forEach(function(s){
+      opts.push('<option value="' + s.id + '">' + escapeHtml(s.name || '(unnamed)') + '</option>');
+    });
+    sel.innerHTML = opts.join('');
+  }
+  function updateImportChosenLoc(){
+    var box = document.getElementById('importChosenLoc');
+    var nm = document.getElementById('importChosenLocName');
+    if (!box || !nm) return;
+    if (importBatchLocation){
+      nm.textContent = importBatchLocation.type === 'existing'
+        ? (importBatchLocation.site.name || '(unnamed)')
+        : (importBatchLocation.name || 'New pin');
+      box.style.display = 'block';
+    } else {
+      box.style.display = 'none';
+    }
+  }
+  function resetImportLocUI(){
+    // Reset to the safe default so a location chosen for one batch can't silently carry
+    // over onto a different camera's next import.
+    importBatchLocation = null;
+    var scanned = document.querySelector('input[name="importLocModeRadio"][value="scanned"]');
+    if (scanned) scanned.checked = true;
+    var manual = document.getElementById('importManualLoc');
+    if (manual) manual.style.display = 'none';
+    var sel = document.getElementById('importLocSiteSelect');
+    if (sel) sel.value = '';
+    updateImportChosenLoc();
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('input[name="importLocModeRadio"]'), function(r){
+    r.addEventListener('change', function(){
+      var manual = getImportLocMode() === 'manual';
+      document.getElementById('importManualLoc').style.display = manual ? 'block' : 'none';
+      if (!manual){ importBatchLocation = null; updateImportChosenLoc(); }
+    });
+  });
+  document.getElementById('importLocSiteSelect').addEventListener('change', function(){
+    var id = this.value;
+    if (!id){ importBatchLocation = null; updateImportChosenLoc(); return; }
+    var site = sites.filter(function(s){ return s.id === id; })[0];
+    if (site){ importBatchLocation = {type:'existing', site:site}; updateImportChosenLoc(); }
+  });
+  document.getElementById('importClearLocBtn').addEventListener('click', function(){
+    importBatchLocation = null;
+    var sel = document.getElementById('importLocSiteSelect'); if (sel) sel.value = '';
+    updateImportChosenLoc();
+  });
+
+  // The "drop a new pin" crosshair map — same pan-under-fixed-crosshair pattern as Deploy.
+  var importLocMap = null;
+  var importLocPos = null;
+  function ensureImportLocMap(){
+    if (importLocMap) return;
+    importLocMap = L.map('importLocMiniMap', {
+      zoomControl:true, attributionControl:false,
+      dragging:true, touchZoom:true, scrollWheelZoom:true,
+      doubleClickZoom:false, boxZoom:false, keyboard:false,
+      zoomSnap:0, zoomDelta:0.25, zoomAnimation:false
+    });
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:22 }).addTo(importLocMap);
+    importLocMap.on('move', function(){
+      var c = importLocMap.getCenter();
+      importLocPos = {lat:c.lat, lng:c.lng};
+      document.getElementById('importLocCoords').textContent = fmtCoord(c.lat) + ', ' + fmtCoord(c.lng);
+    });
+  }
+  function openImportLocPicker(){
+    // Prefill the name from the chosen camera; anchor the map on the main map's current view
+    // (importing usually happens at home, so the phone's GPS isn't the right starting point).
+    var camSel = document.getElementById('importCameraSelect');
+    var cam = cameras.filter(function(c){ return c.id === camSel.value; })[0];
+    var nameInput = document.getElementById('importLocName');
+    if (!nameInput.value && cam) nameInput.value = cam.name;
+    var c = map.getCenter();
+    importLocPos = {lat:c.lat, lng:c.lng};
+    document.getElementById('importLocCoords').textContent = fmtCoord(c.lat) + ', ' + fmtCoord(c.lng);
+    closeAllModals();
+    document.getElementById('importLocModalBackdrop').classList.add('show');
+    ensureImportLocMap();
+    setTimeout(function(){ importLocMap.invalidateSize(); importLocMap.setView([importLocPos.lat, importLocPos.lng], 16); }, 50);
+  }
+  function closeImportLocPicker(reopenImport){
+    document.getElementById('importLocModalBackdrop').classList.remove('show');
+    if (reopenImport){
+      document.getElementById('importPhotosModalBackdrop').classList.add('show');
+      document.getElementById('importPhotosFixedClose').classList.add('show');
+    }
+  }
+  document.getElementById('importDropPinBtn').addEventListener('click', openImportLocPicker);
+  document.getElementById('importLocModalClose').addEventListener('click', function(){ closeImportLocPicker(true); });
+  document.getElementById('importLocCancelBtn').addEventListener('click', function(){ closeImportLocPicker(true); });
+  document.getElementById('importLocModalBackdrop').addEventListener('click', function(e){
+    if (e.target === this) closeImportLocPicker(true);
+  });
+  document.getElementById('importLocSaveBtn').addEventListener('click', function(){
+    if (!importLocPos) return;
+    var name = (document.getElementById('importLocName').value || '').trim();
+    if (!name){ alert('Give this location a name so you can reuse it later.'); return; }
+    importBatchLocation = {type:'new', lat:importLocPos.lat, lng:importLocPos.lng, name:name};
+    updateImportChosenLoc();
+    closeImportLocPicker(true);
+  });
+
   document.getElementById('importProcessBtn').addEventListener('click', async function(){
     var cameraId = document.getElementById('importCameraSelect').value;
     var files = document.getElementById('importFileInput').files;
@@ -7902,6 +8095,37 @@
       return;
     }
 
+    // Manual batch location: resolve the chosen location to a real Site now — reusing an
+    // existing one, or creating a camera Site from a freshly dropped pin. Every photo in the
+    // batch is then stamped with this site instead of per-photo deployment auto-matching.
+    var manualSite = null;
+    var createdNewSite = false;
+    if (getImportLocMode() === 'manual'){
+      if (!importBatchLocation){
+        progress.style.display = 'none';
+        document.getElementById('importPickerArea').style.display = 'block';
+        alert('Choose a saved location or drop a pin for this batch first.');
+        return;
+      }
+      if (importBatchLocation.type === 'existing'){
+        manualSite = importBatchLocation.site;
+      } else {
+        manualSite = {
+          id: uid(),
+          name: importBatchLocation.name,
+          type: 'camera',
+          notes: 'Camera location (set during photo import)',
+          lat: importBatchLocation.lat,
+          lng: importBatchLocation.lng,
+          createdAt: Date.now(),
+          lastActivityAt: Date.now()
+        };
+        sites.push(manualSite);
+        createdNewSite = true;
+        try{ await saveSite(manualSite); }catch(e){ console.error('Outdoor Companion: failed to save new photo-location site', e); }
+      }
+    }
+
     var results = [];
     for (var k=0; k<imageJobs.length; k++){
       progress.textContent = 'Processing ' + (k+1) + ' of ' + imageJobs.length + '…';
@@ -7919,7 +8143,7 @@
       }
       var usedFallback = false;
       if (!timestamp){ timestamp = job.fallbackDate; usedFallback = true; timestampSource = 'file date'; }
-      var matchedSite = findSiteForCameraAtTime(cameraId, timestamp);
+      var matchedSite = manualSite || findSiteForCameraAtTime(cameraId, timestamp);
       var objectUrl = URL.createObjectURL(job.blob);
       var record = {
         id: uid(),
@@ -7938,6 +8162,33 @@
       results.push(record);
     }
 
+    // Bonus: record a lightweight deployment so FUTURE imports from this camera auto-match
+    // on their own — locate once, coast after. Created only if no existing deployment already
+    // covers the batch's earliest photo, so a camera parked at one spot all season never
+    // stacks up duplicate deployments.
+    if (manualSite && results.length){
+      var earliest = results.reduce(function(min, r){ return Math.min(min, r.timestamp || Infinity); }, Infinity);
+      if (isFinite(earliest)){
+        var covered = deployments.some(function(d){ return d.cameraId === cameraId && d.siteId === manualSite.id && d.deployedAt <= earliest; });
+        if (!covered){
+          var autoDep = {
+            id: uid(),
+            cameraId: cameraId,
+            siteId: manualSite.id,
+            lat: manualSite.lat,
+            lng: manualSite.lng,
+            deployedAt: earliest,
+            source: 'photo-import',
+            weather: null,
+            weatherStatus: 'skipped'
+          };
+          deployments.push(autoDep);
+          try{ await saveDeployment(autoDep); }catch(e){ console.error('Outdoor Companion: failed to save auto deployment', e); }
+        }
+      }
+    }
+    if (createdNewSite) renderAll(); // show the new camera-location pin on the map
+
     progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed.';
     results.sort(function(a,b){ return a.timestamp - b.timestamp; });
     var grid = document.getElementById('importResultsGrid');
@@ -7954,6 +8205,9 @@
         '</div>';
       grid.appendChild(card);
     });
+
+    resetImportLocUI();
+    populateImportLocSelect(); // pick up a location just created this session
   });
 
   async function deleteCameraFlow(camId){
