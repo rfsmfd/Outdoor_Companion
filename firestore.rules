@@ -8,13 +8,16 @@ service cloud.firestore {
     }
 
     // ---- Cross-member READ of a shared item (Phase 3b) ----
-    // A member may read another member's item if that item is shared with any group
-    // the reader belongs to. This OR-combines with the owner rule above, so it never
-    // weakens owner access and never grants write. Membership is checked against the
-    // function-only mirror doc memberships/{uid}. We use .get(field, []) everywhere so
-    // a doc missing the field can't raise an error — an erroring rule on ANY doc a
-    // collectionGroup query returns would fail the entire query (blank group view).
-    match /users/{uid}/{coll}/{docId} {
+    // A member may read another member's item if that item is shared with any group the
+    // reader belongs to. Membership is checked against the function-only mirror doc
+    // memberships/{uid}. .get(field, []) everywhere so a missing field can't raise an
+    // error (an erroring rule on any doc a collectionGroup query returns fails the whole
+    // query). CRITICAL: this MUST be a recursive-wildcard path with the LITERAL collection
+    // name ( /{path=**}/sites/... ), NOT a single-segment {coll} wildcard — Firestore only
+    // authorizes a collectionGroup('sites') query against rules that name the collection
+    // group this way; a {coll} wildcard yields permission-denied. One match per shareable
+    // collection (Phase 3b-1: sites only; add cameras/trails/bucks in 3b-2).
+    match /{path=**}/sites/{docId} {
       allow read: if request.auth != null
         && exists(/databases/$(database)/documents/memberships/$(request.auth.uid))
         && resource.data.get('sharedGroups', []).hasAny(
