@@ -1702,7 +1702,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 111</div>
+    <div id="buildBadge">BUILD 112</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7767,6 +7767,27 @@
     try{ renderAll(); }catch(e){}
     updatePhotoImportAvailability();
     if (sel) sel.disabled = false;
+    // TEMP DIAGNOSTIC (removed once group sharing is confirmed): surface, in a plain popup,
+    // exactly why a group view is empty — no DevTools needed.
+    if (scope.type === 'group'){ diagnoseGroupScope(scope.id); }
+  }
+  async function diagnoseGroupScope(gid){
+    var lines = ['GROUP CHECK', 'group id: ' + gid, ''];
+    try{
+      var uid = firebase.auth().currentUser.uid;
+      var mem = await firebase.firestore().collection('memberships').doc(uid).get();
+      lines.push('membership record: ' + (mem.exists ? JSON.stringify(mem.data().groups || []) : 'MISSING'));
+    }catch(e){ lines.push('membership read ERROR: ' + (e.code || e.message)); }
+    try{
+      var q = await firebase.firestore().collectionGroup('sites').where('sharedGroups', 'array-contains', gid).get();
+      lines.push('shared-sites query: OK — found ' + q.size + ' site(s)');
+      q.forEach(function(d){ lines.push('   • ' + d.ref.path); });
+    }catch(e){
+      lines.push('shared-sites query: ERROR');
+      lines.push('code: ' + (e.code || '?'));
+      lines.push((e.message || String(e)));
+    }
+    alert(lines.join('\n'));
   }
 
   function renderScopeSwitcher(){
