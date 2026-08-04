@@ -1701,7 +1701,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 105</div>
+    <div id="buildBadge">BUILD 106</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2039,6 +2039,7 @@
         <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
         <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
         <button type="button" class="btn-ghost" id="galleryCleanupBtn" style="width:100%;margin-top:6px;display:none;">🧹 Clean up empty frames</button>
+        <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
       </div>
       <div id="galleryGrid"></div>
       <div id="galleryEmpty" style="display:none;font-size:12.5px;color:var(--text-dim);text-align:center;padding:22px 10px;"></div>
@@ -4057,7 +4058,79 @@
     btn.disabled = (n === 0);
     btn.textContent = n === 0 ? '🧠 Everything in view is tagged' : ('🧠 Tag all untagged with AI (' + n + ')');
     refreshCleanupButton();
+    refreshAssignLocButton();
   }
+
+  // ---------- Fix "No site match": stamp a location onto already-imported photos ----------
+  // Photos imported via "scanned camera" get no site when no deployment covers their date
+  // (e.g. last-year photos on a camera deployed recently). This assigns an existing saved
+  // location to the unlocated photos in the current gallery view — no re-import, no dupes.
+  function galleryUnlocatedInView(){
+    return galleryPhotoList().filter(function(p){ return !p.matchedSiteId; });
+  }
+  function refreshAssignLocButton(){
+    var btn = document.getElementById('galleryAssignLocBtn');
+    if (!btn) return;
+    var n = cloudPhotosAvailable() ? galleryUnlocatedInView().length : 0;
+    btn.style.display = n === 0 ? 'none' : 'block';
+    btn.textContent = '📍 Assign a location to ' + n + ' unlocated photo' + (n === 1 ? '' : 's');
+  }
+  async function assignSiteToPhotos(photos, site){
+    var done = 0;
+    for (var i = 0; i < photos.length; i++){
+      var p = photos[i];
+      p.matchedSiteId = site.id;
+      p.matchedSiteName = site.name;
+      if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); done++; }catch(e){} }
+      updateCardCondition(p); // a located photo can now show/fetch conditions
+    }
+    populateGalleryFilters(); renderGallery(); refreshTagAllButton();
+    showToast('Located ' + done + ' photo' + (done === 1 ? '' : 's') + ' at ' + (site.name || 'the site'));
+  }
+  function openAssignLocPicker(){
+    var targets = galleryUnlocatedInView();
+    if (!targets.length){ showToast('No unlocated photos in the current view.'); return; }
+    // Offer saved locations, camera sites first (that's what trail-cam photos belong to).
+    var pickSites = sites.slice().sort(function(a, b){
+      var ac = (a.type === 'camera') ? 0 : 1, bc = (b.type === 'camera') ? 0 : 1;
+      if (ac !== bc) return ac - bc;
+      return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true });
+    });
+    if (!pickSites.length){ alert('You have no saved camera locations yet.\n\nDrop a camera pin on the map first (or deploy the camera), then come back and assign it here.'); return; }
+    // Default to the current camera filter's site, so the common case is one tap.
+    var defSiteId = '';
+    var camF = document.getElementById('galleryCameraFilter').value;
+    if (camF){ var cam = cameras.filter(function(c){ return c.id === camF; })[0]; if (cam && cam.currentSiteId) defSiteId = cam.currentSiteId; }
+
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:340px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    var opts = pickSites.map(function(s){
+      return '<option value="' + s.id + '"' + (s.id === defSiteId ? ' selected' : '') + '>' + escapeHtml(s.name || '(unnamed)') + (s.type === 'camera' ? ' 📷' : '') + '</option>';
+    }).join('');
+    card.innerHTML =
+      '<div style="font-weight:600;margin-bottom:4px;">Assign a location</div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">These <strong>' + targets.length + '</strong> photo' + (targets.length === 1 ? '' : 's') + ' in view have no location. Pick where they were taken — every one gets stamped with it.</div>' +
+      '<select id="assignLocSelect" style="width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#fff;font-size:14px;">' + opts + '</select>' +
+      '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        '<button id="assignLocCancel" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
+        '<button id="assignLocGo" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">Assign</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.querySelector('#assignLocCancel').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('#assignLocGo').addEventListener('click', async function(){
+      var sid = card.querySelector('#assignLocSelect').value;
+      var site = sites.filter(function(s){ return s.id === sid; })[0];
+      if (!site){ return; }
+      this.disabled = true;
+      try{ await assignSiteToPhotos(targets, site); close(); }
+      catch(e){ alert('Could not assign the location:\n' + ((e && e.message) || e)); this.disabled = false; }
+    });
+  }
+  document.getElementById('galleryAssignLocBtn').addEventListener('click', openAssignLocPicker);
 
   // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
   // Every photo the AI tagged hasAnimal:false is a cleanup candidate. We never
