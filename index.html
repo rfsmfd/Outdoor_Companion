@@ -1702,7 +1702,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 114</div>
+    <div id="buildBadge">BUILD 115</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2479,6 +2479,7 @@
   var queryDrawnItems = null;
   var queryResultChart = null;
   var queryHeatLayer = null; // the active heat map layer on the main map, if any
+  var queryHeatZoomHandler = null; // zoomend handler that keeps the heat glow a constant real-world size
   var queryHomeRangeLayers = []; // array of ring polygon layers, if home range rings are shown
   var queryPageTotal = 0; // the page-level "X logged sightings" total, shared here so the Query Builder can show "X of Y" against the exact same number
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
@@ -8513,7 +8514,23 @@
       // presence, a low max so just a few overlapping sightings reach full "hot" red
       // instead of needing dozens, and a minOpacity floor so even a single isolated
       // sighting is clearly visible rather than nearly transparent.
-      queryHeatLayer = L.heatLayer(heatPoints, {radius: 45, blur: 35, max: 3, minOpacity: 0.4}).addTo(map);
+      // Keep the glow a constant REAL-WORLD size as you zoom, so heat reflects actual
+      // activity density at a spot — not the zoom level. (Leaflet.heat sizes its radius in
+      // screen pixels, which is exactly why zooming in made everything look "hotter.")
+      var heatBaseZoom = map.getZoom(), heatBaseRadius = 45, heatBaseBlur = 35;
+      var heatSizeForZoom = function(){
+        var scale = Math.max(0.25, Math.min(Math.pow(2, map.getZoom() - heatBaseZoom), 8));
+        return { radius: heatBaseRadius * scale, blur: heatBaseBlur * scale };
+      };
+      var heatSize0 = heatSizeForZoom();
+      queryHeatLayer = L.heatLayer(heatPoints, {radius: heatSize0.radius, blur: heatSize0.blur, max: 3, minOpacity: 0.4}).addTo(map);
+      if (queryHeatZoomHandler){ map.off('zoomend', queryHeatZoomHandler); }
+      queryHeatZoomHandler = function(){
+        if (!queryHeatLayer){ if (queryHeatZoomHandler) map.off('zoomend', queryHeatZoomHandler); queryHeatZoomHandler = null; return; }
+        var s = heatSizeForZoom();
+        try{ queryHeatLayer.setOptions({ radius: s.radius, blur: s.blur }); }catch(e){}
+      };
+      map.on('zoomend', queryHeatZoomHandler);
       // Confirmed, documented Leaflet.heat issue (github.com/Leaflet/Leaflet.heat/issues/83):
       // its canvas defaults to z-index:100, but Leaflet's own tile pane sits at z-index:200
       // — meaning the heat map genuinely renders, just invisibly, behind the map tiles.
@@ -8637,10 +8654,27 @@
   // dropped) is mapped into the SAME event shape a logged observation uses, so every
   // existing chart AND the Query Builder run over one unified list and always agree with
   // the Photo Gallery. Trail-cam photos are hunting-mode data.
+  // Which property boundary contains this coordinate (module-aware). Mirrors the app's
+  // own point-in-bounds check (properties store bounds:{north,south,east,west}).
+  function analyticsPropertyIdForLatLng(lat, lng){
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    for (var i=0;i<properties.length;i++){
+      var pr = properties[i];
+      if (pr.module && pr.module !== activeModule) continue;
+      var b = pr.bounds;
+      if (b && lat >= b.south && lat <= b.north && lng >= b.west && lng <= b.east) return pr.id;
+    }
+    return null;
+  }
   function analyticsSitePropertyId(siteId){
     if (!siteId) return null;
     var s = sites.filter(function(x){ return x.id === siteId; })[0];
-    return s ? (s.propertyId || null) : null;
+    if (!s) return null;
+    // Prefer the stored link, but fall back to which property boundary the site actually
+    // falls inside — this catches sites created before their property existed (stored
+    // propertyId is null even though the location sits inside a property).
+    if (s.propertyId) return s.propertyId;
+    return analyticsPropertyIdForLatLng(s.lat, s.lng);
   }
   function photoVisitToEvent(v){
     var cover = v.cover || v.photos[0];
@@ -8659,9 +8693,22 @@
       propertyId: analyticsSitePropertyId(v.siteId),
       buckProfileId: buckPhoto ? buckPhoto.buckProfileId : null,
       species: sp,
+      isBuck: !!v.isBuck,
       lat: (s && typeof s.lat === 'number') ? s.lat : null,
       lng: (s && typeof s.lng === 'number') ? s.lng : null
     };
+  }
+  // Deer-split classification for the species hierarchy — reads the AI buck flag (photos)
+  // or the sighting type (logged). Untagged photos return null (unknown, excluded).
+  function eventBuckClass(o){
+    if (o.__source === 'photo'){
+      if (o.isBuck) return 'Buck';
+      if (o.species) return 'Antlerless / Other'; // AI-confirmed animal, not flagged a buck
+      return null; // untagged — not enough info to classify
+    }
+    if (o.type === 'buck') return 'Buck';
+    if (o.type === 'doe') return 'Antlerless / Other';
+    return null;
   }
   function buildAnalyticsEvents(){
     var events = [];
@@ -8678,10 +8725,10 @@
         var o = observations[j];
         if (!typeIsInActiveModule(o.type, true)) continue;
         events.push({
-          __source:'obs', createdAt:o.createdAt, moonPhase:o.moonPhase||null,
+          __source:'obs', type:o.type, createdAt:o.createdAt, moonPhase:o.moonPhase||null,
           weatherStatus:o.weatherStatus, weather:o.weather||null, solunarPeriod:o.solunarPeriod||null,
           siteId:o.siteId||null, propertyId:o.propertyId||null, buckProfileId:o.buckProfileId||null,
-          species:null, lat:(typeof o.lat==='number'?o.lat:null), lng:(typeof o.lng==='number'?o.lng:null)
+          species:null, isBuck:(o.type==='buck'), lat:(typeof o.lat==='number'?o.lat:null), lng:(typeof o.lng==='number'?o.lng:null)
         });
       }
     }
@@ -8715,6 +8762,24 @@
     var header = document.createElement('div');
     header.className = 'analytics-header';
     header.innerHTML = '<div class="analytics-total">' + total + ' ' + eventNoun + '</div>';
+    // Transparency: when photos are in the mix, show how the raw photo count becomes
+    // independent detections — bursts grouped into visits, AI-flagged empties excluded —
+    // so this number never looks mysterious next to the gallery's raw photo count.
+    if (activeModule === 'hunting' && (analyticsSource === 'photos' || analyticsSource === 'both')){
+      var photosInView = importedPhotos.filter(function(pp){
+        if (!passesAnalyticsDateFilter(pp.timestamp)) return false;
+        if (analyticsPropertyId && analyticsSitePropertyId(pp.matchedSiteId) !== analyticsPropertyId) return false;
+        if (analyticsBuckProfileId && pp.buckProfileId !== analyticsBuckProfileId) return false;
+        return true;
+      });
+      var emptyCount = photosInView.filter(function(pp){ return pp.ai && pp.ai.hasAnimal === false; }).length;
+      var photoDetections = relevantObs.filter(function(o){ return o.__source === 'photo'; }).length;
+      if (photosInView.length){
+        header.innerHTML += '<div class="analytics-source-note" style="font-size:11px;color:var(--text-dim);margin-top:3px;">' +
+          photoDetections + ' photo detection' + (photoDetections===1?'':'s') + ' — from ' + photosInView.length + ' photo' + (photosInView.length===1?'':'s') +
+          ', bursts grouped into visits' + (emptyCount ? (', ' + emptyCount + ' empt' + (emptyCount===1?'y':'ies') + ' excluded') : '') + '</div>';
+      }
+    }
     if (total < 15){
       header.innerHTML += '<div class="analytics-sparse-note">📊 Charts get more meaningful with more data — right now there\'s only ' + total + ' logged, so patterns below may just be noise. Keep logging and check back.</div>';
     }
@@ -8750,6 +8815,14 @@
     var trendLabels = ['Rising','Falling','Steady'].filter(function(t){ return trendCounts[t]; });
     if (trendLabels.length){
       buildPieChart(makeChartCanvas(chartsGrid, '📈 By Pressure Trend', 'chartPressure'), trendLabels, trendLabels.map(function(t){ return trendCounts[t]; }));
+    }
+
+    // By Barometric Pressure — the actual reading (in ranges), not just the trend direction
+    var pvalCounts = groupCount(relevantObs, function(o){ return (o.weatherStatus === 'ok' && o.weather) ? pressureBucket(o.weather.pressureInHg) : null; });
+    var pvalOrder = ['Under 29.30"','29.30-29.60"','29.60-29.80"','29.80-30.00"','30.00-30.20"','30.20"+'];
+    var pvalLabels = pvalOrder.filter(function(t){ return pvalCounts[t]; });
+    if (pvalLabels.length){
+      buildBarChart(makeChartCanvas(chartsGrid, '🧭 By Barometric Pressure', 'chartPressureVal'), pvalLabels, pvalLabels.map(function(t){ return pvalCounts[t]; }), 'Count');
     }
 
     // By Temperature Range
@@ -8816,6 +8889,17 @@
     var speciesLabels = Object.keys(speciesCounts).sort(function(a,b){ return speciesCounts[b] - speciesCounts[a]; });
     if (speciesLabels.length){
       buildBarChart(makeChartCanvas(chartsGrid, '🐾 By Species', 'chartSpecies'), speciesLabels, speciesLabels.map(function(s){ return speciesCounts[s]; }), 'Count');
+    }
+
+    // Bucks vs. Antlerless — the deer split (from the AI buck flag / sighting type). Pairs
+    // with By Species (above) and By Buck Profile (named individuals) to form the hierarchy:
+    // Species -> Bucks vs. Antlerless -> Named Bucks.
+    if (activeModule === 'hunting'){
+      var buckClassCounts = groupCount(relevantObs, eventBuckClass);
+      var buckClassLabels = ['Buck','Antlerless / Other'].filter(function(l){ return buckClassCounts[l]; });
+      if (buckClassLabels.length){
+        buildBarChart(makeChartCanvas(chartsGrid, '🦌 Bucks vs. Antlerless', 'chartBuckClass'), buckClassLabels, buckClassLabels.map(function(l){ return buckClassCounts[l]; }), 'Count');
+      }
     }
   }
 
