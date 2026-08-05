@@ -118,7 +118,7 @@
   #displayTray.open{ transform:translateX(0); }
   #displayTrayToggleBtn{
     position:fixed;
-    top:14px;right:70px;
+    bottom:174px;right:14px;
     z-index:1500;
     width:42px;height:42px;
     border-radius:6px;
@@ -1088,6 +1088,12 @@
     text-align:center;
     padding:24px 0;
   }
+  /* Count-marker number sits centered on the circle — strip Leaflet's default tooltip box */
+  .leaflet-tooltip.count-marker-label{
+    background:none; border:none; box-shadow:none; padding:0; margin:0;
+    color:#fff; font-weight:700; font-size:11px; text-shadow:0 1px 2px rgba(0,0,0,.95); pointer-events:none;
+  }
+  .leaflet-tooltip.count-marker-label::before{ display:none; }
   /* Desktop: filter bar becomes a persistent left column instead of a bar sitting above
      the charts, and the chart grid gets more breathing room to actually use the width —
      built with plain CSS (grid auto-fit already handles the column count), so this same
@@ -1102,6 +1108,9 @@
       min-width:min(1400px, calc(100vw - 200px));
     }
   }
+  /* Collapsed Analytics panel — shrinks the sidebar to nothing so the map (with its count
+     rings) is fully visible; a floating "Panel" button brings it back. */
+  #sidebar.analytics-collapsed{ width:0 !important; min-width:0 !important; border:none !important; overflow:hidden; }
   @media (min-width: 1100px){
     .analytics-filter-bar{
       flex-direction:column;
@@ -1705,7 +1714,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 117</div>
+    <div id="buildBadge">BUILD 125</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2486,6 +2495,7 @@
   var queryResultChart = null;
   var queryHeatLayer = null; // the active heat map layer on the main map, if any
   var queryHeatZoomHandler = null; // zoomend handler that keeps the heat glow a constant real-world size
+  var queryCountMarkers = []; // active count-marker circles on the map (Data-to-Map: readable counts per location)
   var queryHomeRangeLayers = []; // array of ring polygon layers, if home range rings are shown
   var queryPageTotal = 0; // the page-level "X logged sightings" total, shared here so the Query Builder can show "X of Y" against the exact same number
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
@@ -5723,11 +5733,14 @@
       // specifically expand the main sidebar on a wide enough screen, without affecting
       // Sites/Log/Cameras at all.
       document.getElementById('sidebar').classList.toggle('sidebar-analytics-mode', activeTab === 'analytics');
+      if (activeTab !== 'analytics') expandAnalyticsPanel(); // never leave the panel collapsed on another tab
       document.getElementById('site-list').classList.remove('analytics-desktop-layout');
       // A heat map renders directly on the main map, not inside the Analytics tab's own
       // content — it must be explicitly cleared here, or it would keep showing over
       // Sites/Log/Cameras after navigating away, which would be genuinely confusing.
       if (typeof queryHeatLayer !== 'undefined' && queryHeatLayer){ map.removeLayer(queryHeatLayer); queryHeatLayer = null; }
+      // NOTE: count markers deliberately PERSIST across tab switches — they're a map overlay
+      // the hunter wants to keep looking at (cleared only by a new query or the Clear button).
       if (typeof queryHomeRangeLayers !== 'undefined' && queryHomeRangeLayers.length){ queryHomeRangeLayers.forEach(function(l){ map.removeLayer(l); }); queryHomeRangeLayers = []; }
       renderActiveList();
     });
@@ -8305,6 +8318,7 @@
             '<option value="bar"'+(queryVizType==='bar'?' selected':'')+'>Bar Chart</option>' +
             '<option value="pie"'+(queryVizType==='pie'?' selected':'')+'>Pie Chart</option>' +
             '<option value="count"'+(queryVizType==='count'?' selected':'')+'>Total Count</option>' +
+            '<option value="markers"'+(queryVizType==='markers'?' selected':'')+'>Count Markers (map)</option>' +
             '<option value="heatmap"'+(queryVizType==='heatmap'?' selected':'')+'>Heat Map</option>' +
             '<option value="homerange"'+(queryVizType==='homerange'?' selected':'')+'>Home Range Rings</option></select></div>' +
           '<div class="query-builder-group"><label>Area</label>' +
@@ -8329,9 +8343,9 @@
       queryVizType = this.value;
       // Break Down By is meaningless for Count (a single total), Heat Map, and Home Range
       // (purely spatial) — hide it for those rather than leave a control that does nothing.
-      section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
+      section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
     });
-    section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
+    section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
     section.querySelector('#qb_draw_btn').addEventListener('click', function(){ startQueryAreaDraw(); });
     section.querySelector('#qb_clear_area_btn').addEventListener('click', function(){
       if (queryDrawnLayer && queryDrawnItems){ queryDrawnItems.removeLayer(queryDrawnLayer); }
@@ -8461,6 +8475,125 @@
     });
   }
 
+  // ---------- Count Markers (Data-to-Map: readable, zoom-stable counts per location) ----------
+  // The honest answer to "how many occurrences here" that a heat map can't give: one circle
+  // per SITE (location — not camera), sized + colored by its count, with the actual number
+  // shown. Fixed pixel radius so the circle and its number stay the same size and readable
+  // at every zoom. This is the map view the whole app exists to produce.
+  function countColor(frac){
+    if (frac >= 0.75) return '#D94A2E'; // hottest
+    if (frac >= 0.5)  return '#E8843C';
+    if (frac >= 0.25) return '#E8B04B';
+    return '#6B8F5C'; // coolest
+  }
+  // While the count-map is showing, camera pins default OFF so the rings read clean — the
+  // hunter can toggle them back on in the Map Display tray if wanted. We remember whether
+  // WE hid them, so clearing the map restores the hunter's own prior setting.
+  var countMarkersHidCameras = false;
+  function hideCamerasForCountMarkers(){
+    if (activeFilters.has('camera')){
+      activeFilters.delete('camera');
+      countMarkersHidCameras = true;
+      renderChips(); renderMarkers(); renderList();
+    }
+  }
+  function restoreCamerasAfterCountMarkers(){
+    if (countMarkersHidCameras){
+      activeFilters.add('camera');
+      countMarkersHidCameras = false;
+      renderChips(); renderMarkers(); renderList();
+    }
+  }
+  function clearQueryCountMarkers(){
+    queryCountMarkers.forEach(function(l){ try{ map.removeLayer(l); }catch(e){} });
+    queryCountMarkers = [];
+    restoreCamerasAfterCountMarkers();
+  }
+  function renderCountMarkers(source, resultsEl){
+    clearQueryCountMarkers();
+    // Custom pane so the rings sit ABOVE the camera/site icon pins (Leaflet's markerPane) —
+    // otherwise circle markers render in the lower overlayPane and get hidden underneath.
+    if (!map.getPane('countMarkerPane')){
+      map.createPane('countMarkerPane');
+      map.getPane('countMarkerPane').style.zIndex = 640;
+    }
+    // Group by LOCATION (site), not camera — a photo's site already reflects where its
+    // camera was on that photo's date (deployment history), so past spots stay correct.
+    var bySite = {};
+    source.forEach(function(o){
+      if (!o.siteId || typeof o.lat !== 'number' || typeof o.lng !== 'number') return;
+      var g = bySite[o.siteId] || (bySite[o.siteId] = { count:0, lat:o.lat, lng:o.lng, siteId:o.siteId });
+      g.count++;
+    });
+    var groups = Object.keys(bySite).map(function(id){ return bySite[id]; });
+    if (!groups.length){
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">No located detections to map — assign sites to your photos so they land on the map.</div>';
+      return;
+    }
+    var maxCount = groups.reduce(function(m,g){ return Math.max(m, g.count); }, 0);
+    groups.sort(function(a,b){ return a.count - b.count; }); // draw small first so big ones sit on top
+    groups.forEach(function(g){
+      var frac = maxCount > 0 ? g.count / maxCount : 0;
+      var radius = 6 + Math.round(frac * 9); // 6..15 px — sized to the map, fixed in screen pixels (zoom-stable)
+      var site = sites.filter(function(s){ return s.id === g.siteId; })[0];
+      var name = site ? (site.name || 'Unnamed site') : 'Unknown site';
+      var marker = L.circleMarker([g.lat, g.lng], {
+        radius: radius, color:'#12201a', weight:1.5, fillColor: countColor(frac), fillOpacity: 0.88, pane:'countMarkerPane'
+      }).addTo(map);
+      marker.bindTooltip(String(g.count), { permanent:true, direction:'center', className:'count-marker-label' });
+      marker.bindPopup('<strong>'+escapeHtml(name)+'</strong><br>'+g.count+' detection'+(g.count===1?'':'s'));
+      queryCountMarkers.push(marker);
+    });
+    hideCamerasForCountMarkers(); // camera pins default OFF under the count-map for a clean read
+    var bounds = L.latLngBounds(groups.map(function(g){ return [g.lat, g.lng]; }));
+    map.fitBounds(bounds, { padding:[55,55] });
+    resultsEl.innerHTML += '<div class="query-count-result" style="font-size:16px;">📍 ' + groups.length + ' spot' + (groups.length===1?'':'s') + ' mapped — bigger, hotter circle = more detections</div>' +
+      '<button class="btn-ghost" id="qb_clear_markers_btn" type="button" style="width:100%;margin-top:8px;">✕ Clear Map Markers</button>';
+    var clr = document.getElementById('qb_clear_markers_btn');
+    if (clr) clr.addEventListener('click', function(){ clearQueryCountMarkers(); resultsEl.innerHTML = ''; });
+  }
+
+  // ---------- Analytics panel collapse — see the map (with its count rings), then restore ----------
+  var analyticsPanelCollapsed = false;
+  function ensureAnalyticsRestoreBtn(){
+    var b = document.getElementById('analyticsRestoreBtn');
+    if (!b){
+      b = document.createElement('button');
+      b.id = 'analyticsRestoreBtn';
+      b.textContent = '☰ Panel';
+      b.style.cssText = 'position:fixed;top:14px;left:14px;z-index:1600;display:none;padding:9px 13px;border-radius:6px;background:var(--accent);color:#fff;border:none;font-weight:600;box-shadow:0 2px 6px rgba(0,0,0,.45);cursor:pointer;';
+      b.addEventListener('click', expandAnalyticsPanel);
+      document.body.appendChild(b);
+    }
+    return b;
+  }
+  function collapseAnalyticsPanel(){
+    if (window.innerWidth < 900) return; // only meaningful where the panel is wide enough to cover the map
+    analyticsPanelCollapsed = true;
+    document.getElementById('sidebar').classList.add('analytics-collapsed');
+    ensureAnalyticsRestoreBtn().style.display = 'block';
+    setTimeout(function(){ try{ map.invalidateSize(); }catch(e){} }, 260); // let Leaflet re-measure after the map widens
+  }
+  function expandAnalyticsPanel(){
+    analyticsPanelCollapsed = false;
+    document.getElementById('sidebar').classList.remove('analytics-collapsed');
+    var b = document.getElementById('analyticsRestoreBtn'); if (b) b.style.display = 'none';
+    setTimeout(function(){ try{ map.invalidateSize(); }catch(e){} }, 260);
+  }
+  // Tap the map to dismiss the (open) Analytics panel — same feel as the right-slide tray's
+  // backdrop. Bound once, lazily, so `map` definitely exists. Guarded so it never fires
+  // while placing a pin, on another tab, on a narrow screen, or when already collapsed.
+  var analyticsMapDismissBound = false;
+  function bindAnalyticsMapDismiss(){
+    if (analyticsMapDismissBound || typeof map === 'undefined' || !map) return;
+    analyticsMapDismissBound = true;
+    map.on('click', function(){
+      if (activeTab === 'analytics' && !analyticsPanelCollapsed && window.innerWidth >= 900 && (typeof placing === 'undefined' || !placing)){
+        collapseAnalyticsPanel();
+      }
+    });
+  }
+
   function runCustomQuery(){
     var source = buildAnalyticsEvents().filter(function(o){
       if (!passesSharedAnalyticsFilter(o)) return false; // one shared filter set (date/property/species/buck)
@@ -8475,6 +8608,7 @@
     // to Bar/Pie/Count should never leave a stale heat layer sitting on the map.
     if (queryHeatLayer){ map.removeLayer(queryHeatLayer); queryHeatLayer = null; }
     if (queryHomeRangeLayers.length){ queryHomeRangeLayers.forEach(function(l){ map.removeLayer(l); }); queryHomeRangeLayers = []; }
+    clearQueryCountMarkers();
 
     // Shows how much of the page-level total this specific query actually used —
     // resolves a real, reported ambiguity: the big header above ("X logged sightings")
@@ -8490,6 +8624,11 @@
 
     if (queryVizType === 'homerange'){
       renderHomeRangeRings(source.filter(function(o){ return typeof o.lat==='number' && typeof o.lng==='number'; }), resultsEl);
+      return;
+    }
+
+    if (queryVizType === 'markers'){
+      renderCountMarkers(source, resultsEl);
       return;
     }
 
@@ -8572,6 +8711,34 @@
   function renderAnalyticsFilterBar(container){
     var bar = document.createElement('div');
     bar.className = 'analytics-filter-bar';
+
+    // One-tap Data-to-Map: paint the CURRENT filter's detections onto the map as count
+    // markers — the hunter's "where does this buck spend his time" in a single tap, no
+    // query-building required. (The Query Builder below is the power-user path to the same.)
+    var mapGroup = document.createElement('div');
+    mapGroup.className = 'analytics-filter-group';
+    var mapBtn = document.createElement('button');
+    mapBtn.className = 'btn-primary';
+    mapBtn.style.cssText = 'width:100%;';
+    mapBtn.textContent = '📍 Map Detections';
+    mapBtn.addEventListener('click', function(){
+      queryVizType = 'markers';
+      queryBuilderOpen = true;
+      renderAnalytics();
+      runCustomQuery();
+      // Panel stays OPEN so you can keep viewing the analytics; tap the map to dismiss it
+      // (same feel as the right-slide tray), which then reveals the full map with the rings.
+    });
+    mapGroup.appendChild(mapBtn);
+    if (window.innerWidth >= 900){
+      var collapseBtn = document.createElement('button');
+      collapseBtn.className = 'btn-ghost';
+      collapseBtn.style.cssText = 'width:100%;margin-top:4px;font-size:11px;';
+      collapseBtn.textContent = '🗺 Hide panel / see map';
+      collapseBtn.addEventListener('click', collapseAnalyticsPanel);
+      mapGroup.appendChild(collapseBtn);
+    }
+    bar.appendChild(mapGroup);
 
     // Data Source — photos are the primary dataset, so it defaults to them (hunting only;
     // trail-cam photos don't apply to fishing).
@@ -8773,6 +8940,7 @@
 
   function renderAnalytics(){
     destroyAnalyticsCharts();
+    bindAnalyticsMapDismiss();
     var list = document.getElementById('site-list');
     list.innerHTML = '';
     list.classList.add('analytics-desktop-layout');
