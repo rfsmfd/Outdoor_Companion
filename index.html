@@ -1702,7 +1702,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 115</div>
+    <div id="buildBadge">BUILD 116</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8227,8 +8227,8 @@
     ['moon','Moon Phase'], ['illum','Moon Illumination %'], ['wind','Wind Direction'],
     ['pressure','Pressure Trend'], ['pressureval','Barometric Pressure'], ['temp','Temperature'],
     ['condition','Weather Condition'], ['sun','Time of Day'], ['hour','Actual Clock Time'],
-    ['solunar','Solunar Period'], ['site','Site'], ['property','Property'], ['buck','Buck Profile'],
-    ['species','Species']
+    ['solunar','Solunar Period'], ['site','Site'], ['property','Property'],
+    ['species','Species'], ['buckclass','Bucks vs. Antlerless'], ['buck','Buck Profile']
   ];
 
   function queryGroupKeyForObs(o, dimension){
@@ -8258,6 +8258,7 @@
       return b ? b.name : null;
     }
     if (dimension === 'species') return o.species || null;
+    if (dimension === 'buckclass') return eventBuckClass(o);
     return null;
   }
 
@@ -8289,7 +8290,7 @@
     var propOptionsHtml = properties.filter(function(p){ return !p.module || p.module === activeModule; })
       .map(function(p){ return '<option value="'+p.id+'"'+(queryPropertyId===p.id?' selected':'')+'>'+escapeHtml(p.name)+'</option>'; }).join('');
     var groupByOptionsHtml = QUERY_GROUPBY_OPTIONS
-      .filter(function(pair){ return activeModule === 'hunting' || (pair[0] !== 'buck' && pair[0] !== 'species'); })
+      .filter(function(pair){ return activeModule === 'hunting' || (pair[0] !== 'buck' && pair[0] !== 'species' && pair[0] !== 'buckclass'); })
       .map(function(pair){ return '<option value="'+pair[0]+'"'+(queryGroupBy===pair[0]?' selected':'')+'>'+pair[1]+'</option>'; }).join('');
 
     section.innerHTML =
