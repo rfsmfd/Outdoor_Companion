@@ -1108,6 +1108,9 @@
       min-width:min(1400px, calc(100vw - 200px));
     }
   }
+  /* Collapsed Analytics panel — shrinks the sidebar to nothing so the map (with its count
+     rings) is fully visible; a floating "Panel" button brings it back. */
+  #sidebar.analytics-collapsed{ width:0 !important; min-width:0 !important; border:none !important; overflow:hidden; }
   @media (min-width: 1100px){
     .analytics-filter-bar{
       flex-direction:column;
@@ -1711,7 +1714,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 123</div>
+    <div id="buildBadge">BUILD 124</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5730,6 +5733,7 @@
       // specifically expand the main sidebar on a wide enough screen, without affecting
       // Sites/Log/Cameras at all.
       document.getElementById('sidebar').classList.toggle('sidebar-analytics-mode', activeTab === 'analytics');
+      if (activeTab !== 'analytics') expandAnalyticsPanel(); // never leave the panel collapsed on another tab
       document.getElementById('site-list').classList.remove('analytics-desktop-layout');
       // A heat map renders directly on the main map, not inside the Analytics tab's own
       // content — it must be explicitly cleared here, or it would keep showing over
@@ -8549,6 +8553,34 @@
     if (clr) clr.addEventListener('click', function(){ clearQueryCountMarkers(); resultsEl.innerHTML = ''; });
   }
 
+  // ---------- Analytics panel collapse — see the map (with its count rings), then restore ----------
+  var analyticsPanelCollapsed = false;
+  function ensureAnalyticsRestoreBtn(){
+    var b = document.getElementById('analyticsRestoreBtn');
+    if (!b){
+      b = document.createElement('button');
+      b.id = 'analyticsRestoreBtn';
+      b.textContent = '☰ Panel';
+      b.style.cssText = 'position:fixed;top:14px;left:14px;z-index:1600;display:none;padding:9px 13px;border-radius:6px;background:var(--accent);color:#fff;border:none;font-weight:600;box-shadow:0 2px 6px rgba(0,0,0,.45);cursor:pointer;';
+      b.addEventListener('click', expandAnalyticsPanel);
+      document.body.appendChild(b);
+    }
+    return b;
+  }
+  function collapseAnalyticsPanel(){
+    if (window.innerWidth < 900) return; // only meaningful where the panel is wide enough to cover the map
+    analyticsPanelCollapsed = true;
+    document.getElementById('sidebar').classList.add('analytics-collapsed');
+    ensureAnalyticsRestoreBtn().style.display = 'block';
+    setTimeout(function(){ try{ map.invalidateSize(); }catch(e){} }, 260); // let Leaflet re-measure after the map widens
+  }
+  function expandAnalyticsPanel(){
+    analyticsPanelCollapsed = false;
+    document.getElementById('sidebar').classList.remove('analytics-collapsed');
+    var b = document.getElementById('analyticsRestoreBtn'); if (b) b.style.display = 'none';
+    setTimeout(function(){ try{ map.invalidateSize(); }catch(e){} }, 260);
+  }
+
   function runCustomQuery(){
     var source = buildAnalyticsEvents().filter(function(o){
       if (!passesSharedAnalyticsFilter(o)) return false; // one shared filter set (date/property/species/buck)
@@ -8681,8 +8713,17 @@
       queryBuilderOpen = true;
       renderAnalytics();
       runCustomQuery();
+      collapseAnalyticsPanel(); // reveal the map with the rings (desktop)
     });
     mapGroup.appendChild(mapBtn);
+    if (window.innerWidth >= 900){
+      var collapseBtn = document.createElement('button');
+      collapseBtn.className = 'btn-ghost';
+      collapseBtn.style.cssText = 'width:100%;margin-top:4px;font-size:11px;';
+      collapseBtn.textContent = '🗺 Hide panel / see map';
+      collapseBtn.addEventListener('click', collapseAnalyticsPanel);
+      mapGroup.appendChild(collapseBtn);
+    }
     bar.appendChild(mapGroup);
 
     // Data Source — photos are the primary dataset, so it defaults to them (hunting only;
