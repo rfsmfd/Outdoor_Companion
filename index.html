@@ -1063,15 +1063,18 @@
   .analytics-filter-group{ min-width:160px; }
   .analytics-filter-label{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px; }
   .query-builder{
-    display:none; /* hidden below the desktop breakpoint — see the min-width:1100px media
-      query for where this gets revealed. Progressive Disclosure principle (Goals
-      Checklist): advanced analytics stays opt-in and desktop-only, never confronting the
-      lean phone experience by default. */
+    /* Shown on every device now, but COLLAPSED by default (see queryBuilderOpen). The
+       Progressive Disclosure principle (Goals Checklist) is preserved by folding the depth
+       behind an opt-in toggle, rather than hiding the whole tool on phones. */
     background:var(--panel-alt);
     border:1px solid var(--accent);
     border-radius:8px;
-    padding:14px 16px;
-    margin:0 16px 20px 16px;
+    padding:12px 16px;
+    margin:0 16px 16px 16px;
+  }
+  .query-builder-toggle{
+    background:none; border:none; color:var(--accent); cursor:pointer; padding:0; width:100%;
+    font-family:'Oswald',sans-serif; font-size:15px; display:flex; align-items:center; gap:8px; text-align:left;
   }
   .query-builder-title{ font-family:'Oswald',sans-serif; font-size:15px; color:var(--accent); margin-bottom:4px; }
   .query-builder-desc{ font-size:11.5px; color:var(--text-dim); margin:0 0 12px 0; }
@@ -1702,7 +1705,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 113</div>
+    <div id="buildBadge">BUILD 117</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2465,6 +2468,10 @@
   var analyticsCustomTo = null;
   var analyticsPropertyId = null; // null = All Properties
   var analyticsBuckProfileId = null; // null = All Bucks (hunting-only)
+  var analyticsSource = 'photos'; // 'photos' | 'sightings' | 'both' — photos are the app's primary dataset
+  var analyticsSpecies = null;   // Subject drill-down: null = all species, or a species name
+  var analyticsBuckClass = null; // Subject drill-down: null = all deer, 'Buck', or 'Antlerless / Other'
+  var queryBuilderOpen = false;  // Custom Query section collapsed by default (Progressive Disclosure)
   // Custom Query Builder — deliberately separate state from the fixed-chart filters
   // above, since changing a fixed-chart filter shouldn't silently also change whatever
   // custom query someone's experimenting with, and vice versa.
@@ -2478,6 +2485,7 @@
   var queryDrawnItems = null;
   var queryResultChart = null;
   var queryHeatLayer = null; // the active heat map layer on the main map, if any
+  var queryHeatZoomHandler = null; // zoomend handler that keeps the heat glow a constant real-world size
   var queryHomeRangeLayers = []; // array of ring polygon layers, if home range rings are shown
   var queryPageTotal = 0; // the page-level "X logged sightings" total, shared here so the Query Builder can show "X of Y" against the exact same number
   var deployments = [];  // {id, cameraId, siteId, lat, lng, deployedAt}
@@ -8254,6 +8262,8 @@
       var b = buckProfiles.filter(function(x){ return x.id === o.buckProfileId; })[0];
       return b ? b.name : null;
     }
+    if (dimension === 'species') return o.species || null;
+    if (dimension === 'buckclass') return eventBuckClass(o);
     return null;
   }
 
@@ -8278,57 +8288,50 @@
     var section = document.createElement('div');
     section.className = 'query-builder';
 
-    var buckOptionsHtml = '';
-    if (activeModule === 'hunting' && buckProfiles.length > 0){
-      buckOptionsHtml = buckProfiles.map(function(b){ return '<option value="'+b.id+'"'+(queryDataSource===b.id?' selected':'')+'>'+escapeHtml(b.name)+'</option>'; }).join('');
-    }
-    var propOptionsHtml = properties.filter(function(p){ return !p.module || p.module === activeModule; })
-      .map(function(p){ return '<option value="'+p.id+'"'+(queryPropertyId===p.id?' selected':'')+'>'+escapeHtml(p.name)+'</option>'; }).join('');
+    // Break Down By is analytical dimensions only now — Species/Buck live in the shared
+    // Subject filter above, not here. Guard against a stale selection from before.
+    if (queryGroupBy === 'species' || queryGroupBy === 'buckclass') queryGroupBy = 'moon';
     var groupByOptionsHtml = QUERY_GROUPBY_OPTIONS
       .filter(function(pair){ return activeModule === 'hunting' || pair[0] !== 'buck'; })
       .map(function(pair){ return '<option value="'+pair[0]+'"'+(queryGroupBy===pair[0]?' selected':'')+'>'+pair[1]+'</option>'; }).join('');
 
     section.innerHTML =
-      '<div class="query-builder-title">🔧 Custom Query Builder</div>' +
-      '<p class="query-builder-desc">Pick your data, filter it, choose how to see it, and run it.</p>' +
-      '<div class="query-builder-row">' +
-        '<div class="query-builder-group"><label>Data</label><select id="qb_source"><option value="all">All Sightings</option>' + buckOptionsHtml + '</select></div>' +
-        '<div class="query-builder-group"><label>Date Range</label><select id="qb_daterange">' +
-          '<option value="all"'+(queryDateRange==='all'?' selected':'')+'>All Time</option>' +
-          '<option value="year"'+(queryDateRange==='year'?' selected':'')+'>Past Year</option>' +
-          '<option value="month"'+(queryDateRange==='month'?' selected':'')+'>Past Month</option></select></div>' +
-        '<div class="query-builder-group"><label>Property</label><select id="qb_property"><option value="">All Properties</option>' + propOptionsHtml + '</select></div>' +
-        '<div class="query-builder-group"><label>Area</label>' +
-          '<button class="btn-ghost" id="qb_draw_btn" type="button">🔷 Draw Area</button>' +
-          '<button class="btn-ghost" id="qb_clear_area_btn" type="button" style="display:'+(queryDrawnLayer?'inline-block':'none')+';color:#D94A2E;">✕ Clear Area</button>' +
+      '<button type="button" class="query-builder-toggle" id="qb_toggle">🔧 Custom Query <span id="qb_caret">'+(queryBuilderOpen?'▾':'▸')+'</span></button>' +
+      '<div id="qb_body" style="display:'+(queryBuilderOpen?'block':'none')+';margin-top:12px;">' +
+        '<p class="query-builder-desc">Runs on whatever the filters above have narrowed to — just choose how to break it down and see it.</p>' +
+        '<div class="query-builder-row">' +
+          '<div class="query-builder-group" id="qb_groupby_group"><label>Break Down By</label><select id="qb_groupby">' + groupByOptionsHtml + '</select></div>' +
+          '<div class="query-builder-group"><label>Show As</label><select id="qb_viztype">' +
+            '<option value="bar"'+(queryVizType==='bar'?' selected':'')+'>Bar Chart</option>' +
+            '<option value="pie"'+(queryVizType==='pie'?' selected':'')+'>Pie Chart</option>' +
+            '<option value="count"'+(queryVizType==='count'?' selected':'')+'>Total Count</option>' +
+            '<option value="heatmap"'+(queryVizType==='heatmap'?' selected':'')+'>Heat Map</option>' +
+            '<option value="homerange"'+(queryVizType==='homerange'?' selected':'')+'>Home Range Rings</option></select></div>' +
+          '<div class="query-builder-group"><label>Area</label>' +
+            '<button class="btn-ghost" id="qb_draw_btn" type="button">🔷 Draw Area</button>' +
+            '<button class="btn-ghost" id="qb_clear_area_btn" type="button" style="display:'+(queryDrawnLayer?'inline-block':'none')+';color:#D94A2E;">✕ Clear Area</button>' +
+          '</div>' +
         '</div>' +
-        '<div class="query-builder-group" id="qb_groupby_group"><label>Break Down By</label><select id="qb_groupby">' + groupByOptionsHtml + '</select></div>' +
-        '<div class="query-builder-group"><label>Show As</label><select id="qb_viztype">' +
-          '<option value="bar"'+(queryVizType==='bar'?' selected':'')+'>Bar Chart</option>' +
-          '<option value="pie"'+(queryVizType==='pie'?' selected':'')+'>Pie Chart</option>' +
-          '<option value="count"'+(queryVizType==='count'?' selected':'')+'>Total Count</option>' +
-          '<option value="heatmap"'+(queryVizType==='heatmap'?' selected':'')+'>Heat Map</option>' +
-          '<option value="homerange"'+(queryVizType==='homerange'?' selected':'')+'>Home Range Rings</option></select></div>' +
-      '</div>' +
-      '<button class="btn-primary" id="qb_run_btn" style="margin-top:10px;">▶ Run Query</button>' +
-      '<div id="qb_area_note" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;">' + (queryDrawnLayer ? '📍 Area drawn on map — results limited to inside it' : '') + '</div>' +
-      '<div id="qb_results" style="margin-top:14px;"></div>';
+        '<button class="btn-primary" id="qb_run_btn" style="margin-top:10px;">▶ Run Query</button>' +
+        '<div id="qb_area_note" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;">' + (queryDrawnLayer ? '📍 Area drawn on map — results limited to inside it' : '') + '</div>' +
+        '<div id="qb_results" style="margin-top:14px;"></div>' +
+      '</div>';
 
     container.appendChild(section);
 
-    section.querySelector('#qb_source').addEventListener('change', function(){ queryDataSource = this.value; });
-    section.querySelector('#qb_daterange').addEventListener('change', function(){ queryDateRange = this.value; });
-    section.querySelector('#qb_property').addEventListener('change', function(){ queryPropertyId = this.value || null; });
+    section.querySelector('#qb_toggle').addEventListener('click', function(){
+      queryBuilderOpen = !queryBuilderOpen;
+      section.querySelector('#qb_body').style.display = queryBuilderOpen ? 'block' : 'none';
+      section.querySelector('#qb_caret').textContent = queryBuilderOpen ? '▾' : '▸';
+    });
     section.querySelector('#qb_groupby').addEventListener('change', function(){ queryGroupBy = this.value; });
     section.querySelector('#qb_viztype').addEventListener('change', function(){
       queryVizType = this.value;
-      // Break Down By is meaningless for Count (a single total) and Heat Map (purely
-      // spatial density, not a category breakdown) — hide it for those specifically
-      // rather than leave a control on screen that does nothing.
+      // Break Down By is meaningless for Count (a single total), Heat Map, and Home Range
+      // (purely spatial) — hide it for those rather than leave a control that does nothing.
       section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
     });
     section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
-
     section.querySelector('#qb_draw_btn').addEventListener('click', function(){ startQueryAreaDraw(); });
     section.querySelector('#qb_clear_area_btn').addEventListener('click', function(){
       if (queryDrawnLayer && queryDrawnItems){ queryDrawnItems.removeLayer(queryDrawnLayer); }
@@ -8459,11 +8462,8 @@
   }
 
   function runCustomQuery(){
-    var source = observations.filter(function(o){
-      if (!typeIsInActiveModule(o.type, true)) return false;
-      if (!passesQueryDateFilter(o.createdAt)) return false;
-      if (queryPropertyId && o.propertyId !== queryPropertyId) return false;
-      if (queryDataSource !== 'all' && o.buckProfileId !== queryDataSource) return false;
+    var source = buildAnalyticsEvents().filter(function(o){
+      if (!passesSharedAnalyticsFilter(o)) return false; // one shared filter set (date/property/species/buck)
       if (queryDrawnLayer && !pointInShape(o.lat, o.lng, queryDrawnLayer)) return false;
       return true;
     });
@@ -8481,27 +8481,29 @@
     // and this query's own result are two genuinely separate numbers, easy to conflate
     // when they sit close together on the same page. Always shown first, regardless of
     // which visualization is selected below it.
-    resultsEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Using ' + source.length + ' of ' + queryPageTotal + ' total logged ' + (queryPageTotal === 1 ? 'sighting' : 'sightings') + '</div>';
+    resultsEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Using ' + source.length + ' of ' + queryPageTotal + ' total ' + (queryPageTotal === 1 ? 'record' : 'records') + '</div>';
 
     if (source.length === 0){
-      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">No sightings match this query.</div>';
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">No records match this query.</div>';
       return;
     }
 
     if (queryVizType === 'homerange'){
-      renderHomeRangeRings(source, resultsEl);
+      renderHomeRangeRings(source.filter(function(o){ return typeof o.lat==='number' && typeof o.lng==='number'; }), resultsEl);
       return;
     }
 
     if (queryVizType === 'count'){
-      resultsEl.innerHTML += '<div class="query-count-result">' + source.length + ' matching ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>';
+      resultsEl.innerHTML += '<div class="query-count-result">' + source.length + ' matching ' + (source.length === 1 ? 'record' : 'records') + '</div>';
       return;
     }
 
     if (queryVizType === 'heatmap'){
       // Renders on the actual map, not in this sidebar results area — a heat map's whole
       // point is spatial, so a small canvas in the sidebar wouldn't show anything useful.
-      var heatPoints = source.map(function(o){ return [o.lat, o.lng, 1]; });
+      var geoSource = source.filter(function(o){ return typeof o.lat==='number' && typeof o.lng==='number'; });
+      if (!geoSource.length){ resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">No located records to map yet — assign sites to your photos and they\'ll appear here.</div>'; return; }
+      var heatPoints = geoSource.map(function(o){ return [o.lat, o.lng, 1]; });
       // Leaflet.heat's defaults are tuned for dense datasets (its own demo uses 10,000
       // points) — a hunter's real data is more like a handful of sightings, so the
       // defaults render as faint, isolated dots rather than a meaningful "hot" area.
@@ -8509,7 +8511,23 @@
       // presence, a low max so just a few overlapping sightings reach full "hot" red
       // instead of needing dozens, and a minOpacity floor so even a single isolated
       // sighting is clearly visible rather than nearly transparent.
-      queryHeatLayer = L.heatLayer(heatPoints, {radius: 45, blur: 35, max: 3, minOpacity: 0.4}).addTo(map);
+      // Keep the glow a constant REAL-WORLD size as you zoom, so heat reflects actual
+      // activity density at a spot — not the zoom level. (Leaflet.heat sizes its radius in
+      // screen pixels, which is exactly why zooming in made everything look "hotter.")
+      var heatBaseZoom = map.getZoom(), heatBaseRadius = 45, heatBaseBlur = 35;
+      var heatSizeForZoom = function(){
+        var scale = Math.max(0.25, Math.min(Math.pow(2, map.getZoom() - heatBaseZoom), 8));
+        return { radius: heatBaseRadius * scale, blur: heatBaseBlur * scale };
+      };
+      var heatSize0 = heatSizeForZoom();
+      queryHeatLayer = L.heatLayer(heatPoints, {radius: heatSize0.radius, blur: heatSize0.blur, max: 3, minOpacity: 0.4}).addTo(map);
+      if (queryHeatZoomHandler){ map.off('zoomend', queryHeatZoomHandler); }
+      queryHeatZoomHandler = function(){
+        if (!queryHeatLayer){ if (queryHeatZoomHandler) map.off('zoomend', queryHeatZoomHandler); queryHeatZoomHandler = null; return; }
+        var s = heatSizeForZoom();
+        try{ queryHeatLayer.setOptions({ radius: s.radius, blur: s.blur }); }catch(e){}
+      };
+      map.on('zoomend', queryHeatZoomHandler);
       // Confirmed, documented Leaflet.heat issue (github.com/Leaflet/Leaflet.heat/issues/83):
       // its canvas defaults to z-index:100, but Leaflet's own tile pane sits at z-index:200
       // — meaning the heat map genuinely renders, just invisibly, behind the map tiles.
@@ -8520,9 +8538,9 @@
           queryHeatLayer._canvas.style.zIndex = 650;
         }
       }, 0);
-      var bounds = L.latLngBounds(source.map(function(o){ return [o.lat, o.lng]; }));
+      var bounds = L.latLngBounds(geoSource.map(function(o){ return [o.lat, o.lng]; }));
       map.fitBounds(bounds, {padding: [40, 40]});
-      resultsEl.innerHTML += '<div class="query-count-result" style="font-size:16px;">🔥 Showing heat map on the map — ' + source.length + ' ' + (source.length === 1 ? 'sighting' : 'sightings') + '</div>' +
+      resultsEl.innerHTML += '<div class="query-count-result" style="font-size:16px;">🔥 Showing heat map on the map — ' + geoSource.length + ' ' + (geoSource.length === 1 ? 'record' : 'records') + '</div>' +
         '<button class="btn-ghost" id="qb_clear_heatmap_btn" type="button" style="width:100%;margin-top:8px;">✕ Clear Heat Map</button>';
       document.getElementById('qb_clear_heatmap_btn').addEventListener('click', function(){
         if (queryHeatLayer){ map.removeLayer(queryHeatLayer); queryHeatLayer = null; }
@@ -8554,6 +8572,25 @@
   function renderAnalyticsFilterBar(container){
     var bar = document.createElement('div');
     bar.className = 'analytics-filter-bar';
+
+    // Data Source — photos are the primary dataset, so it defaults to them (hunting only;
+    // trail-cam photos don't apply to fishing).
+    if (activeModule === 'hunting'){
+      var srcGroup = document.createElement('div');
+      srcGroup.className = 'analytics-filter-group';
+      srcGroup.innerHTML = '<div class="analytics-filter-label">Data Source</div>';
+      var srcChips = document.createElement('div');
+      srcChips.className = 'chips';
+      [['photos','📷 Photos'],['sightings','📝 Sightings'],['both','Both']].forEach(function(pair){
+        var chip = document.createElement('button');
+        chip.className = 'chip' + (analyticsSource === pair[0] ? ' active' : '');
+        chip.textContent = pair[1];
+        chip.addEventListener('click', function(){ analyticsSource = pair[0]; renderAnalytics(); });
+        srcChips.appendChild(chip);
+      });
+      srcGroup.appendChild(srcChips);
+      bar.appendChild(srcGroup);
+    }
 
     // Date Range
     var dateGroup = document.createElement('div');
@@ -8589,23 +8626,149 @@
     propGroup.appendChild(propSelect);
     bar.appendChild(propGroup);
 
-    // Buck Profile (hunting only)
-    if (activeModule === 'hunting' && buckProfiles.length > 0){
-      var buckGroup = document.createElement('div');
-      buckGroup.className = 'analytics-filter-group';
-      buckGroup.innerHTML = '<div class="analytics-filter-label">Buck</div>';
-      var buckSelect = document.createElement('select');
-      buckSelect.innerHTML = '<option value="">All Bucks</option>' + buckProfiles
-        .map(function(b){ return '<option value="'+b.id+'"'+(analyticsBuckProfileId===b.id?' selected':'')+'>'+escapeHtml(b.name)+'</option>'; }).join('');
-      buckSelect.addEventListener('change', function(){
-        analyticsBuckProfileId = buckSelect.value || null;
-        renderAnalytics();
-      });
-      buckGroup.appendChild(buckSelect);
-      bar.appendChild(buckGroup);
+    // Subject drill-down (hunting only) — narrow the data before analyzing it:
+    // Species -> Bucks/Antlerless -> Named Buck. These AND together and drive BOTH the
+    // charts and the custom query (one shared filter set, no duplication).
+    if (activeModule === 'hunting'){
+      var subjGroup = document.createElement('div');
+      subjGroup.className = 'analytics-filter-group';
+      subjGroup.innerHTML = '<div class="analytics-filter-label">Subject</div>';
+
+      // Species (from whatever the AI has tagged)
+      var speciesSet = {};
+      importedPhotos.forEach(function(p){ if (p.ai && p.ai.hasAnimal && p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true; });
+      var speciesNames = Object.keys(speciesSet).sort();
+      if (speciesNames.length){
+        var spSelect = document.createElement('select');
+        spSelect.style.cssText = 'width:100%;margin-bottom:6px;';
+        spSelect.innerHTML = '<option value="">All species</option>' + speciesNames
+          .map(function(s){ return '<option value="'+escapeHtml(s)+'"'+(analyticsSpecies===s?' selected':'')+'>'+escapeHtml(s)+'</option>'; }).join('');
+        spSelect.addEventListener('change', function(){ analyticsSpecies = spSelect.value || null; renderAnalytics(); });
+        subjGroup.appendChild(spSelect);
+      }
+
+      // Bucks vs. Antlerless (deer split)
+      var bcSelect = document.createElement('select');
+      bcSelect.style.cssText = 'width:100%;margin-bottom:6px;';
+      bcSelect.innerHTML =
+        '<option value="">All deer</option>' +
+        '<option value="Buck"'+(analyticsBuckClass==='Buck'?' selected':'')+'>Bucks only</option>' +
+        '<option value="Antlerless / Other"'+(analyticsBuckClass==='Antlerless / Other'?' selected':'')+'>Antlerless only</option>';
+      bcSelect.addEventListener('change', function(){ analyticsBuckClass = bcSelect.value || null; renderAnalytics(); });
+      subjGroup.appendChild(bcSelect);
+
+      // Named Buck
+      if (buckProfiles.length > 0){
+        var buckSelect = document.createElement('select');
+        buckSelect.style.cssText = 'width:100%;';
+        buckSelect.innerHTML = '<option value="">All bucks</option>' + buckProfiles
+          .map(function(b){ return '<option value="'+b.id+'"'+(analyticsBuckProfileId===b.id?' selected':'')+'>'+escapeHtml(b.name)+'</option>'; }).join('');
+        buckSelect.addEventListener('change', function(){ analyticsBuckProfileId = buckSelect.value || null; renderAnalytics(); });
+        subjGroup.appendChild(buckSelect);
+      }
+
+      bar.appendChild(subjGroup);
     }
 
     container.appendChild(bar);
+  }
+
+  // Single shared filter used by BOTH the dashboard charts and the Custom Query Builder —
+  // so nothing is set in two places. (The Query Builder adds only the drawn-area filter.)
+  function passesSharedAnalyticsFilter(o){
+    if (!passesAnalyticsDateFilter(o.createdAt)) return false;
+    if (analyticsPropertyId && o.propertyId !== analyticsPropertyId) return false;
+    if (analyticsSpecies && o.species !== analyticsSpecies) return false;
+    if (analyticsBuckClass && eventBuckClass(o) !== analyticsBuckClass) return false;
+    if (analyticsBuckProfileId && o.buckProfileId !== analyticsBuckProfileId) return false;
+    return true;
+  }
+
+  // ---------- Analytics data source: unify photo detections + logged sightings ----------
+  // Photos are the app's primary dataset, so Analytics defaults to them. Each photo VISIT
+  // (an independent detection via computeVisits — bursts collapsed, AI-flagged empties
+  // dropped) is mapped into the SAME event shape a logged observation uses, so every
+  // existing chart AND the Query Builder run over one unified list and always agree with
+  // the Photo Gallery. Trail-cam photos are hunting-mode data.
+  // Which property boundary contains this coordinate (module-aware). Mirrors the app's
+  // own point-in-bounds check (properties store bounds:{north,south,east,west}).
+  function analyticsPropertyIdForLatLng(lat, lng){
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    for (var i=0;i<properties.length;i++){
+      var pr = properties[i];
+      if (pr.module && pr.module !== activeModule) continue;
+      var b = pr.bounds;
+      if (b && lat >= b.south && lat <= b.north && lng >= b.west && lng <= b.east) return pr.id;
+    }
+    return null;
+  }
+  function analyticsSitePropertyId(siteId){
+    if (!siteId) return null;
+    var s = sites.filter(function(x){ return x.id === siteId; })[0];
+    if (!s) return null;
+    // Prefer the stored link, but fall back to which property boundary the site actually
+    // falls inside — this catches sites created before their property existed (stored
+    // propertyId is null even though the location sits inside a property).
+    if (s.propertyId) return s.propertyId;
+    return analyticsPropertyIdForLatLng(s.lat, s.lng);
+  }
+  function photoVisitToEvent(v){
+    var cover = v.cover || v.photos[0];
+    var buckPhoto = null;
+    for (var i=0;i<v.photos.length;i++){ if (v.photos[i].buckProfileId){ buckPhoto = v.photos[i]; break; } }
+    var s = v.siteId ? sites.filter(function(x){ return x.id === v.siteId; })[0] : null;
+    var sp = (v.species && v.species !== 'untagged' && v.species !== 'empty') ? v.species : null;
+    return {
+      __source: 'photo',
+      createdAt: cover.timestamp,
+      moonPhase: cover.moonPhase || null,
+      weatherStatus: cover.weatherStatus,
+      weather: cover.weather || null,
+      solunarPeriod: cover.solunarPeriod || null,
+      siteId: v.siteId || null,
+      propertyId: analyticsSitePropertyId(v.siteId),
+      buckProfileId: buckPhoto ? buckPhoto.buckProfileId : null,
+      species: sp,
+      isBuck: !!v.isBuck,
+      lat: (s && typeof s.lat === 'number') ? s.lat : null,
+      lng: (s && typeof s.lng === 'number') ? s.lng : null
+    };
+  }
+  // Deer-split classification for the species hierarchy — reads the AI buck flag (photos)
+  // or the sighting type (logged). Untagged photos return null (unknown, excluded).
+  function eventBuckClass(o){
+    if (o.__source === 'photo'){
+      if (o.isBuck) return 'Buck';
+      if (o.species) return 'Antlerless / Other'; // AI-confirmed animal, not flagged a buck
+      return null; // untagged — not enough info to classify
+    }
+    if (o.type === 'buck') return 'Buck';
+    if (o.type === 'doe') return 'Antlerless / Other';
+    return null;
+  }
+  function buildAnalyticsEvents(){
+    var events = [];
+    // Trail-cam photos are hunting-only; fishing always uses logged catches.
+    var src = (activeModule === 'fishing') ? 'sightings' : analyticsSource;
+    if (src === 'photos' || src === 'both'){
+      // Keep animals + not-yet-analyzed photos; drop only AI-confirmed empties.
+      var animalPhotos = importedPhotos.filter(function(p){ return !(p.ai && p.ai.hasAnimal === false); });
+      var visits = computeVisits(animalPhotos, (galleryVisitGapMin || 30) * 60000);
+      for (var i=0;i<visits.length;i++){ events.push(photoVisitToEvent(visits[i])); }
+    }
+    if (src === 'sightings' || src === 'both'){
+      for (var j=0;j<observations.length;j++){
+        var o = observations[j];
+        if (!typeIsInActiveModule(o.type, true)) continue;
+        events.push({
+          __source:'obs', type:o.type, createdAt:o.createdAt, moonPhase:o.moonPhase||null,
+          weatherStatus:o.weatherStatus, weather:o.weather||null, solunarPeriod:o.solunarPeriod||null,
+          siteId:o.siteId||null, propertyId:o.propertyId||null, buckProfileId:o.buckProfileId||null,
+          species:null, isBuck:(o.type==='buck'), lat:(typeof o.lat==='number'?o.lat:null), lng:(typeof o.lng==='number'?o.lng:null)
+        });
+      }
+    }
+    return events;
   }
 
   function renderAnalytics(){
@@ -8620,19 +8783,37 @@
     mainWrap.style.cssText = 'flex:1;min-width:0;';
     list.appendChild(mainWrap);
 
-    var relevantObs = observations.filter(function(o){
-      if (!typeIsInActiveModule(o.type, true)) return false;
-      if (!passesAnalyticsDateFilter(o.createdAt)) return false;
-      if (analyticsPropertyId && o.propertyId !== analyticsPropertyId) return false;
-      if (analyticsBuckProfileId && o.buckProfileId !== analyticsBuckProfileId) return false;
-      return true;
-    });
+    var relevantObs = buildAnalyticsEvents().filter(passesSharedAnalyticsFilter);
     var total = relevantObs.length;
     queryPageTotal = total; // shared with the Query Builder below, so "X of Y" always matches the header exactly, never a separately-computed number that could drift
 
+    var eventNoun = (activeModule === 'fishing')
+      ? ('catch' + (total===1?'':'es'))
+      : (analyticsSource === 'sightings' ? ('sighting' + (total===1?'':'s')) : ('detection' + (total===1?'':'s')));
     var header = document.createElement('div');
     header.className = 'analytics-header';
-    header.innerHTML = '<div class="analytics-total">' + total + ' logged ' + (activeModule === 'fishing' ? 'catch' + (total===1?'':'es') : 'sighting' + (total===1?'':'s')) + '</div>';
+    header.innerHTML = '<div class="analytics-total">' + total + ' ' + eventNoun + '</div>';
+    // Transparency: when photos are in the mix, show how the raw photo count becomes
+    // independent detections — bursts grouped into visits, AI-flagged empties excluded —
+    // so this number never looks mysterious next to the gallery's raw photo count.
+    if (activeModule === 'hunting' && (analyticsSource === 'photos' || analyticsSource === 'both')){
+      var photosInView = importedPhotos.filter(function(pp){
+        if (!passesAnalyticsDateFilter(pp.timestamp)) return false;
+        if (analyticsPropertyId && analyticsSitePropertyId(pp.matchedSiteId) !== analyticsPropertyId) return false;
+        if (analyticsSpecies && !(pp.ai && pp.ai.primarySpecies === analyticsSpecies)) return false;
+        if (analyticsBuckClass === 'Buck' && !(pp.ai && pp.ai.isBuck)) return false;
+        if (analyticsBuckClass === 'Antlerless / Other' && !(pp.ai && pp.ai.hasAnimal && !pp.ai.isBuck)) return false;
+        if (analyticsBuckProfileId && pp.buckProfileId !== analyticsBuckProfileId) return false;
+        return true;
+      });
+      var emptyCount = photosInView.filter(function(pp){ return pp.ai && pp.ai.hasAnimal === false; }).length;
+      var photoDetections = relevantObs.filter(function(o){ return o.__source === 'photo'; }).length;
+      if (photosInView.length){
+        header.innerHTML += '<div class="analytics-source-note" style="font-size:11px;color:var(--text-dim);margin-top:3px;">' +
+          photoDetections + ' photo detection' + (photoDetections===1?'':'s') + ' — from ' + photosInView.length + ' photo' + (photosInView.length===1?'':'s') +
+          ', bursts grouped into visits' + (emptyCount ? (', ' + emptyCount + ' empt' + (emptyCount===1?'y':'ies') + ' excluded') : '') + '</div>';
+      }
+    }
     if (total < 15){
       header.innerHTML += '<div class="analytics-sparse-note">📊 Charts get more meaningful with more data — right now there\'s only ' + total + ' logged, so patterns below may just be noise. Keep logging and check back.</div>';
     }
@@ -8668,6 +8849,14 @@
     var trendLabels = ['Rising','Falling','Steady'].filter(function(t){ return trendCounts[t]; });
     if (trendLabels.length){
       buildPieChart(makeChartCanvas(chartsGrid, '📈 By Pressure Trend', 'chartPressure'), trendLabels, trendLabels.map(function(t){ return trendCounts[t]; }));
+    }
+
+    // By Barometric Pressure — the actual reading (in ranges), not just the trend direction
+    var pvalCounts = groupCount(relevantObs, function(o){ return (o.weatherStatus === 'ok' && o.weather) ? pressureBucket(o.weather.pressureInHg) : null; });
+    var pvalOrder = ['Under 29.30"','29.30-29.60"','29.60-29.80"','29.80-30.00"','30.00-30.20"','30.20"+'];
+    var pvalLabels = pvalOrder.filter(function(t){ return pvalCounts[t]; });
+    if (pvalLabels.length){
+      buildBarChart(makeChartCanvas(chartsGrid, '🧭 By Barometric Pressure', 'chartPressureVal'), pvalLabels, pvalLabels.map(function(t){ return pvalCounts[t]; }), 'Count');
     }
 
     // By Temperature Range
@@ -8726,6 +8915,24 @@
       var buckLabels = Object.keys(buckCounts).sort(function(a,b){ return buckCounts[b] - buckCounts[a]; });
       if (buckLabels.length){
         buildBarChart(makeChartCanvas(chartsGrid, '🦌 By Buck Profile', 'chartBuck'), buckLabels, buckLabels.map(function(b){ return buckCounts[b]; }), 'Count');
+      }
+    }
+
+    // By Species — trail-cam photos carry AI species; only appears when there's species data
+    var speciesCounts = groupCount(relevantObs, function(o){ return o.species || null; });
+    var speciesLabels = Object.keys(speciesCounts).sort(function(a,b){ return speciesCounts[b] - speciesCounts[a]; });
+    if (speciesLabels.length){
+      buildBarChart(makeChartCanvas(chartsGrid, '🐾 By Species', 'chartSpecies'), speciesLabels, speciesLabels.map(function(s){ return speciesCounts[s]; }), 'Count');
+    }
+
+    // Bucks vs. Antlerless — the deer split (from the AI buck flag / sighting type). Pairs
+    // with By Species (above) and By Buck Profile (named individuals) to form the hierarchy:
+    // Species -> Bucks vs. Antlerless -> Named Bucks.
+    if (activeModule === 'hunting'){
+      var buckClassCounts = groupCount(relevantObs, eventBuckClass);
+      var buckClassLabels = ['Buck','Antlerless / Other'].filter(function(l){ return buckClassCounts[l]; });
+      if (buckClassLabels.length){
+        buildBarChart(makeChartCanvas(chartsGrid, '🦌 Bucks vs. Antlerless', 'chartBuckClass'), buckClassLabels, buckClassLabels.map(function(l){ return buckClassCounts[l]; }), 'Count');
       }
     }
   }
