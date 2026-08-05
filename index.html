@@ -1714,7 +1714,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 124</div>
+    <div id="buildBadge">BUILD 125</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8580,6 +8580,19 @@
     var b = document.getElementById('analyticsRestoreBtn'); if (b) b.style.display = 'none';
     setTimeout(function(){ try{ map.invalidateSize(); }catch(e){} }, 260);
   }
+  // Tap the map to dismiss the (open) Analytics panel — same feel as the right-slide tray's
+  // backdrop. Bound once, lazily, so `map` definitely exists. Guarded so it never fires
+  // while placing a pin, on another tab, on a narrow screen, or when already collapsed.
+  var analyticsMapDismissBound = false;
+  function bindAnalyticsMapDismiss(){
+    if (analyticsMapDismissBound || typeof map === 'undefined' || !map) return;
+    analyticsMapDismissBound = true;
+    map.on('click', function(){
+      if (activeTab === 'analytics' && !analyticsPanelCollapsed && window.innerWidth >= 900 && (typeof placing === 'undefined' || !placing)){
+        collapseAnalyticsPanel();
+      }
+    });
+  }
 
   function runCustomQuery(){
     var source = buildAnalyticsEvents().filter(function(o){
@@ -8713,7 +8726,8 @@
       queryBuilderOpen = true;
       renderAnalytics();
       runCustomQuery();
-      collapseAnalyticsPanel(); // reveal the map with the rings (desktop)
+      // Panel stays OPEN so you can keep viewing the analytics; tap the map to dismiss it
+      // (same feel as the right-slide tray), which then reveals the full map with the rings.
     });
     mapGroup.appendChild(mapBtn);
     if (window.innerWidth >= 900){
@@ -8926,6 +8940,7 @@
 
   function renderAnalytics(){
     destroyAnalyticsCharts();
+    bindAnalyticsMapDismiss();
     var list = document.getElementById('site-list');
     list.innerHTML = '';
     list.classList.add('analytics-desktop-layout');
