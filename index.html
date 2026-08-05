@@ -1714,7 +1714,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 125</div>
+    <div id="buildBadge">BUILD 126</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2052,6 +2052,7 @@
         <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
         <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
         <button type="button" class="btn-ghost" id="galleryCleanupBtn" style="width:100%;margin-top:6px;display:none;">🧹 Clean up empty frames</button>
+        <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
         <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
         <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
       </div>
@@ -4183,6 +4184,42 @@
     var n = cloudPhotosAvailable() ? galleryUnlocatedInView().length : 0;
     btn.style.display = n === 0 ? 'none' : 'block';
     btn.textContent = '🔧 Fix ' + n + ' unlocated photo' + (n === 1 ? '' : 's') + ' (camera + location)';
+    refreshRematchButton();
+  }
+  // Automatic re-match: re-runs the deployment cross-reference over EVERY unlocated photo,
+  // catching ones stranded because they were imported before their camera was deployed (or
+  // before a deployment was recorded). Safe: only fills photos with NO site — never touches
+  // ones already located. Photos still lacking a covering deployment (e.g. taken before the
+  // camera's recorded deploy date) stay unlocated for the manual Fix / a backdated deployment.
+  function refreshRematchButton(){
+    var btn = document.getElementById('galleryRematchBtn');
+    if (!btn) return;
+    var unlocated = cloudPhotosAvailable() ? importedPhotos.filter(function(p){ return !p.matchedSiteId && p.cameraId && p.timestamp; }).length : 0;
+    var hasDeployments = deployments && deployments.length > 0;
+    btn.style.display = (unlocated > 0 && hasDeployments) ? 'block' : 'none';
+    btn.textContent = '🔄 Auto-match ' + unlocated + ' unlocated to deployments';
+  }
+  async function rematchPhotosToDeployments(){
+    var unlocated = importedPhotos.filter(function(p){ return !p.matchedSiteId && p.cameraId && p.timestamp; });
+    var fixed = 0;
+    for (var i=0; i<unlocated.length; i++){
+      var p = unlocated[i];
+      var site = findSiteForCameraAtTime(p.cameraId, p.timestamp);
+      if (site){
+        p.matchedSiteId = site.id;
+        p.matchedSiteName = site.name;
+        if (p.weatherStatus !== 'ok'){ p.weatherStatus = 'pending'; }
+        if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} }
+        fixed++;
+      }
+    }
+    populateGalleryFilters(); renderGallery(); refreshTagAllButton(); refreshAssignLocButton();
+    if (fixed){
+      showToast('Matched ' + fixed + ' photo' + (fixed===1?'':'s') + ' to their sites');
+    } else {
+      showToast('No new matches — these predate their cameras’ deploy dates. Use Fix to assign, or backdate the deployment.');
+    }
+    return fixed;
   }
   async function assignFixToPhotos(photos, cameraId, site){
     var done = 0;
@@ -4267,6 +4304,7 @@
       catch(e){ alert('Could not fix the photos:\n' + ((e && e.message) || e)); this.disabled = false; }
     });
   }
+  document.getElementById('galleryRematchBtn').addEventListener('click', rematchPhotosToDeployments);
   document.getElementById('galleryAssignLocBtn').addEventListener('click', openAssignLocPicker);
 
   // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
