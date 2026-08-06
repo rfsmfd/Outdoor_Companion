@@ -1728,7 +1728,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 131</div>
+    <div id="buildBadge">BUILD 132</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6170,6 +6170,7 @@
       var actionsRow = document.createElement('div');
       actionsRow.style.cssText = 'margin-top:8px;';
       actionsRow.innerHTML =
+        '<button class="btn-ghost" data-act="buck-map" style="width:100%;font-size:12px;font-weight:600;margin-bottom:5px;background:var(--accent);color:#fff;border-color:var(--accent);">📍 Where he\'s been (map)</button>' +
         '<button class="btn-ghost" data-act="edit-buck" style="width:100%;font-size:11px;margin-bottom:5px;">Edit</button>' +
         '<div style="display:flex;gap:6px;">' +
           '<button class="btn-ghost" data-act="delete-buck" style="flex:1;font-size:11px;color:#D94A2E;">Delete Profile</button>' +
@@ -6211,6 +6212,10 @@
           if (pdoc) showGalleryPhoto(pdoc);
           else showPhotoLightbox(img.getAttribute('data-full') || img.getAttribute('src'));
         });
+      });
+      actionsRow.querySelector('[data-act="buck-map"]').addEventListener('click', function(e){
+        e.stopPropagation();
+        showBuckOnMap(profile);
       });
       actionsRow.querySelector('[data-act="edit-buck"]').addEventListener('click', function(e){
         e.stopPropagation();
@@ -8837,6 +8842,55 @@
       '<button class="btn-ghost" id="qb_clear_markers_btn" type="button" style="width:100%;margin-top:8px;">✕ Clear Map Markers</button>';
     var clr = document.getElementById('qb_clear_markers_btn');
     if (clr) clr.addEventListener('click', function(){ clearQueryCountMarkers(); resultsEl.innerHTML = ''; });
+  }
+
+  // ---------- Phase 2.5 (Stage 1): a single buck's movement map — "where he's been" ----------
+  // Reuses the count-markers engine on ONE buck: gather every located sighting of him — his linked
+  // photos (collapsed into independent visits, so "seen 10×" = 10 real occurrences) plus his linked
+  // field sightings — and drop a sized ring at each place. Bigger/hotter = seen there more. This is
+  // the founder's "shows where he spends most of his time" view. Client-only; no AI, no deploy.
+  function buckMapEvents(profileId){
+    var events = [];
+    var buckPhotos = importedPhotos.filter(function(p){ return p.buckProfileId === profileId && p.matchedSiteId; });
+    var visits = computeVisits(buckPhotos, (galleryVisitGapMin || 30) * 60000);
+    visits.forEach(function(v){
+      var s = v.siteId ? sites.filter(function(x){ return x.id === v.siteId; })[0] : null;
+      if (s && typeof s.lat === 'number') events.push({ siteId: v.siteId, lat: s.lat, lng: s.lng });
+    });
+    observations.filter(function(o){ return o.buckProfileId === profileId; }).forEach(function(o){
+      if (o.siteId){
+        var s = sites.filter(function(x){ return x.id === o.siteId; })[0];
+        if (s && typeof s.lat === 'number') events.push({ siteId: o.siteId, lat: s.lat, lng: s.lng });
+      }
+    });
+    return events;
+  }
+  function showBuckOnMap(profile){
+    var events = buckMapEvents(profile.id);
+    closeAllModals();                                   // reveal the map behind the buck panel/modal
+    if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();
+    var panel = document.getElementById('buckMapPanel');
+    if (!panel){
+      panel = document.createElement('div');
+      panel.id = 'buckMapPanel';
+      panel.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:1600;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;max-width:min(440px,92vw);box-shadow:0 6px 24px rgba(0,0,0,.5);color:var(--text);';
+      document.body.appendChild(panel);
+    }
+    panel.style.display = 'block';
+    panel.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px;">' +
+        '<div style="font-weight:700;font-size:14px;">🦌 ' + escapeHtml(profile.name) + ' — where he\'s been</div>' +
+        '<button id="buckMapClose" style="background:none;border:none;color:var(--text-dim);font-size:22px;line-height:1;cursor:pointer;">×</button>' +
+      '</div>' +
+      '<div id="buckMapResults" style="font-size:12.5px;"></div>';
+    document.getElementById('buckMapClose').addEventListener('click', function(){ clearQueryCountMarkers(); panel.style.display = 'none'; });
+    var resultsEl = document.getElementById('buckMapResults');
+    if (!events.length){
+      clearQueryCountMarkers();
+      resultsEl.innerHTML = '<div style="color:var(--text-dim);line-height:1.5;">No located sightings yet for ' + escapeHtml(profile.name) + '. Link some of his photos (Photo Gallery → open a photo → 🦌 Link to buck), then try again.</div>';
+      return;
+    }
+    renderCountMarkers(events, resultsEl);
   }
 
   // ---------- Analytics panel collapse — see the map (with its count rings), then restore ----------
