@@ -211,6 +211,132 @@ exports.tagPhoto = onCall(
   }
 );
 
+// Phase 2.5 Stage 3 — individual-buck recognition. Given ONE new buck photo and the caller's
+// KNOWN bucks (name + recorded antler traits), rank which known buck it matches. Suggest-only:
+// the client shows the ranking and the human confirms. Weighs DISTINCTIVE persistent features
+// over point count / spread (which grow year to year).
+const COMPARE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    ranked: {
+      type: "array",
+      description: "Up to 3 best candidate matches, most likely first. Empty array if none are plausible.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ref: { type: "string", description: "The exact ref id of the candidate buck being matched." },
+          name: { type: "string", description: "The candidate buck's name." },
+          confidence: { type: "string", enum: ["high", "medium", "low"] },
+          reason: { type: "string", description: "One line: the specific antler evidence for (or against) this match." },
+        },
+        required: ["ref", "name", "confidence", "reason"],
+      },
+    },
+    likelyNew: { type: "boolean", description: "True if the buck is most likely a NEW/unknown buck not in the candidate list." },
+    summary: { type: "string", description: "One-line read of the rack on the buck in the photo." },
+  },
+  required: ["ranked", "likelyNew", "summary"],
+};
+
+const COMPARE_SYSTEM =
+  "You are an expert whitetail biologist doing INDIVIDUAL-buck identification from trail-camera photos. " +
+  "You are given ONE new buck photo and a list of KNOWN bucks with their recorded antler traits. Decide " +
+  "which known buck (if any) the buck in the photo is. Weigh DISTINCTIVE, PERSISTENT features most heavily " +
+  "— drop tines, kickers, split points, sticker points, broken beams, strong asymmetry, brow/tine " +
+  "configuration — because point count and spread GROW year to year and can't confirm identity on their " +
+  "own. If the distinctive features don't clearly match any known buck, prefer likelyNew=true rather than " +
+  "forcing a weak match. Rank up to 3 plausible candidates with honest confidence and the specific " +
+  "evidence. Respond with the structured JSON only.";
+
+exports.compareBucks = onCall(
+  {
+    secrets: [ANTHROPIC_API_KEY],
+    region: "us-east1",
+    memory: "512MiB",
+    timeoutSeconds: 60,
+  },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "You must be signed in to identify bucks.");
+    }
+    const photoId = request.data && request.data.photoId;
+    if (!photoId || typeof photoId !== "string") {
+      throw new HttpsError("invalid-argument", "A photoId is required.");
+    }
+    const candidates =
+      request.data && Array.isArray(request.data.candidates) ? request.data.candidates : [];
+    if (!candidates.length) {
+      return { ranked: [], likelyNew: true, summary: "No known bucks to compare against yet.", model: MODEL, comparedAt: Date.now() };
+    }
+
+    // Owner-scoped — the function can only ever read the caller's own photo.
+    const storagePath = "users/" + uid + "/trailcam/" + photoId + ".jpg";
+    const file = admin.storage().bucket(STORAGE_BUCKET).file(storagePath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      throw new HttpsError("not-found", "That photo was not found in your account.");
+    }
+    let base64;
+    try {
+      const [buf] = await file.download();
+      base64 = buf.toString("base64");
+    } catch (e) {
+      throw new HttpsError("internal", "Could not read the photo from storage.");
+    }
+
+    const list = candidates
+      .map((c) => "[" + (c.ref || "") + "] " + (c.name || "(unnamed)") + " — " + (c.fingerprint || "no antler detail recorded yet"))
+      .join("\n");
+
+    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    let response;
+    try {
+      response = await client.messages.create({
+        model: MODEL,
+        max_tokens: 1024,
+        output_config: { effort: "low", format: { type: "json_schema", schema: COMPARE_SCHEMA } },
+        system: COMPARE_SYSTEM,
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: base64 } },
+              {
+                type: "text",
+                text:
+                  "Known bucks:\n" + list +
+                  "\n\nWhich of these known bucks is the buck in this photo? Rank the best matches by the distinctive antler evidence; if none fit, say it's likely a new buck.",
+              },
+            ],
+          },
+        ],
+      });
+    } catch (e) {
+      console.error("compareBucks request failed:", e && e.message);
+      throw new HttpsError("internal", "The AI request failed. Check the API key / billing and try again.");
+    }
+
+    if (response.stop_reason === "refusal") {
+      throw new HttpsError("internal", "The model declined to analyze this image.");
+    }
+    const textBlock = (response.content || []).find((b) => b.type === "text");
+    if (!textBlock) {
+      throw new HttpsError("internal", "The model returned no result.");
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(textBlock.text);
+    } catch (e) {
+      throw new HttpsError("internal", "The model returned unreadable output.");
+    }
+    console.log("compareBucks ok:", photoId, "candidates=" + candidates.length, "likelyNew=" + parsed.likelyNew);
+    return Object.assign({}, parsed, { model: MODEL, comparedAt: Date.now() });
+  }
+);
+
 /**
  * Group sharing — membership mutations that clients can't do safely.
  *
