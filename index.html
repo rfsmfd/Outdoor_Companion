@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 134</div>
+    <div id="buildBadge">BUILD 135</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4059,7 +4059,22 @@
       var others = (Array.isArray(ai.allSpecies) ? ai.allSpecies.filter(function(sp){ return sp && sp !== ai.primarySpecies; }) : []);
       if (others.length) s += ' + ' + others.map(function(sp){ return escapeHtml(sp); }).join(' + ');
       if (ai.count && ai.count > 1) s += ' ×' + ai.count;
-      if (ai.isBuck){ s += ' — BUCK'; if (ai.antlerNotes) s += ' (' + escapeHtml(ai.antlerNotes) + ')'; }
+      if (ai.isBuck){
+        s += ' — BUCK'; if (ai.antlerNotes) s += ' (' + escapeHtml(ai.antlerNotes) + ')';
+        // Structured rack detail (Phase 2.5) — present once a photo is tagged by the upgraded AI.
+        var a = ai.antler;
+        if (a){
+          var parts = [];
+          var lr = (a.pointsLeft || 0) + (a.pointsRight || 0);
+          var pts = a.totalPoints || lr;
+          if (pts) parts.push(pts + ' pt' + ((a.pointsLeft || a.pointsRight) ? ' (' + (a.pointsLeft || 0) + '×' + (a.pointsRight || 0) + ')' : ''));
+          if (a.spreadClass && a.spreadClass !== 'unknown') parts.push(a.spreadClass + ' spread');
+          if (a.mass && a.mass !== 'unknown') parts.push(a.mass + ' mass');
+          if (Array.isArray(a.features) && a.features.length) parts.push(a.features.join(', '));
+          if (parts.length) s += '<br><span style="color:#ffb066;">🦌 ' + escapeHtml(parts.join(' · ')) + '</span>';
+        }
+      }
+      if (ai.bodyClass && ai.bodyClass !== 'unknown') s += ' · ' + escapeHtml(ai.bodyClass) + ' body';
     } else {
       s = '🧠 empty frame';
     }
