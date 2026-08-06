@@ -1227,13 +1227,27 @@
   .photo-gallery-filters select{ flex:1 1 30%; min-width:110px; }
   #galleryGrid{
     display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(130px, 1fr));
+    grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
     gap:10px;
     max-height:62vh;
     overflow-y:auto;
   }
   #galleryGrid .import-photo-card{ cursor:pointer; }
   #galleryGrid .import-photo-card:hover{ border-color:var(--accent); }
+  /* Gallery thumbnails run larger than the compact import/cleanup grids so the animal is
+     actually readable at a glance (tapping still opens the full lightbox). */
+  #galleryGrid .import-photo-card img{ height:150px; }
+  #galleryGrid .import-photo-card .loc{ font-size:12.5px; font-weight:700; }
+  #galleryGrid .import-photo-card .loc.unmatched{ color:#D94A2E; }
+  #galleryGrid .import-photo-card .cam{ font-size:10px; color:var(--text-dim); margin-top:1px; }
+  /* Group-by-location: each section spans the full grid width, with its own thumbnail row. */
+  #galleryGrid .gallery-loc-group{ grid-column:1 / -1; }
+  #galleryGrid .gallery-loc-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px; }
+  .gallery-loc-hdr{ display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; padding:7px 10px; margin:4px 0 9px; background:var(--panel-alt); border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:8px; }
+  .gallery-loc-hdr .pin{ font-size:13px; }
+  .gallery-loc-hdr .sname{ font-size:13.5px; font-weight:700; }
+  .gallery-loc-hdr.unmatched .sname{ color:#D94A2E; }
+  .gallery-loc-hdr .lmeta{ font-size:11px; color:var(--text-dim); }
   .import-photo-card{
     background:var(--panel-alt);
     border:1px solid var(--line);
@@ -1714,7 +1728,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 128</div>
+    <div id="buildBadge">BUILD 129</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2029,8 +2043,8 @@
     <div class="oc-modal" id="photoGalleryModal">
       <h3>📸 Photo Gallery <button class="close-x" id="photoGalleryClose">&times;</button></h3>
       <div class="photo-gallery-filters">
+        <select id="gallerySiteFilter"><option value="">📍 All locations</option></select>
         <select id="galleryCameraFilter"><option value="">All cameras</option></select>
-        <select id="gallerySiteFilter"><option value="">All sites</option></select>
         <select id="gallerySpeciesFilter"><option value="">All photos</option></select>
         <select id="gallerySort">
           <option value="newest">Newest first</option>
@@ -2038,6 +2052,9 @@
         </select>
       </div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 4px 0;">
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;" title="Group photos into sections by location (site). Each spot shows every photo ever taken there — no matter which camera was on it.">
+          <input type="checkbox" id="galleryGroupByLocation"> 📍 Group by location
+        </label>
         <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;" title="Collapse bursts of the same animal at the same site into one visit with a duration. No photos are deleted — this only changes how they're counted.">
           <input type="checkbox" id="galleryGroupVisits"> 👣 Group into visits
         </label>
@@ -3645,6 +3662,7 @@
   // quality, fully browsable; nothing is deleted, merged, or hidden. Fully derived
   // from data already on each photo, so it applies retroactively to everything.
   var galleryGroupVisits = false;
+  var galleryGroupByLocation = false; // section the gallery by site (composes with visit grouping)
   var galleryVisitGapMin = 30; // tunable quiet-period threshold (minutes)
   // Species that are legitimate AI tags but are NOT game — humans, vehicles, and domestic/hunting
   // dogs (common in dog-hunting country). These get cleaned up like empty frames and are never
@@ -3765,7 +3783,7 @@
     cameras.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
       .forEach(function(c){ if (camIds[c.id]) camOpts.push('<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>'); });
     var prevCam = camSel.value; camSel.innerHTML = camOpts.join(''); camSel.value = prevCam;
-    var siteOpts = ['<option value="">All sites</option>'];
+    var siteOpts = ['<option value="">📍 All locations</option>'];
     sites.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
       .forEach(function(s){ if (siteIds[s.id]) siteOpts.push('<option value="'+s.id+'">'+escapeHtml(s.name||'(unnamed)')+'</option>'); });
     if (hasUnlocated) siteOpts.push('<option value="__none__">No site match</option>');
@@ -3813,62 +3831,116 @@
     var list = galleryPhotoList();
     empty.style.display = 'none';
     grid.innerHTML = '';
+    if (galleryGroupByLocation){ renderGalleryByLocation(list, grid, count); return; }
     if (galleryGroupVisits){ renderGalleryVisits(list, grid, count); return; }
     count.textContent = list.length + ' of ' + importedPhotos.length + ' photo' + (importedPhotos.length===1?'':'s');
-    list.forEach(function(p){
-      var card = document.createElement('div');
-      card.className = 'import-photo-card';
-      card.setAttribute('data-photo-id', p.id);
-      var dateStr = new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
-      var src = p.thumb || p.downloadURL || '';
-      card.innerHTML =
-        '<img src="' + src + '" alt="' + escapeHtml(p.filename||'') + '">' +
-        '<div class="meta">' +
-          '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
-          '<div class="site' + (p.matchedSiteName ? '' : ' unmatched') + '">' + (p.matchedSiteName ? escapeHtml(p.matchedSiteName) : 'No site match') + '</div>' +
-          '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(p) + '</div>' +
-          photoAiBadgeHtml(p) +
-          (p.buckProfileId ? (function(){ var b = buckProfiles.filter(function(x){ return x.id === p.buckProfileId; })[0]; return b ? '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#ffb066;">🦌 ' + escapeHtml(b.name) + '</div>' : ''; })() : '') +
-        '</div>';
-      card.addEventListener('click', function(){ showGalleryPhoto(p, list); }); // page through all photos in view
-      grid.appendChild(card);
-    });
+    list.forEach(function(p){ grid.appendChild(buildPhotoCardEl(p, list, false)); });
+  }
+  // ---- Shared gallery card builders (used by the flat, visit, and by-location renders) ----
+  // hideLoc drops the per-card location line when the card already sits under a location header.
+  function buildPhotoCardEl(p, navList, hideLoc){
+    var card = document.createElement('div');
+    card.className = 'import-photo-card';
+    card.setAttribute('data-photo-id', p.id);
+    var dateStr = new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
+    var src = p.thumb || p.downloadURL || '';
+    var cam = cameras.filter(function(c){ return c.id === p.cameraId; })[0];
+    var buckHtml = '';
+    if (p.buckProfileId){ var b = buckProfiles.filter(function(x){ return x.id === p.buckProfileId; })[0]; if (b) buckHtml = '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#ffb066;">🦌 ' + escapeHtml(b.name) + '</div>'; }
+    card.innerHTML =
+      '<img src="' + src + '" alt="' + escapeHtml(p.filename||'') + '">' +
+      '<div class="meta">' +
+        (hideLoc ? '' : '<div class="loc' + (p.matchedSiteName ? '' : ' unmatched') + '">📍 ' + (p.matchedSiteName ? escapeHtml(p.matchedSiteName) : 'No location yet') + '</div>') +
+        (cam ? '<div class="cam">📷 ' + escapeHtml(cam.name) + '</div>' : '') +
+        '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
+        '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(p) + '</div>' +
+        photoAiBadgeHtml(p) +
+        buckHtml +
+      '</div>';
+    card.addEventListener('click', function(){ showGalleryPhoto(p, navList || [p]); });
+    return card;
+  }
+  function buildVisitCardEl(v, hideLoc){
+    var p = v.cover;
+    var card = document.createElement('div');
+    card.className = 'import-photo-card visit-card' + (v.isBuck ? ' is-buck' : '');
+    var src = p.thumb || p.downloadURL || '';
+    var start = new Date(v.firstTs);
+    var dateStr = start.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+    var spLabel = v.species === 'untagged' ? 'Not tagged' : (v.species === 'empty' ? 'Empty' : v.species);
+    var spText = (v.isBuck ? '♂ ' : '') + spLabel + (v.peakCount > 1 ? ' ×' + v.peakCount : '');
+    var durHtml;
+    if (v.durationMs > 0){
+      var end = new Date(v.lastTs);
+      var range = start.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}) + '–' + end.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+      durHtml = '⏱ ' + formatVisitDuration(v.durationMs) + ' · ' + range;
+    } else {
+      durHtml = 'single frame';
+    }
+    card.innerHTML =
+      '<img src="' + src + '" alt="">' +
+      '<span class="visit-count">' + v.count + ' 📷</span>' +
+      '<div class="meta">' +
+        (hideLoc ? '' : '<div class="site' + (v.siteName ? '' : ' unmatched') + '">' + (v.siteName ? escapeHtml(v.siteName) : 'No site match') + '</div>') +
+        '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
+        '<div class="sp' + (v.isBuck ? ' buck' : '') + '">' + escapeHtml(spText) + '</div>' +
+        '<div class="dur">' + escapeHtml(durHtml) + '</div>' +
+      '</div>';
+    card.title = v.count + ' photo' + (v.count===1?'':'s') + ' in this visit — opens the best frame, arrows page through them all';
+    card.addEventListener('click', function(){ showGalleryPhoto(v.cover, v.photos); }); // page through this visit's frames
+    return card;
   }
   function renderGalleryVisits(list, grid, count){
     var visits = computeVisits(list, galleryVisitGapMin * 60000);
     var sortNewest = document.getElementById('gallerySort').value !== 'oldest';
     visits.sort(function(a,b){ return sortNewest ? b.firstTs - a.firstTs : a.firstTs - b.firstTs; });
     count.textContent = list.length + ' photo' + (list.length===1?'':'s') + ' → ' + visits.length + ' visit' + (visits.length===1?'':'s');
-    visits.forEach(function(v){
-      var p = v.cover;
-      var card = document.createElement('div');
-      card.className = 'import-photo-card visit-card' + (v.isBuck ? ' is-buck' : '');
-      var src = p.thumb || p.downloadURL || '';
-      var start = new Date(v.firstTs);
-      var dateStr = start.toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
-      var spLabel = v.species === 'untagged' ? 'Not tagged' : (v.species === 'empty' ? 'Empty' : v.species);
-      var spText = (v.isBuck ? '♂ ' : '') + spLabel + (v.peakCount > 1 ? ' ×' + v.peakCount : '');
-      var durHtml;
-      if (v.durationMs > 0){
-        var end = new Date(v.lastTs);
-        var range = start.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}) + '–' + end.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
-        durHtml = '⏱ ' + formatVisitDuration(v.durationMs) + ' · ' + range;
+    visits.forEach(function(v){ grid.appendChild(buildVisitCardEl(v, false)); });
+  }
+  // Group-by-location: one section per SITE — every photo ever taken there, whatever camera was
+  // on it, so a spot keeps its full history as cameras move through it. Composes with visit
+  // grouping (each section shows visits instead of raw frames when that toggle is also on).
+  function renderGalleryByLocation(list, grid, count){
+    var sortNewest = document.getElementById('gallerySort').value !== 'oldest';
+    var groups = {}, order = [];
+    list.forEach(function(p){
+      var key = p.matchedSiteId || '__none__';
+      if (!groups[key]){ groups[key] = { id: p.matchedSiteId || null, name: p.matchedSiteName || null, photos: [] }; order.push(key); }
+      groups[key].photos.push(p);
+    });
+    // Located spots first (alphabetical/numeric), the "no location yet" bucket always last.
+    order.sort(function(a, b){
+      if (a === '__none__') return 1;
+      if (b === '__none__') return -1;
+      return (groups[a].name || '').localeCompare(groups[b].name || '', undefined, { numeric: true });
+    });
+    count.textContent = list.length + ' photo' + (list.length===1?'':'s') + ' · ' + order.length + ' location' + (order.length===1?'':'s');
+    order.forEach(function(key){
+      var g = groups[key];
+      var sitePhotos = g.photos.slice().sort(function(a, b){ return sortNewest ? (b.timestamp||0)-(a.timestamp||0) : (a.timestamp||0)-(b.timestamp||0); });
+      var camNames = [];
+      var seenCam = {};
+      sitePhotos.forEach(function(p){ if (p.cameraId && !seenCam[p.cameraId]){ seenCam[p.cameraId] = true; var c = cameras.filter(function(x){ return x.id === p.cameraId; })[0]; if (c) camNames.push(c.name); } });
+      var section = document.createElement('div');
+      section.className = 'gallery-loc-group';
+      var hdr = document.createElement('div');
+      hdr.className = 'gallery-loc-hdr' + (g.name ? '' : ' unmatched');
+      var meta = sitePhotos.length + ' photo' + (sitePhotos.length===1?'':'s');
+      var row = document.createElement('div');
+      row.className = 'gallery-loc-row';
+      if (galleryGroupVisits){
+        var visits = computeVisits(sitePhotos, galleryVisitGapMin * 60000);
+        visits.sort(function(a, b){ return sortNewest ? b.firstTs - a.firstTs : a.firstTs - b.firstTs; });
+        meta += ' · ' + visits.length + ' visit' + (visits.length===1?'':'s');
+        visits.forEach(function(v){ row.appendChild(buildVisitCardEl(v, true)); });
       } else {
-        durHtml = 'single frame';
+        sitePhotos.forEach(function(p){ row.appendChild(buildPhotoCardEl(p, sitePhotos, true)); });
       }
-      card.innerHTML =
-        '<img src="' + src + '" alt="">' +
-        '<span class="visit-count">' + v.count + ' 📷</span>' +
-        '<div class="meta">' +
-          '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
-          '<div class="site' + (v.siteName ? '' : ' unmatched') + '">' + (v.siteName ? escapeHtml(v.siteName) : 'No site match') + '</div>' +
-          '<div class="sp' + (v.isBuck ? ' buck' : '') + '">' + escapeHtml(spText) + '</div>' +
-          '<div class="dur">' + escapeHtml(durHtml) + '</div>' +
-        '</div>';
-      card.title = v.count + ' photo' + (v.count===1?'':'s') + ' in this visit — opens the best frame, arrows page through them all';
-      card.addEventListener('click', function(){ showGalleryPhoto(v.cover, v.photos); }); // page through this visit's frames
-
-      grid.appendChild(card);
+      hdr.innerHTML = '<span class="pin">📍</span><span class="sname">' + (g.name ? escapeHtml(g.name) : 'No location yet') + '</span>' +
+        '<span class="lmeta">· ' + meta + (camNames.length ? (' · 📷 ' + escapeHtml(camNames.join(', '))) : '') + '</span>';
+      section.appendChild(hdr);
+      section.appendChild(row);
+      grid.appendChild(section);
     });
   }
   // A photo can open with a NAV LIST — the frames of a visit, or every photo in the current
@@ -4138,6 +4210,10 @@
   document.getElementById('galleryGroupVisits').addEventListener('change', function(){
     galleryGroupVisits = this.checked;
     document.getElementById('galleryVisitGap').style.display = this.checked ? '' : 'none';
+    renderGallery();
+  });
+  document.getElementById('galleryGroupByLocation').addEventListener('change', function(){
+    galleryGroupByLocation = this.checked;
     renderGallery();
   });
   document.getElementById('galleryVisitGap').addEventListener('change', function(){
