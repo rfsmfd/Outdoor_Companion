@@ -1714,7 +1714,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 126</div>
+    <div id="buildBadge">BUILD 127</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4251,10 +4251,15 @@
       });
     }
   }
-  function openAssignLocPicker(){
-    var targets = galleryUnlocatedInView();
+  // Assign-location picker. Called two ways:
+  //   • from the gallery Fix button (no args) → targets the unlocated photos currently in view;
+  //   • from prompt-at-import (opts.targets) → targets the just-imported photos that didn't match.
+  // opts: {targets, defaultCamId, title, intro, ctaLabel, onDone(site, cameraId, targets)}.
+  function openAssignLocPicker(opts){
+    opts = opts || {};
+    var targets = opts.targets || galleryUnlocatedInView();
     if (!targets.length){ showToast('No unlocated photos in the current view.'); return; }
-    if (!sites.length){ alert('You have no saved camera locations yet.\n\nDrop a camera pin on the map first (or deploy the camera), then come back and fix these here.'); return; }
+    if (!sites.length){ alert('You have no saved camera locations yet.\n\nDrop a camera pin on the map first (or deploy the camera), then come back and set these here.'); return; }
 
     var pickSites = sites.slice().sort(function(a, b){
       var ac = (a.type === 'camera') ? 0 : 1, bc = (b.type === 'camera') ? 0 : 1;
@@ -4263,7 +4268,7 @@
     });
     var pickCams = cameras.slice().sort(function(a, b){ return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }); });
     // Default the camera to the one currently filtered — the user sees the "wrong" one and changes it.
-    var defCamId = document.getElementById('galleryCameraFilter').value || (targets[0] && targets[0].cameraId) || (pickCams[0] && pickCams[0].id) || '';
+    var defCamId = opts.defaultCamId || document.getElementById('galleryCameraFilter').value || (targets[0] && targets[0].cameraId) || (pickCams[0] && pickCams[0].id) || '';
 
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
@@ -4272,16 +4277,19 @@
     var fld = 'width:100%;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#fff;font-size:14px;';
     var camOpts = pickCams.map(function(c){ return '<option value="' + c.id + '"' + (c.id === defCamId ? ' selected' : '') + '>' + escapeHtml(c.name || '(unnamed)') + '</option>'; }).join('');
     var siteOpts = pickSites.map(function(s){ return '<option value="' + s.id + '">' + escapeHtml(s.name || '(unnamed)') + (s.type === 'camera' ? ' 📷' : '') + '</option>'; }).join('');
+    var title = opts.title || 'Fix these photos';
+    var intro = opts.intro || ('These <strong>' + targets.length + '</strong> photo' + (targets.length === 1 ? '' : 's') + ' in view have no location. Set the camera they really came from and where it sits — every one gets both.');
+    var ctaLabel = opts.ctaLabel || 'Fix';
     card.innerHTML =
-      '<div style="font-weight:600;margin-bottom:4px;">Fix these photos</div>' +
-      '<div style="font-size:12px;color:#9db0a3;margin-bottom:12px;line-height:1.45;">These <strong>' + targets.length + '</strong> photo' + (targets.length === 1 ? '' : 's') + ' in view have no location. Set the camera they really came from and where it sits — every one gets both.</div>' +
+      '<div style="font-weight:600;margin-bottom:4px;">' + escapeHtml(title) + '</div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:12px;line-height:1.45;">' + intro + '</div>' +
       '<label style="display:block;font-size:11px;color:#9db0a3;margin-bottom:4px;">Camera</label>' +
       '<select id="fixCamSelect" style="' + fld + 'margin-bottom:10px;">' + camOpts + '</select>' +
       '<label style="display:block;font-size:11px;color:#9db0a3;margin-bottom:4px;">Location</label>' +
       '<select id="fixSiteSelect" style="' + fld + '">' + siteOpts + '</select>' +
       '<div style="display:flex;gap:8px;margin-top:14px;">' +
         '<button id="fixCancel" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
-        '<button id="fixGo" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">Fix ' + targets.length + '</button>' +
+        '<button id="fixGo" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">' + escapeHtml(ctaLabel) + ' ' + targets.length + '</button>' +
       '</div>';
     back.appendChild(card); document.body.appendChild(back);
     var camSel = card.querySelector('#fixCamSelect');
@@ -4300,12 +4308,16 @@
       var site = sites.filter(function(s){ return s.id === siteSel.value; })[0];
       if (!site){ return; }
       this.disabled = true;
-      try{ await assignFixToPhotos(targets, camSel.value, site); close(); }
-      catch(e){ alert('Could not fix the photos:\n' + ((e && e.message) || e)); this.disabled = false; }
+      try{
+        await assignFixToPhotos(targets, camSel.value, site);
+        if (opts.onDone){ try{ await opts.onDone(site, camSel.value, targets); }catch(e){ console.error('Outdoor Companion: assign-location onDone failed', e); } }
+        close();
+      }
+      catch(e){ alert('Could not set the location:\n' + ((e && e.message) || e)); this.disabled = false; }
     });
   }
   document.getElementById('galleryRematchBtn').addEventListener('click', rematchPhotosToDeployments);
-  document.getElementById('galleryAssignLocBtn').addEventListener('click', openAssignLocPicker);
+  document.getElementById('galleryAssignLocBtn').addEventListener('click', function(){ openAssignLocPicker(); });
 
   // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
   // Every photo the AI tagged hasAnimal:false is a cleanup candidate. We never
@@ -9997,6 +10009,29 @@
     closeImportLocPicker(true);
   });
 
+  // Records a lightweight "coasting" deployment so FUTURE imports from this camera auto-match on
+  // their own — locate once, coast after. No-op if an existing deployment already covers the
+  // batch's earliest photo, so a camera parked at one spot all season never stacks duplicates.
+  // Shared by the manual-import path and the prompt-at-import assign flow.
+  async function ensureCoastingDeployment(cameraId, siteObj, earliestTs){
+    if (!cameraId || !siteObj || !isFinite(earliestTs)) return;
+    var covered = deployments.some(function(d){ return d.cameraId === cameraId && d.siteId === siteObj.id && d.deployedAt <= earliestTs; });
+    if (covered) return;
+    var autoDep = {
+      id: uid(),
+      cameraId: cameraId,
+      siteId: siteObj.id,
+      lat: siteObj.lat,
+      lng: siteObj.lng,
+      deployedAt: earliestTs,
+      source: 'photo-import',
+      weather: null,
+      weatherStatus: 'skipped'
+    };
+    deployments.push(autoDep);
+    try{ await saveDeployment(autoDep); }catch(e){ console.error('Outdoor Companion: failed to save auto deployment', e); }
+  }
+
   document.getElementById('importProcessBtn').addEventListener('click', async function(){
     var cameraId = document.getElementById('importCameraSelect').value;
     var files = document.getElementById('importFileInput').files;
@@ -10107,29 +10142,10 @@
     }
 
     // Bonus: record a lightweight deployment so FUTURE imports from this camera auto-match
-    // on their own — locate once, coast after. Created only if no existing deployment already
-    // covers the batch's earliest photo, so a camera parked at one spot all season never
-    // stacks up duplicate deployments.
+    // on their own — locate once, coast after (see ensureCoastingDeployment).
     if (manualSite && results.length){
-      var earliest = results.reduce(function(min, r){ return Math.min(min, r.timestamp || Infinity); }, Infinity);
-      if (isFinite(earliest)){
-        var covered = deployments.some(function(d){ return d.cameraId === cameraId && d.siteId === manualSite.id && d.deployedAt <= earliest; });
-        if (!covered){
-          var autoDep = {
-            id: uid(),
-            cameraId: cameraId,
-            siteId: manualSite.id,
-            lat: manualSite.lat,
-            lng: manualSite.lng,
-            deployedAt: earliest,
-            source: 'photo-import',
-            weather: null,
-            weatherStatus: 'skipped'
-          };
-          deployments.push(autoDep);
-          try{ await saveDeployment(autoDep); }catch(e){ console.error('Outdoor Companion: failed to save auto deployment', e); }
-        }
-      }
+      var earliestMatched = results.reduce(function(min, r){ return Math.min(min, r.timestamp || Infinity); }, Infinity);
+      await ensureCoastingDeployment(cameraId, manualSite, earliestMatched);
     }
     if (createdNewSite) renderAll(); // show the new camera-location pin on the map
 
@@ -10165,6 +10181,38 @@
       }).then(function(){
         progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed, conditions added.';
       });
+    }
+
+    // Prompt-at-import: a Scanned import (auto-match by deployment) that couldn't place some
+    // photos would otherwise finish silently, stranding them as "No site match" — the classic
+    // historical / SD-card case. Instead, surface the assign-location picker right here so they
+    // never strand. Only fires for the unmatched subset; a fully-matched import never sees it.
+    if (!manualSite && results.length){
+      var promptedIds = {}; results.forEach(function(r){ promptedIds[r.id] = true; });
+      var unmatchedDocs = importedPhotos.filter(function(d){ return promptedIds[d.id] && !d.matchedSiteId; });
+      if (unmatchedDocs.length){
+        var earliestUnmatched = unmatchedDocs.reduce(function(min, d){ return Math.min(min, d.timestamp || Infinity); }, Infinity);
+        var promptCam = cameras.filter(function(c){ return c.id === cameraId; })[0];
+        openAssignLocPicker({
+          targets: unmatchedDocs,
+          defaultCamId: cameraId,
+          title: 'Where were these taken?',
+          intro: '<strong>' + unmatchedDocs.length + '</strong> of these photo' + (unmatchedDocs.length === 1 ? ' was' : 's were') +
+                 ' taken before ' + (promptCam ? escapeHtml(promptCam.name) : 'this camera') + ' had a recorded location, so they couldn’t be placed automatically. ' +
+                 'Pick the site they came from — every one gets it, and future imports from here will match on their own.',
+          ctaLabel: 'Set location for',
+          onDone: function(site){
+            // Reflect the new location on the import results grid behind the picker…
+            var siteLabel = site.name || '(unnamed)';
+            unmatchedDocs.forEach(function(d){
+              var el = document.querySelector('#importResultsGrid [data-photo-id="' + d.id + '"] .site');
+              if (el){ el.textContent = siteLabel; el.classList.remove('unmatched'); }
+            });
+            // …and drop a coasting deployment so this camera's later imports self-match.
+            return ensureCoastingDeployment(cameraId, site, earliestUnmatched);
+          }
+        });
+      }
     }
   });
 
