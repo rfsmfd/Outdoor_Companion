@@ -1728,7 +1728,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 129</div>
+    <div id="buildBadge">BUILD 130</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2072,6 +2072,7 @@
         <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
         <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
         <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
+        <button type="button" class="btn-ghost" id="galleryDiagnoseBtn" style="width:100%;margin-top:6px;">🔍 Diagnose locations (read-only)</button>
       </div>
       <div id="galleryGrid"></div>
       <div id="galleryEmpty" style="display:none;font-size:12.5px;color:var(--text-dim);text-align:center;padding:22px 10px;"></div>
@@ -4416,6 +4417,102 @@
   }
   document.getElementById('galleryRematchBtn').addEventListener('click', rematchPhotosToDeployments);
   document.getElementById('galleryAssignLocBtn').addEventListener('click', function(){ openAssignLocPicker(); });
+
+  // ---------- Location health diagnostic (READ-ONLY; temporary — remove after the migration) ----------
+  // Reports on the location data WITHOUT changing anything, so we can size the immutable-places
+  // cleanup against the founder's real cloud data (which Claude Code can't reach directly).
+  // Detects: places dragged across >1 physical spot (the move-by-reuse Reveal-bug), places named
+  // after a camera, and photos wearing a camera name. Copy button emits a plain-text report.
+  function metersBetween(aLat, aLng, bLat, bLng){
+    if (aLat==null || aLng==null || bLat==null || bLng==null) return Infinity;
+    var R = 6371000, toRad = function(d){ return d * Math.PI / 180; };
+    var dLat = toRad(bLat - aLat), dLng = toRad(bLng - aLng);
+    var s = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(toRad(aLat))*Math.cos(toRad(bLat))*Math.sin(dLng/2)*Math.sin(dLng/2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+  function computeLocationHealth(){
+    var SAME_SPOT_M = 35; // deployments within this distance count as the same physical spot
+    var camNames = {}; cameras.forEach(function(c){ if (c.name) camNames[c.name.toLowerCase()] = true; });
+    var distinctSpots = function(list){
+      var clusters = [];
+      list.forEach(function(d){
+        if (typeof d.lat !== 'number') return;
+        if (!clusters.some(function(c){ return metersBetween(c.lat, c.lng, d.lat, d.lng) <= SAME_SPOT_M; })) clusters.push({lat:d.lat, lng:d.lng});
+      });
+      return clusters.length;
+    };
+    // Sites dragged across >1 spot (siteId shared by deployments at different coordinates).
+    var depsBySite = {};
+    deployments.forEach(function(d){ if (d.siteId) (depsBySite[d.siteId] = depsBySite[d.siteId] || []).push(d); });
+    var scrambled = [];
+    Object.keys(depsBySite).forEach(function(sid){
+      if (distinctSpots(depsBySite[sid]) > 1){
+        var s = sites.filter(function(x){ return x.id === sid; })[0];
+        scrambled.push({ name: s ? s.name : '(deleted place)', spots: distinctSpots(depsBySite[sid]),
+          photos: importedPhotos.filter(function(p){ return p.matchedSiteId === sid; }).length });
+      }
+    });
+    // Cameras ever moved (their deployments span >1 spot).
+    var depsByCam = {};
+    deployments.forEach(function(d){ (depsByCam[d.cameraId] = depsByCam[d.cameraId] || []).push(d); });
+    var movedCams = Object.keys(depsByCam).filter(function(cid){ return distinctSpots(depsByCam[cid]) > 1; }).length;
+    // Places named after a camera + photos wearing a camera name.
+    var camNamedSites = sites.filter(function(s){ return s.name && camNames[s.name.toLowerCase()]; }).map(function(s){ return s.name; });
+    var camNamedPhotos = importedPhotos.filter(function(p){ return p.matchedSiteName && camNames[p.matchedSiteName.toLowerCase()]; }).length;
+    var located = importedPhotos.filter(function(p){ return p.matchedSiteId; }).length;
+    return {
+      cameras: cameras.length, sites: sites.length, deployments: deployments.length,
+      photos: importedPhotos.length, located: located, unlocated: importedPhotos.length - located,
+      scrambled: scrambled, movedCams: movedCams, camNamedSites: camNamedSites, camNamedPhotos: camNamedPhotos
+    };
+  }
+  function locationHealthText(h){
+    var L = [];
+    L.push('=== OUTDOOR COMPANION — LOCATION HEALTH (read-only) ===');
+    L.push('Cameras: ' + h.cameras);
+    L.push('Places (map pins): ' + h.sites);
+    L.push('Deployments: ' + h.deployments);
+    L.push('Photos: ' + h.photos + '  (located ' + h.located + ', no location ' + h.unlocated + ')');
+    L.push('');
+    L.push('-- Moved-by-reuse (the scramble risk) --');
+    L.push('Cameras ever moved to a new spot: ' + h.movedCams);
+    L.push('Places dragged across >1 spot: ' + h.scrambled.length);
+    h.scrambled.forEach(function(s){ L.push('   • "' + s.name + '" → ' + s.spots + ' spots, ' + s.photos + ' photos affected'); });
+    L.push('');
+    L.push('-- Camera-named places (the main cleanup) --');
+    L.push('Places named after a camera: ' + h.camNamedSites.length + (h.camNamedSites.length ? ('  [' + h.camNamedSites.join(', ') + ']') : ''));
+    L.push('Photos showing a camera name: ' + h.camNamedPhotos);
+    L.push('');
+    L.push('(Nothing was changed — this is a read-only report.)');
+    return L.join('\n');
+  }
+  function diagnoseLocations(){
+    if (!hasChatStorage){ alert('Sign in first so the diagnostic can read your cloud data.'); return; }
+    var h = computeLocationHealth();
+    var txt = locationHealthText(h);
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100003;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:460px;width:100%;max-height:85vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    card.innerHTML =
+      '<div style="font-weight:700;font-size:15px;margin-bottom:10px;">🔍 Location health <span style="font-weight:400;font-size:11px;color:#9db0a3;">· read-only</span></div>' +
+      '<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;background:#1E2B23;border:1px solid #3c4d42;border-radius:8px;padding:11px;margin:0;">' + escapeHtml(txt) + '</pre>' +
+      '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        '<button id="locHealthCopy" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">📋 Copy report</button>' +
+        '<button id="locHealthClose" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Close</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.querySelector('#locHealthClose').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('#locHealthCopy').addEventListener('click', function(){
+      var btn = this;
+      var done = function(){ btn.textContent = '✓ Copied — paste it to me'; };
+      if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done, function(){ btn.textContent = '(copy failed — select the text above)'; }); }
+      else { try{ var ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done(); }catch(e){ btn.textContent='(copy failed — select the text above)'; } }
+    });
+  }
+  document.getElementById('galleryDiagnoseBtn').addEventListener('click', diagnoseLocations);
 
   // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
   // Every photo the AI tagged as non-game is a cleanup candidate — empty frames AND humans,
