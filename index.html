@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 136</div>
+    <div id="buildBadge">BUILD 137</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9968,6 +9968,7 @@
         timestamp: photoRecord.timestamp,
         timestampSource: photoRecord.timestampSource,
         usedFallbackDate: !!photoRecord.usedFallbackDate,
+        contentHash: photoRecord.contentHash || null, // for duplicate-import detection
         matchedSiteId: photoRecord.matchedSiteId || null,
         matchedSiteName: photoRecord.matchedSiteName || null,
         storagePath: storagePath,
@@ -10461,6 +10462,19 @@
     closeImportLocPicker(true);
   });
 
+  // SHA-256 hex of a blob's bytes — the exact-content fingerprint for duplicate-import detection.
+  // Returns null if the browser blocks crypto.subtle (e.g. an insecure context); callers then fall
+  // back to the camera+time+filename check, so dedup degrades gracefully rather than breaking.
+  async function sha256Hex(blob){
+    try{
+      if (!crypto || !crypto.subtle || !blob || !blob.arrayBuffer) return null;
+      var buf = await blob.arrayBuffer();
+      var digest = await crypto.subtle.digest('SHA-256', buf);
+      var arr = Array.prototype.slice.call(new Uint8Array(digest));
+      return arr.map(function(b){ return ('0' + b.toString(16)).slice(-2); }).join('');
+    }catch(e){ return null; }
+  }
+
   // Records a lightweight "coasting" deployment so FUTURE imports from this camera auto-match on
   // their own — locate once, coast after. No-op if an existing deployment already covers the
   // batch's earliest photo, so a camera parked at one spot all season never stacks duplicates.
@@ -10557,7 +10571,15 @@
       }
     }
 
-    var results = [];
+    // Duplicate guard: skip any photo already in the library — matched by exact image bytes (a
+    // re-imported Reveal export) OR camera+capture-time+filename (works on older photos that have
+    // no stored hash). Makes haphazard re-imports safe, and also de-dupes WITHIN this batch.
+    var seenHash = {}, seenMeta = {};
+    importedPhotos.forEach(function(p){
+      if (p.contentHash) seenHash[p.contentHash] = true;
+      seenMeta[(p.cameraId||'') + '|' + (p.timestamp||'') + '|' + (p.filename||'')] = true;
+    });
+    var results = [], skipped = 0;
     for (var k=0; k<imageJobs.length; k++){
       progress.textContent = 'Processing ' + (k+1) + ' of ' + imageJobs.length + '…';
       var job = imageJobs[k];
@@ -10574,6 +10596,12 @@
       }
       var usedFallback = false;
       if (!timestamp){ timestamp = job.fallbackDate; usedFallback = true; timestampSource = 'file date'; }
+      // Skip if we already have this exact photo (see the duplicate guard above).
+      var contentHash = await sha256Hex(job.blob);
+      var metaKey = cameraId + '|' + timestamp + '|' + job.name;
+      if ((contentHash && seenHash[contentHash]) || seenMeta[metaKey]){ skipped++; continue; }
+      if (contentHash) seenHash[contentHash] = true;
+      seenMeta[metaKey] = true;
       var matchedSite = manualSite || findSiteForCameraAtTime(cameraId, timestamp);
       var objectUrl = URL.createObjectURL(job.blob);
       var record = {
@@ -10583,6 +10611,7 @@
         timestamp: timestamp,
         usedFallbackDate: usedFallback,
         timestampSource: timestampSource, // 'filename' | 'exif' | 'file date'
+        contentHash: contentHash,
         matchedSiteId: matchedSite ? matchedSite.id : null,
         matchedSiteName: matchedSite ? matchedSite.name : null,
         objectUrl: objectUrl,
@@ -10601,7 +10630,8 @@
     }
     if (createdNewSite) renderAll(); // show the new camera-location pin on the map
 
-    progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed.';
+    var dupNote = skipped ? (' · skipped ' + skipped + ' duplicate' + (skipped===1?'':'s') + ' already imported') : '';
+    progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed' + dupNote + '.';
     results.sort(function(a,b){ return a.timestamp - b.timestamp; });
     var grid = document.getElementById('importResultsGrid');
     grid.innerHTML = '';
@@ -10631,7 +10661,7 @@
       enrichPhotoDocs(newDocs, function(done, total){
         progress.textContent = 'Done — ' + results.length + ' processed. Adding conditions ' + done + '/' + total + '…';
       }).then(function(){
-        progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed, conditions added.';
+        progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed' + dupNote + ', conditions added.';
       });
     }
 
