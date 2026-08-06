@@ -1222,14 +1222,14 @@
     overflow-y:auto;
     margin-top:10px;
   }
-  #photoGalleryModal{ width:680px; max-width:96vw; }
+  #photoGalleryModal{ width:min(1200px, 96vw); max-width:96vw; }
   .photo-gallery-filters{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
   .photo-gallery-filters select{ flex:1 1 30%; min-width:110px; }
   #galleryGrid{
     display:grid;
     grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
     gap:10px;
-    max-height:62vh;
+    max-height:70vh;
     overflow-y:auto;
   }
   #galleryGrid .import-photo-card{ cursor:pointer; }
@@ -1728,7 +1728,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 130</div>
+    <div id="buildBadge">BUILD 131</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1817,6 +1817,15 @@
         </div>
       </div>
       <div id="deployGpsNote" style="font-size:11px;color:var(--text-dim);margin-bottom:10px;"></div>
+      <div style="margin-bottom:10px;">
+        <label style="display:block;font-size:11px;color:var(--text-dim);margin-bottom:4px;">Where is it?</label>
+        <select id="deployPlaceSelect" style="width:100%;padding:9px;border-radius:7px;border:1px solid var(--line);background:var(--panel-alt);color:var(--text);font-size:13px;">
+          <option value="">➕ New spot — drop the pin below</option>
+        </select>
+      </div>
+      <div id="deployNewSpotName" style="margin-bottom:10px;">
+        <input type="text" id="deployPlaceName" placeholder="Name this spot — e.g. Oak Bottom, Creek Crossing" style="width:100%;padding:9px;border-radius:7px;border:1px solid var(--line);background:var(--panel-alt);color:var(--text);font-size:13px;box-sizing:border-box;" />
+      </div>
       <div id="deployMiniMapWrap">
         <div id="deployMiniMap"></div>
         <div id="deployCrosshair">
@@ -1865,7 +1874,7 @@
       <div id="importLocDragHint">Use road names to find the area, then pan/zoom so the crosshair sits on the camera's real spot</div>
       <div class="form-pop" style="margin-bottom:10px;">
         <label>Name this camera site <em style="color:var(--text-dim);font-style:normal;">— saved for future reference &amp; reuse</em></label>
-        <input type="text" id="importLocName" placeholder="e.g. Creek Cam" />
+        <input type="text" id="importLocName" placeholder="Name the place — e.g. Oak Bottom, Creek Crossing" />
       </div>
       <button class="btn-primary" id="importLocSaveBtn" style="width:100%;margin-bottom:8px;">Use This Location</button>
       <button class="btn-ghost" id="importLocCancelBtn" style="width:100%;">Cancel</button>
@@ -3837,6 +3846,14 @@
     count.textContent = list.length + ' of ' + importedPhotos.length + ' photo' + (importedPhotos.length===1?'':'s');
     list.forEach(function(p){ grid.appendChild(buildPhotoCardEl(p, list, false)); });
   }
+  // Resolve a location's CURRENT name from its site id — a photo stores the name it had at import,
+  // but a place can be renamed, and each viewer may have their own nickname. Resolving live means a
+  // rename updates every photo at that spot instantly. Safe now that places are IMMUTABLE (a place
+  // is never dragged to a new spot), so a photo's site id always points to its true location.
+  function siteNameById(id, fallback){
+    if (id){ var s = sites.filter(function(x){ return x.id === id; })[0]; if (s) return s.name; }
+    return fallback || null;
+  }
   // ---- Shared gallery card builders (used by the flat, visit, and by-location renders) ----
   // hideLoc drops the per-card location line when the card already sits under a location header.
   function buildPhotoCardEl(p, navList, hideLoc){
@@ -3851,7 +3868,7 @@
     card.innerHTML =
       '<img src="' + src + '" alt="' + escapeHtml(p.filename||'') + '">' +
       '<div class="meta">' +
-        (hideLoc ? '' : '<div class="loc' + (p.matchedSiteName ? '' : ' unmatched') + '">📍 ' + (p.matchedSiteName ? escapeHtml(p.matchedSiteName) : 'No location yet') + '</div>') +
+        (hideLoc ? '' : (function(){ var ln = siteNameById(p.matchedSiteId, p.matchedSiteName); return '<div class="loc' + (ln ? '' : ' unmatched') + '">📍 ' + (ln ? escapeHtml(ln) : 'No location yet') + '</div>'; })()) +
         (cam ? '<div class="cam">📷 ' + escapeHtml(cam.name) + '</div>' : '') +
         '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
         '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(p) + '</div>' +
@@ -3882,7 +3899,7 @@
       '<img src="' + src + '" alt="">' +
       '<span class="visit-count">' + v.count + ' 📷</span>' +
       '<div class="meta">' +
-        (hideLoc ? '' : '<div class="site' + (v.siteName ? '' : ' unmatched') + '">' + (v.siteName ? escapeHtml(v.siteName) : 'No site match') + '</div>') +
+        (hideLoc ? '' : (function(){ var ln = siteNameById(v.siteId, v.siteName); return '<div class="site' + (ln ? '' : ' unmatched') + '">' + (ln ? escapeHtml(ln) : 'No location yet') + '</div>'; })()) +
         '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
         '<div class="sp' + (v.isBuck ? ' buck' : '') + '">' + escapeHtml(spText) + '</div>' +
         '<div class="dur">' + escapeHtml(durHtml) + '</div>' +
@@ -3937,7 +3954,8 @@
       } else {
         sitePhotos.forEach(function(p){ row.appendChild(buildPhotoCardEl(p, sitePhotos, true)); });
       }
-      hdr.innerHTML = '<span class="pin">📍</span><span class="sname">' + (g.name ? escapeHtml(g.name) : 'No location yet') + '</span>' +
+      var liveName = siteNameById(g.id, g.name);
+      hdr.innerHTML = '<span class="pin">📍</span><span class="sname">' + (liveName ? escapeHtml(liveName) : 'No location yet') + '</span>' +
         '<span class="lmeta">· ' + meta + (camNames.length ? (' · 📷 ' + escapeHtml(camNames.join(', '))) : '') + '</span>';
       section.appendChild(hdr);
       section.appendChild(row);
@@ -5379,7 +5397,8 @@
       if (cam){
         var makeModel = [cam.make, cam.model].filter(Boolean).join(' ');
         camInfo =
-          (makeModel ? '<div class="notes"><strong>' + escapeHtml(makeModel) + '</strong></div>' : '') +
+          '<div class="notes">📷 <strong>' + escapeHtml(cam.name) + '</strong> is here now</div>' +
+          (makeModel ? '<div class="notes">' + escapeHtml(makeModel) + '</div>' : '') +
           (cam.notes ? '<div class="notes">' + escapeHtml(cam.notes) + '</div>' : '') +
           (cam.lastDeployedAt ? '<div class="coords">Deployed ' + relTime(cam.lastDeployedAt) + '</div>' : '');
       }
@@ -5395,6 +5414,7 @@
     } else {
       var shareLabel = sharedCount ? ('🤝 Shared (' + sharedCount + ')') : '🤝 Share';
       actionRow = '<div class="row">' +
+        '<button class="btn-ghost" data-act="rename" data-id="'+s.id+'">✏️ Rename</button>' +
         (myGroups.length ? '<button class="btn-ghost" data-act="share" data-id="'+s.id+'">'+shareLabel+'</button>' : '') +
         '<button class="btn-ghost" data-act="delete" data-id="'+s.id+'">Delete</button>' +
       '</div>';
@@ -5410,9 +5430,26 @@
       '</div>';
   }
 
+  // Rename a location (place). Places get their OWN names, independent of whichever camera sits
+  // there — this is how a spot ("Oak Bottom") stops reading like a camera ("Camera 2"). The gallery
+  // resolves names live (siteNameById), so every photo pinned to this place updates at once.
+  async function renameSitePrompt(id){
+    var s = sites.filter(function(x){ return x.id === id; })[0];
+    if (!s) return;
+    var name = (window.prompt('Name this location (the PLACE, e.g. Oak Bottom or Creek Crossing):', s.name || '') || '').trim();
+    if (!name || name === s.name) return;
+    s.name = name;
+    try{ await saveSite(s); }catch(e){ console.error('Outdoor Companion: failed to rename location', e); }
+    map.closePopup();
+    renderAll();
+    if (typeof renderGallery === 'function') renderGallery();
+    showToast('Location renamed to “' + name + '”');
+  }
   function bindPopupActions(popup, id){
     var node = popup.getElement();
     if (!node) return;
+    var renameBtn = node.querySelector('[data-act="rename"]');
+    if (renameBtn) renameBtn.addEventListener('click', function(){ renameSitePrompt(id); });
     var delBtn = node.querySelector('[data-act="delete"]');
     if (delBtn) delBtn.addEventListener('click', function(){ removeSite(id); map.closePopup(); });
     var shareBtn = node.querySelector('[data-act="share"]');
@@ -9362,8 +9399,9 @@
   // location indefinitely, which is misleading — the pin would still sit on the map
   // even though the camera is sitting in a truck. This closes that gap: marks the
   // current deployment as ended (permanently preserving when it was picked up,
-  // alongside when it was originally deployed) and removes the live site pin, while
-  // leaving the camera fully ready to redeploy whenever its next spot is ready.
+  // alongside when it was originally deployed) and frees the camera to redeploy.
+  // The PLACE is KEPT, never deleted — a place is permanent (photos are pinned to it
+  // forever), and it stays on the map as a known spot ready to be reused.
   async function pickUpCamera(cam){
     var currentDeployment = deployments
       .filter(function(d){ return d.cameraId === cam.id && !d.pickedUpAt; })
@@ -9371,9 +9409,6 @@
     if (currentDeployment){
       currentDeployment.pickedUpAt = Date.now();
       try{ await saveDeployment(currentDeployment); }catch(e){ console.error('Outdoor Companion: failed to save deployment pickup', e); }
-    }
-    if (cam.currentSiteId){
-      await removeSite(cam.currentSiteId);
     }
     cam.currentSiteId = null;
     try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: failed to save camera after pickup', e); }
@@ -10171,12 +10206,9 @@
   });
 
   function openImportLocPicker(){
-    // Prefill the name from the chosen camera; anchor the map on the main map's current view
-    // (importing usually happens at home, so the phone's GPS isn't the right starting point).
-    var camSel = document.getElementById('importCameraSelect');
-    var cam = cameras.filter(function(c){ return c.id === camSel.value; })[0];
-    var nameInput = document.getElementById('importLocName');
-    if (!nameInput.value && cam) nameInput.value = cam.name;
+    // Anchor the map on the main map's current view (importing usually happens at home, so the
+    // phone's GPS isn't the right starting point). We no longer prefill the camera's name — a
+    // location should be named for the PLACE (the input's placeholder guides that), not the camera.
     importLocSelectedPropertyId = null;
     populateImportLocPropSelect();
     var c = map.getCenter();
@@ -10754,11 +10786,10 @@
     cam.model = document.getElementById('editCamModel').value.trim();
     cam.notes = document.getElementById('editCamNotes').value.trim();
     try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: failed to save camera details', e); }
-    // If this camera is already deployed, keep its map pin's name in sync too.
-    if (cam.currentSiteId){
-      var site = sites.filter(function(s){ return s.id === cam.currentSiteId; })[0];
-      if (site){ site.name = cam.name; try{ await saveSite(site); }catch(e){} renderAll(); }
-    }
+    // Refresh the map so a deployed camera's popup shows the new make/model/notes. We intentionally
+    // do NOT rename its place — a place keeps its own name (it's named for WHERE it is, not which
+    // camera happens to be sitting there), so your place names never get overwritten.
+    renderAll();
     document.getElementById('editCamModalBackdrop').classList.remove('show');
 
     // Land on the camera list so the save is immediately visible — no hunting for the menu.
@@ -10806,9 +10837,28 @@
     });
   }
 
+  // New-spot vs reuse-an-existing-place: hide the pin map + name field when reusing a place
+  // (a place is permanent, so its coords/name already exist and must NOT be overwritten).
+  function updateDeployPlaceMode(){
+    var reusing = !!document.getElementById('deployPlaceSelect').value;
+    document.getElementById('deployNewSpotName').style.display = reusing ? 'none' : 'block';
+    document.getElementById('deployMiniMapWrap').style.display = reusing ? 'none' : 'block';
+    var hint = document.getElementById('deployDragHint'); if (hint) hint.style.display = reusing ? 'none' : 'block';
+  }
   function openDeployReview(cam){
     pendingDeployCam = cam;
     document.getElementById('deployCamName').textContent = cam.name;
+    // Populate the reuse-an-existing-place list (places are permanent + reusable across cameras —
+    // e.g. Camera 5 dropping onto the same spot Camera 2 left). Default is a fresh new spot.
+    var placeSel = document.getElementById('deployPlaceSelect');
+    var opts = ['<option value="">➕ New spot — drop the pin below</option>'];
+    sites.filter(function(s){ return s.type === 'camera'; })
+      .sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
+      .forEach(function(s){ opts.push('<option value="'+s.id+'">📍 '+escapeHtml(s.name||'(unnamed)')+'</option>'); });
+    placeSel.innerHTML = opts.join('');
+    placeSel.value = '';
+    document.getElementById('deployPlaceName').value = '';
+    updateDeployPlaceMode();
     var pos = lastKnownPos;
     if (pos){
       deployPos = {lat: pos.lat, lng: pos.lng, accuracy: pos.accuracy};
@@ -10841,6 +10891,7 @@
   document.getElementById('deployModalBackdrop').addEventListener('click', function(e){
     if (e.target === this){ this.classList.remove('show'); pendingDeployCam = null; }
   });
+  document.getElementById('deployPlaceSelect').addEventListener('change', updateDeployPlaceMode);
 
   document.getElementById('deploySaveBtn').addEventListener('click', async function(){
     if (!pendingDeployCam) return;
@@ -10849,39 +10900,49 @@
     // falling back to raw GPS/map-center if the person never touched it.
     var pos = deployPos || lastKnownPos || (function(){ var c = map.getCenter(); return {lat:c.lat, lng:c.lng, accuracy:null}; })();
 
+    // NEVER drag an existing place to a new spot — that would rewrite the location of every photo
+    // taken there (the Reveal bug this app exists to avoid). A place is permanent and reusable.
+    // Redeploying either lands on a place the user PICKS (reuse) or creates a BRAND-NEW place;
+    // the old place stays exactly where it was, keeping its history.
+    var reuseId = document.getElementById('deployPlaceSelect').value;
     var site;
-    if (cam.currentSiteId && sites.some(function(s){ return s.id === cam.currentSiteId; })){
-      // Camera already has a site — move it to the new deployment location
-      site = sites.filter(function(s){ return s.id === cam.currentSiteId; })[0];
-      site.lat = pos.lat;
-      site.lng = pos.lng;
-      site.notes = 'Trail camera · redeployed ' + new Date().toLocaleDateString();
-      site.lastActivityAt = Date.now();
+    if (reuseId && sites.some(function(s){ return s.id === reuseId; })){
+      site = sites.filter(function(s){ return s.id === reuseId; })[0]; // reuse an existing place, coords + name untouched
     } else {
+      var placeName = (document.getElementById('deployPlaceName').value || '').trim();
       site = {
         id: uid(),
-        name: cam.name,
+        name: placeName || ('New spot · ' + new Date().toLocaleDateString(undefined, {month:'short', day:'numeric'})),
         type: 'camera',
-        notes: 'Deployed via QR scan',
+        notes: 'Deployed ' + new Date().toLocaleDateString(),
         lat: pos.lat,
         lng: pos.lng,
         createdAt: Date.now(),
         lastActivityAt: Date.now()
       };
       sites.push(site);
-      cam.currentSiteId = site.id;
     }
+    // Close the camera's current OPEN deployment when it's moving to a DIFFERENT place, so each
+    // deployment is a clean time-window and a photo pins to the place covering its capture time.
+    var prevOpen = deployments.filter(function(d){ return d.cameraId === cam.id && !d.pickedUpAt; })
+      .sort(function(a,b){ return b.deployedAt - a.deployedAt; })[0];
+    if (prevOpen && prevOpen.siteId !== site.id){
+      prevOpen.pickedUpAt = Date.now();
+      try{ await saveDeployment(prevOpen); }catch(e){ console.error('Outdoor Companion: failed to close prior deployment', e); }
+    }
+    site.lastActivityAt = Date.now();
+    cam.currentSiteId = site.id;
     cam.lastDeployedAt = Date.now();
 
     var dep = {
       id: uid(),
       cameraId: cam.id,
       siteId: site.id,
-      lat: pos.lat,
-      lng: pos.lng,
+      lat: site.lat,
+      lng: site.lng,
       deployedAt: Date.now(),
       moonPhase: getMoonPhase(new Date()),
-      solunarPeriod: classifyEventSolunarPeriod(new Date(), pos.lat, pos.lng),
+      solunarPeriod: classifyEventSolunarPeriod(new Date(), site.lat, site.lng),
       weather: null,
       weatherStatus: 'pending'
     };
@@ -10894,7 +10955,7 @@
     }catch(e){ console.error('Outdoor Companion: failed to save deployment', e); }
 
     // Same non-blocking pattern as Field Observations — never delays the deploy flow.
-    fetchCurrentWeather(pos.lat, pos.lng).then(async function(weatherResult){
+    fetchCurrentWeather(site.lat, site.lng).then(async function(weatherResult){
       dep.weather = weatherResult;
       dep.weatherStatus = weatherResult ? 'ok' : 'unavailable';
       try{ await saveDeployment(dep); }catch(e){ console.error('Outdoor Companion: failed to save weather onto deployment', e); }
