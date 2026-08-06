@@ -1714,7 +1714,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 127</div>
+    <div id="buildBadge">BUILD 128</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3646,6 +3646,25 @@
   // from data already on each photo, so it applies retroactively to everything.
   var galleryGroupVisits = false;
   var galleryVisitGapMin = 30; // tunable quiet-period threshold (minutes)
+  // Species that are legitimate AI tags but are NOT game — humans, vehicles, and domestic/hunting
+  // dogs (common in dog-hunting country). These get cleaned up like empty frames and are never
+  // counted as detections on the map or in analytics. Lowercase; matched exactly.
+  var NON_WILDLIFE_SPECIES = ['none','human','person','people','vehicle','dog','dogs','domestic dog','hound','hounds'];
+  // Interprets the AI's output (never touches the AI itself, which is off-limits) to decide whether
+  // a photo shows real game. A frame is wildlife if ANY species it reports is game — so a dog AND a
+  // deer in the same frame still counts as a deer. hasAnimal:false (empty) is not wildlife; a
+  // genuine animal the model couldn't name (no species at all) is kept, to be safe.
+  function aiIsWildlife(ai){
+    if (!ai || !ai.hasAnimal) return false;
+    var names = [];
+    if (ai.primarySpecies) names.push(ai.primarySpecies);
+    if (Array.isArray(ai.allSpecies)){ for (var i=0;i<ai.allSpecies.length;i++){ if (ai.allSpecies[i]) names.push(ai.allSpecies[i]); } }
+    if (!names.length) return true; // hasAnimal but unnamed → assume a real animal, keep it
+    for (var j=0;j<names.length;j++){
+      if (NON_WILDLIFE_SPECIES.indexOf(names[j].toLowerCase()) === -1) return true; // a real-game species is present
+    }
+    return false; // every reported species is non-game (human/vehicle/dog/none)
+  }
   function visitSpeciesOf(p){
     if (p.ai && p.ai.hasAnimal) return p.ai.primarySpecies || 'animal';
     if (p.ai && !p.ai.hasAnimal) return 'empty';
@@ -3673,7 +3692,10 @@
       // Location grain is the SITE (a spot can hold more than one camera, and it's
       // one visit to the spot); fall back to the camera, then a catch-all bucket.
       var loc = p.matchedSiteId || (p.cameraId ? 'cam:' + p.cameraId : 'unknown');
-      var k = loc + '|' + visitSpeciesOf(p);
+      // A buck rides in his OWN visit, never merged into a doe group — so a tagged buck is
+      // always counted as his own instance. The quiet-period grouping below still runs INSIDE
+      // that buck group, so 10 frames of one buck over a few minutes = 1 visit, not 10.
+      var k = loc + '|' + visitSpeciesOf(p) + ((p.ai && p.ai.isBuck) ? '|buck' : '');
       (groups[k] = groups[k] || []).push(p);
     });
     var visits = [];
@@ -3720,7 +3742,7 @@
     if (siteF === '__none__') list = list.filter(function(p){ return !p.matchedSiteId; });
     else if (siteF) list = list.filter(function(p){ return p.matchedSiteId === siteF; });
     if (spF === '__untagged__') list = list.filter(function(p){ return !p.ai; });
-    else if (spF === '__animal__') list = list.filter(function(p){ return p.ai && p.ai.hasAnimal; });
+    else if (spF === '__animal__') list = list.filter(function(p){ return aiIsWildlife(p.ai); });
     else if (spF === '__buck__') list = list.filter(function(p){ return p.ai && p.ai.isBuck; });
     else if (spF === '__empty__') list = list.filter(function(p){ return p.ai && !p.ai.hasAnimal; });
     else if (spF) list = list.filter(function(p){
@@ -4320,18 +4342,19 @@
   document.getElementById('galleryAssignLocBtn').addEventListener('click', function(){ openAssignLocPicker(); });
 
   // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
-  // Every photo the AI tagged hasAnimal:false is a cleanup candidate. We never
-  // auto-delete — the user reviews a grid (all pre-selected) and unchecks any real
-  // animal the AI missed before a final confirm. Frees Storage + Firestore for good.
+  // Every photo the AI tagged as non-game is a cleanup candidate — empty frames AND humans,
+  // vehicles, and dogs (see aiIsWildlife). We never auto-delete — the user reviews a grid (all
+  // pre-selected) and unchecks any real animal the AI missed before a final confirm. Frees
+  // Storage + Firestore for good.
   function galleryEmptiesInView(){
-    return galleryPhotoList().filter(function(p){ return p.ai && !p.ai.hasAnimal; });
+    return galleryPhotoList().filter(function(p){ return p.ai && !aiIsWildlife(p.ai); });
   }
   function refreshCleanupButton(){
     var btn = document.getElementById('galleryCleanupBtn');
     if (!btn) return;
     var n = galleryEmptiesInView().length;
     btn.style.display = n === 0 ? 'none' : 'block';
-    btn.textContent = '🧹 Clean up empty frames (' + n + ')';
+    btn.textContent = '🧹 Clean up non-animal frames (' + n + ')';
   }
   function updateCleanupDeleteBtn(){
     var n = document.querySelectorAll('#cleanupGrid .cleanup-cb:checked').length;
@@ -4347,19 +4370,22 @@
     grid.innerHTML = '';
     if (!list.length){
       emptyMsg.style.display = 'block';
-      emptyMsg.textContent = 'No empty frames in the current view. Tag some photos with AI first, or widen your filters.';
+      emptyMsg.textContent = 'No empty or non-animal frames in the current view. Tag some photos with AI first, or widen your filters.';
     } else {
       emptyMsg.style.display = 'none';
       grid.innerHTML = list.map(function(p){
         var src = p.thumb || p.downloadURL || '';
         var dateStr = p.timestamp ? new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : '';
         var conf = (p.ai && p.ai.confidence) ? (escapeHtml(p.ai.confidence) + ' confidence') : '';
+        // Why this frame is flagged — 'empty', or the non-game species (human / dog / vehicle) —
+        // so the reviewer can spot a real animal the AI mislabeled before deleting.
+        var reason = (p.ai && p.ai.hasAnimal) ? (p.ai.primarySpecies || 'non-animal') : 'empty';
         return '<label class="cleanup-card import-photo-card">' +
           '<input type="checkbox" class="cleanup-cb" data-photo-id="' + p.id + '" checked>' +
           '<span class="keep-badge">✓ keep</span>' +
           '<img src="' + src + '" alt="" loading="lazy">' +
           '<div class="meta"><div class="dt">' + escapeHtml(dateStr) + '</div>' +
-          (conf ? '<div class="cond">' + conf + '</div>' : '') + '</div>' +
+          '<div class="cond">' + escapeHtml(reason) + (conf ? ' · ' + conf : '') + '</div></div>' +
         '</label>';
       }).join('');
       Array.prototype.forEach.call(grid.querySelectorAll('.cleanup-cb'), function(cb){
@@ -8853,7 +8879,7 @@
 
       // Species (from whatever the AI has tagged)
       var speciesSet = {};
-      importedPhotos.forEach(function(p){ if (p.ai && p.ai.hasAnimal && p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true; });
+      importedPhotos.forEach(function(p){ if (aiIsWildlife(p.ai) && p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true; });
       var speciesNames = Object.keys(speciesSet).sort();
       if (speciesNames.length){
         var spSelect = document.createElement('select');
@@ -8968,8 +8994,9 @@
     // Trail-cam photos are hunting-only; fishing always uses logged catches.
     var src = (activeModule === 'fishing') ? 'sightings' : analyticsSource;
     if (src === 'photos' || src === 'both'){
-      // Keep animals + not-yet-analyzed photos; drop only AI-confirmed empties.
-      var animalPhotos = importedPhotos.filter(function(p){ return !(p.ai && p.ai.hasAnimal === false); });
+      // Keep genuine wildlife + not-yet-analyzed photos; drop AI-confirmed empties AND non-game
+      // (humans, vehicles, dogs) so they never inflate detection counts on the map or in charts.
+      var animalPhotos = importedPhotos.filter(function(p){ return !p.ai || aiIsWildlife(p.ai); });
       var visits = computeVisits(animalPhotos, (galleryVisitGapMin || 30) * 60000);
       for (var i=0;i<visits.length;i++){ events.push(photoVisitToEvent(visits[i])); }
     }
@@ -9020,16 +9047,16 @@
         if (analyticsPropertyId && analyticsSitePropertyId(pp.matchedSiteId) !== analyticsPropertyId) return false;
         if (analyticsSpecies && !(pp.ai && pp.ai.primarySpecies === analyticsSpecies)) return false;
         if (analyticsBuckClass === 'Buck' && !(pp.ai && pp.ai.isBuck)) return false;
-        if (analyticsBuckClass === 'Antlerless / Other' && !(pp.ai && pp.ai.hasAnimal && !pp.ai.isBuck)) return false;
+        if (analyticsBuckClass === 'Antlerless / Other' && !(aiIsWildlife(pp.ai) && !pp.ai.isBuck)) return false;
         if (analyticsBuckProfileId && pp.buckProfileId !== analyticsBuckProfileId) return false;
         return true;
       });
-      var emptyCount = photosInView.filter(function(pp){ return pp.ai && pp.ai.hasAnimal === false; }).length;
+      var emptyCount = photosInView.filter(function(pp){ return pp.ai && !aiIsWildlife(pp.ai); }).length;
       var photoDetections = relevantObs.filter(function(o){ return o.__source === 'photo'; }).length;
       if (photosInView.length){
         header.innerHTML += '<div class="analytics-source-note" style="font-size:11px;color:var(--text-dim);margin-top:3px;">' +
           photoDetections + ' photo detection' + (photoDetections===1?'':'s') + ' — from ' + photosInView.length + ' photo' + (photosInView.length===1?'':'s') +
-          ', bursts grouped into visits' + (emptyCount ? (', ' + emptyCount + ' empt' + (emptyCount===1?'y':'ies') + ' excluded') : '') + '</div>';
+          ', bursts grouped into visits' + (emptyCount ? (', ' + emptyCount + ' non-animal frame' + (emptyCount===1?'':'s') + ' excluded') : '') + '</div>';
       }
     }
     if (total < 15){
