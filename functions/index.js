@@ -53,6 +53,41 @@ const OUTPUT_SCHEMA = {
       description:
         "If a buck is present, a short description of the rack (e.g. '8-point, wide spread, good mass'); otherwise an empty string.",
     },
+    antler: {
+      type: "object",
+      additionalProperties: false,
+      description:
+        "Structured rack detail for identifying an INDIVIDUAL buck across photos. Fill only when a clearly antlered buck is present; otherwise use 0 / 'unknown' / empty.",
+      properties: {
+        pointsLeft: { type: "integer", description: "Scorable points on the buck's LEFT antler (0 if none/unknown)." },
+        pointsRight: { type: "integer", description: "Scorable points on the buck's RIGHT antler (0 if none/unknown)." },
+        totalPoints: { type: "integer", description: "Total scorable points (0 if none/unknown)." },
+        spreadClass: {
+          type: "string",
+          enum: ["unknown", "narrow", "average", "wide", "very-wide"],
+          description:
+            "Inside spread vs the ears (ear tip-to-tip ~16-18 in on a whitetail): narrow=inside the ears, average=about ear width, wide=beyond the ears, very-wide=well beyond.",
+        },
+        mass: { type: "string", enum: ["unknown", "light", "average", "heavy"], description: "Antler/beam mass (thickness)." },
+        features: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Distinctive traits that FINGERPRINT this buck: e.g. 'drop tine right', 'kicker off right base', 'split G2 left', 'sticker points', 'broken left main beam', 'palmated brow', 'strong asymmetry'. Empty array if none notable.",
+        },
+        signature: {
+          type: "string",
+          description: "One-line human-readable rack summary, e.g. 'wide 5x4, split left G2, heavy mass'. Empty string if not a buck.",
+        },
+      },
+      required: ["pointsLeft", "pointsRight", "totalPoints", "spreadClass", "mass", "features", "signature"],
+    },
+    bodyClass: {
+      type: "string",
+      enum: ["unknown", "young", "mature", "old"],
+      description:
+        "Rough age/body class for a DEER from body size and build (young~1.5yr, mature~2.5yr, old~3.5yr+). 'unknown' if not a deer or can't tell. Helps identify a buck across seasons when antlers change or are shed.",
+    },
     notes: {
       type: "string",
       description: "Brief free-text observation (behavior, direction, time-of-day cues, anything notable).",
@@ -66,6 +101,8 @@ const OUTPUT_SCHEMA = {
     "count",
     "isBuck",
     "antlerNotes",
+    "antler",
+    "bodyClass",
     "notes",
     "confidence",
   ],
@@ -76,6 +113,12 @@ const SYSTEM_PROMPT =
   "These are often taken at night in infrared/black-and-white, sometimes with the animal far from the " +
   "camera, partially in frame, or motion-blurred. Determine whether an animal is present, identify the " +
   "species, count the individuals, and for deer note sex and (for bucks) antler characteristics. " +
+  "When a clearly antlered buck is present, fill the structured 'antler' object precisely — points per " +
+  "side and total, spread relative to the ears, mass, and especially any DISTINCTIVE FINGERPRINT features " +
+  "(drop tines, kickers, split points, stickers, broken beams, palmation, strong asymmetry) plus a one-line " +
+  "signature — because these are what let us recognize the SAME individual buck across different photos. " +
+  "For any deer, also give a rough body/age class. Use 0 / 'unknown' / empty for antler fields when a buck " +
+  "isn't clearly present or you genuinely can't tell — never guess antler detail you cannot see. " +
   "Be honest about uncertainty via the confidence field, and when genuinely unsure whether something is " +
   "an animal, lean toward flagging a possible animal rather than calling the frame empty — a missed animal " +
   "is worse than a false alarm. Respond with the structured JSON only.";
