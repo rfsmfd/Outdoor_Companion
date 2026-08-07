@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 139</div>
+    <div id="buildBadge">BUILD 140</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3487,13 +3487,16 @@
       // map-reading is clean dots + names, and the camera icon just marks where a camera is now.
       if (cam){
         var numMatch = cam.name ? cam.name.match(/\d+/) : null;
-        var num = numMatch ? numMatch[0] : '';
+        // The lens shows the camera's NUMBER, or — for a non-numeric name (e.g. GardePro "FLCR"/
+        // "POND") — its first two letters, so a deployed camera is never a blank lens.
+        var lens = numMatch ? numMatch[0] : (cam.name ? cam.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() : '');
+        var lensFont = lens.length >= 2 ? 8 : 10;
         var flag =
           '<div class="place-cam-flag"><svg class="cam-svg" width="36" height="30" viewBox="0 0 36 30" aria-hidden="true">' +
             '<rect x="12" y="2" width="12" height="7" rx="2" fill="#FF6A13" stroke="#14201A" stroke-width="2"/>' +
             '<rect x="1.5" y="7" width="33" height="21" rx="4" fill="#FF6A13" stroke="#14201A" stroke-width="2"/>' +
             '<circle cx="18" cy="18.5" r="6.5" fill="#14201A"/>' +
-            '<text x="18" y="22" text-anchor="middle" fill="#FF6A13" font-size="10" font-weight="700" font-family="IBM Plex Mono,monospace">' + escapeHtml(num) + '</text>' +
+            '<text x="18" y="21.7" text-anchor="middle" fill="#FF6A13" font-size="' + lensFont + '" font-weight="700" font-family="IBM Plex Mono,monospace">' + escapeHtml(lens) + '</text>' +
           '</svg></div>';
         return L.divIcon({
           className: '',
