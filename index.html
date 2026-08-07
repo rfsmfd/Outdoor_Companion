@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 140</div>
+    <div id="buildBadge">BUILD 141</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4129,12 +4129,24 @@
     return badge + photoConfidenceChip(ai);
   }
   // Calls the tagPhoto Cloud Function on one photo and persists the result on its record.
+  // Retries with backoff — a large batch can transiently trip the AI service's per-minute rate
+  // limit; rather than fail the photo, we wait and retry a few times (the pauses also naturally
+  // pace the batch back under the limit) so a run rides through the throttle instead of choking.
+  var TAG_RETRY_DELAYS = [2000, 5000, 12000, 25000]; // ms; ~44s total across retries lets a per-minute window reset
   async function tagPhotoWithAI(doc){
     if (!cloudPhotosAvailable() || typeof firebase === 'undefined' || !firebase.functions){
       throw new Error('Sign in to use AI tagging.');
     }
     var callable = firebase.app().functions('us-east1').httpsCallable('tagPhoto');
-    var res = await callable({ photoId: doc.id });
+    var res, lastErr = null;
+    for (var attempt = 0; attempt <= TAG_RETRY_DELAYS.length; attempt++){
+      try{ res = await callable({ photoId: doc.id }); lastErr = null; break; }
+      catch(e){
+        lastErr = e;
+        if (attempt < TAG_RETRY_DELAYS.length){ await new Promise(function(r){ setTimeout(r, TAG_RETRY_DELAYS[attempt]); }); }
+      }
+    }
+    if (lastErr) throw lastErr;
     doc.ai = res.data || {};
     if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
     return doc.ai;
@@ -4786,9 +4798,10 @@
     var done = 0, failed = 0;
     // Tag several photos AT ONCE — each is still a full, independent AI analysis of that one image
     // (same model, same prompt, same depth); we just keep a few in flight so a big batch finishes
-    // in a fraction of the time. 5 concurrent is well under any rate limit and self-heals: any that
-    // fail just stay untagged, and re-running the button picks them up.
-    var CONCURRENCY = 5;
+    // faster. Kept modest (3) to stay gentle on the AI per-minute rate limit; tagPhotoWithAI also
+    // retries-with-backoff, so throttled photos ride through instead of failing. Self-heals: any
+    // that still fail stay untagged, and re-running the button picks them up.
+    var CONCURRENCY = 3;
     for (var start=0; start<list.length; start += CONCURRENCY){
       var chunk = list.slice(start, start + CONCURRENCY);
       await Promise.all(chunk.map(function(doc){
