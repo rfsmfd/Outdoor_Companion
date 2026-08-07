@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 138</div>
+    <div id="buildBadge">BUILD 139</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4781,12 +4781,18 @@
     if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nThis calls Claude once per photo (about half a cent each). You can keep using the app while it runs.')) return;
     btn.disabled = true;
     var done = 0, failed = 0;
-    for (var i=0; i<list.length; i++){
-      status.textContent = 'Analyzing ' + (i+1) + ' of ' + list.length + '…' + (failed ? ' (' + failed + ' failed)' : '');
-      try{ await tagPhotoWithAI(list[i]); }
-      catch(e){ failed++; }
-      done++;
-      renderGallery(); // badges appear as each one finishes
+    // Tag several photos AT ONCE — each is still a full, independent AI analysis of that one image
+    // (same model, same prompt, same depth); we just keep a few in flight so a big batch finishes
+    // in a fraction of the time. 5 concurrent is well under any rate limit and self-heals: any that
+    // fail just stay untagged, and re-running the button picks them up.
+    var CONCURRENCY = 5;
+    for (var start=0; start<list.length; start += CONCURRENCY){
+      var chunk = list.slice(start, start + CONCURRENCY);
+      await Promise.all(chunk.map(function(doc){
+        return tagPhotoWithAI(doc).then(function(){ done++; }, function(){ done++; failed++; });
+      }));
+      status.textContent = 'Analyzing ' + Math.min(done, list.length) + ' of ' + list.length + '…' + (failed ? ' (' + failed + ' failed)' : '');
+      renderGallery(); // badges appear as each group finishes
     }
     populateGalleryFilters(); // new species may now exist to filter by
     refreshTagAllButton();
