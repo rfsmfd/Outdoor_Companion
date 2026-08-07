@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 137</div>
+    <div id="buildBadge">BUILD 138</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9633,6 +9633,7 @@
     cam.currentSiteId = null;
     try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: failed to save camera after pickup', e); }
     renderCameraList();
+    renderAll(); // the place stays on the map, but its marker drops from a camera icon to a plain dot
     showToast(cam.name + ' marked as picked up');
   }
 
@@ -10577,7 +10578,10 @@
     var seenHash = {}, seenMeta = {};
     importedPhotos.forEach(function(p){
       if (p.contentHash) seenHash[p.contentHash] = true;
-      seenMeta[(p.cameraId||'') + '|' + (p.timestamp||'') + '|' + (p.filename||'')] = true;
+      // Only trust the meta-key when the timestamp is real (from filename/EXIF). A file-date
+      // fallback is the download time — many photos share it, so keying on it could wrongly skip
+      // a genuinely new photo (data loss). Fallback-dated photos are covered by contentHash instead.
+      if (!p.usedFallbackDate) seenMeta[(p.cameraId||'') + '|' + (p.timestamp||'') + '|' + (p.filename||'')] = true;
     });
     var results = [], skipped = 0;
     for (var k=0; k<imageJobs.length; k++){
@@ -10596,12 +10600,14 @@
       }
       var usedFallback = false;
       if (!timestamp){ timestamp = job.fallbackDate; usedFallback = true; timestampSource = 'file date'; }
-      // Skip if we already have this exact photo (see the duplicate guard above).
+      // Skip if we already have this exact photo (see the duplicate guard above). The meta-key is
+      // only used when the timestamp is reliable (filename/EXIF) — never on a file-date fallback,
+      // which could false-positive and drop a real photo. Exact-bytes (contentHash) covers the rest.
       var contentHash = await sha256Hex(job.blob);
-      var metaKey = cameraId + '|' + timestamp + '|' + job.name;
-      if ((contentHash && seenHash[contentHash]) || seenMeta[metaKey]){ skipped++; continue; }
+      var metaKey = (timestampSource === 'filename' || timestampSource === 'exif') ? (cameraId + '|' + timestamp + '|' + job.name) : null;
+      if ((contentHash && seenHash[contentHash]) || (metaKey && seenMeta[metaKey])){ skipped++; continue; }
       if (contentHash) seenHash[contentHash] = true;
-      seenMeta[metaKey] = true;
+      if (metaKey) seenMeta[metaKey] = true;
       var matchedSite = manualSite || findSiteForCameraAtTime(cameraId, timestamp);
       var objectUrl = URL.createObjectURL(job.blob);
       var record = {
