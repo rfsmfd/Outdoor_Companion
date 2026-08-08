@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 154</div>
+    <div id="buildBadge">BUILD 155</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4249,9 +4249,9 @@
     if (!doc) return;
     if (val === '__identify__'){ this.value = doc.buckProfileId || ''; identifyBuck(doc); return; }
     if (val === '__new__'){
-      var name = (window.prompt('Name this buck (e.g. Droptine 8):') || '').trim();
-      if (!name){ this.value = doc.buckProfileId || ''; return; }
-      var profile = { id: uid(), name: name, notes: '', createdAt: Date.now() };
+      var det = await promptBuckDetails();
+      if (!det){ this.value = doc.buckProfileId || ''; return; }
+      var profile = { id: uid(), name: det.name, notes: det.notes, propertyId: det.propertyId || null, createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       doc.buckProfileId = profile.id;
@@ -4284,6 +4284,47 @@
   function unlinkBuckFromPhoto(p, buckId){
     if (Array.isArray(p.buckProfileIds)) p.buckProfileIds = p.buckProfileIds.filter(function(x){ return x !== buckId; });
     if (p.buckProfileId === buckId) p.buckProfileId = (p.buckProfileIds && p.buckProfileIds.length) ? p.buckProfileIds[0] : null;
+  }
+  // Name + distinguishing-marks dialog used everywhere a buck is created. The marks (e.g. "missing
+  // left brow point, kicker off right base") are saved as the profile's notes, which already flow into
+  // the AI matcher's fingerprint (buildBuckCandidates) AND show on his folder to help you sort by eye.
+  function promptBuckDetails(defaults){
+    defaults = defaults || {};
+    return new Promise(function(resolve){
+      var back = document.createElement('div');
+      back.style.cssText = 'position:fixed;inset:0;z-index:100007;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+      var card = document.createElement('div');
+      card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:20px;max-width:430px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+      var __props = (typeof properties !== 'undefined' && properties) ? properties.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||''); }) : [];
+      var propField = __props.length ? (
+        '<label style="display:block;font-size:12px;color:#9db0a3;margin-bottom:4px;">Home farm / property <span style="opacity:.7;">— where he mainly lives (optional)</span></label>' +
+        '<select class="pbd-prop" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-bottom:16px;font-size:14px;font-family:inherit;">' +
+          '<option value="">— not set —</option>' +
+          __props.map(function(p){ return '<option value="' + escapeHtml(p.id) + '"' + (defaults.propertyId === p.id ? ' selected' : '') + '>' + escapeHtml(p.name || '(unnamed farm)') + '</option>'; }).join('') +
+        '</select>'
+      ) : '';
+      card.innerHTML =
+        '<div style="font-weight:700;font-size:15px;margin-bottom:14px;">🦌 ' + (defaults.title ? escapeHtml(defaults.title) : 'Name this buck') + '</div>' +
+        '<label style="display:block;font-size:12px;color:#9db0a3;margin-bottom:4px;">Name</label>' +
+        '<input class="pbd-name" type="text" placeholder="e.g. Droptine 8" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-bottom:14px;font-size:15px;font-family:inherit;">' +
+        '<label style="display:block;font-size:12px;color:#9db0a3;margin-bottom:4px;">Distinguishing marks <span style="opacity:.7;">— optional, helps you sort &amp; the AI find him</span></label>' +
+        '<textarea class="pbd-notes" rows="3" placeholder="e.g. missing left brow point · kicker off right base · split G2 · notched right ear" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-bottom:16px;font-size:14px;resize:vertical;font-family:inherit;line-height:1.45;"></textarea>' +
+        propField +
+        '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+          '<button class="pbd-cancel" style="padding:9px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
+          '<button class="pbd-save" style="padding:9px 18px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">Save buck</button>' +
+        '</div>';
+      back.appendChild(card); document.body.appendChild(back);
+      var nameI = card.querySelector('.pbd-name'), notesI = card.querySelector('.pbd-notes');
+      nameI.value = defaults.name || ''; notesI.value = defaults.notes || '';
+      function done(v){ if (back.parentNode) document.body.removeChild(back); resolve(v); }
+      function save(){ var nm = nameI.value.trim(); if (!nm){ nameI.focus(); return; } var ps = card.querySelector('.pbd-prop'); done({ name: nm, notes: notesI.value.trim(), propertyId: ps ? (ps.value || null) : null }); }
+      card.querySelector('.pbd-cancel').addEventListener('click', function(){ done(null); });
+      back.addEventListener('click', function(e){ if (e.target === back) done(null); });
+      card.querySelector('.pbd-save').addEventListener('click', save);
+      nameI.addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.preventDefault(); notesI.focus(); } });
+      setTimeout(function(){ nameI.focus(); }, 50);
+    });
   }
   // FREE "which buck?" — compares THIS photo's already-stored antler fingerprint to each named buck's
   // linked photos (same trait math the clustering uses). No AI call, no cost. Best-effort hint; the paid
@@ -4377,9 +4418,9 @@
       });
     });
     card.querySelector('.bm-new').addEventListener('click', async function(){
-      var name = (window.prompt('Name this new buck (e.g. Droptine 8):') || '').trim();
-      if (!name) return;
-      var profile = { id: uid(), name: name, notes: '', createdAt: Date.now() };
+      var det = await promptBuckDetails();
+      if (!det) return;
+      var profile = { id: uid(), name: det.name, notes: det.notes, propertyId: det.propertyId || null, createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       await linkPhotoToBuckId(doc, profile.id);
@@ -4894,9 +4935,9 @@
       render();
     }
     async function nameGroup(g){
-      var name = (window.prompt('Name this buck — links all ' + g.members.length + ' photo' + (g.members.length===1?'':'s') + ' to him:') || '').trim();
-      if (!name) return;
-      var profile = { id: uid(), name: name, notes: '', createdAt: Date.now() };
+      var det = await promptBuckDetails({ title: 'Name this buck — links all ' + g.members.length + ' photo' + (g.members.length===1?'':'s') });
+      if (!det) return;
+      var profile = { id: uid(), name: det.name, notes: det.notes, propertyId: det.propertyId || null, createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       for (var i = 0; i < g.members.length; i++){
@@ -5004,9 +5045,9 @@
     async function newBuckFromSelected(){
       var ids = Object.keys(selected);
       if (!ids.length){ showToast('Tap a few photos first.'); return; }
-      var name = (window.prompt('Name this buck — tags the ' + ids.length + ' selected photo' + (ids.length===1?'':'s') + ':') || '').trim();
-      if (!name) return;
-      var profile = { id: uid(), name: name, notes: '', createdAt: Date.now() };
+      var det = await promptBuckDetails({ title: 'New buck — tags the ' + ids.length + ' selected photo' + (ids.length===1?'':'s') });
+      if (!det) return;
+      var profile = { id: uid(), name: det.name, notes: det.notes, propertyId: det.propertyId || null, createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       await assignSelectedToBuck(profile.id);
@@ -5030,9 +5071,12 @@
         var photos = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, b.id); });
         photos.sort(function(a, c){ var sa=(a.ai&&a.ai.antler&&a.ai.antler.signature)?1:0, sc=(c.ai&&c.ai.antler&&c.ai.antler.signature)?1:0; return sc - sa; });
         var thumbs = photos.slice(0, 3).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:46px;height:46px;object-fit:cover;border-radius:4px;background:#000;">'; }).join('');
-        return '<button class="bcl-assign" data-bid="' + escapeHtml(b.id) + '" title="Tag selected photos as ' + escapeHtml(b.name) + '" style="flex:0 0 auto;text-align:left;padding:8px;border-radius:9px;border:1px solid #3c4d42;background:#22302a;color:#e8f0ea;cursor:pointer;">' +
+        var mark = b.notes ? '<div style="font-size:10px;color:#9db0a3;margin-top:2px;max-width:158px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(b.notes) + '</div>' : '';
+        var farm = '';
+        if (b.propertyId && typeof properties !== 'undefined'){ var fp = properties.filter(function(x){ return x.id === b.propertyId; })[0]; if (fp) farm = '<div style="font-size:10px;color:#8aa080;margin-top:2px;">📍 ' + escapeHtml(fp.name || 'farm') + '</div>'; }
+        return '<button class="bcl-assign" data-bid="' + escapeHtml(b.id) + '" title="Tag selected photos as ' + escapeHtml(b.name) + (b.notes ? ' — ' + escapeHtml(b.notes) : '') + '" style="flex:0 0 auto;text-align:left;padding:8px;border-radius:9px;border:1px solid #3c4d42;background:#22302a;color:#e8f0ea;cursor:pointer;">' +
           '<div style="display:flex;gap:3px;margin-bottom:5px;">' + (thumbs || '<div style="width:46px;height:46px;border-radius:4px;background:#1b2620;"></div>') + '</div>' +
-          '<div style="font-weight:700;font-size:12px;">🦌 ' + escapeHtml(b.name) + ' <span style="color:#9db0a3;font-weight:500;">· ' + photos.length + '</span></div>' +
+          '<div style="font-weight:700;font-size:12px;">🦌 ' + escapeHtml(b.name) + ' <span style="color:#9db0a3;font-weight:500;">· ' + photos.length + '</span></div>' + mark + farm +
         '</button>';
       }).join('');
       return '<div style="font-size:11.5px;color:#9db0a3;font-weight:600;margin-bottom:6px;">Your bucks — select photos, then tap a buck to tag them as him. Several bucks in one frame? Park it in Multi-buck to sort later.</div>' +
