@@ -139,6 +139,12 @@ exports.tagPhoto = onCall(
     if (!photoId || typeof photoId !== "string") {
       throw new HttpsError("invalid-argument", "A photoId is required.");
     }
+    // Deep mode (single-photo "Re-tag") looks HARDER with a stronger model + high effort — much
+    // better at fine antler tine-counting on a buck. Bulk "Tag all" stays on the cheap/fast model
+    // (species/empty detection doesn't need it), so we only pay the premium where it matters.
+    const deep = !!(request.data && request.data.deep);
+    const modelUsed = deep ? "claude-opus-5" : MODEL;
+    const effortUsed = deep ? "high" : "low";
 
     // Owner-scoped path — the function can only ever read the caller's own photos.
     const storagePath = "users/" + uid + "/trailcam/" + photoId + ".jpg";
@@ -162,10 +168,10 @@ exports.tagPhoto = onCall(
     let response;
     try {
       response = await client.messages.create({
-        model: MODEL,
+        model: modelUsed,
         max_tokens: 1024,
-        // Low effort keeps cost/latency down; the task is a constrained classification.
-        output_config: { effort: "low", format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
+        // Effort scales with mode: low for the cheap bulk pass, high for a deep single re-tag.
+        output_config: { effort: effortUsed, format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
         system: SYSTEM_PROMPT,
         messages: [
           {
@@ -207,7 +213,7 @@ exports.tagPhoto = onCall(
       "out=" + (usage.output_tokens || 0)
     );
 
-    return Object.assign({}, parsed, { model: MODEL, taggedAt: Date.now() });
+    return Object.assign({}, parsed, { model: modelUsed, taggedAt: Date.now() });
   }
 );
 

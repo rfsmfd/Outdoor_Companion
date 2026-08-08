@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 141</div>
+    <div id="buildBadge">BUILD 142</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4133,14 +4133,14 @@
   // limit; rather than fail the photo, we wait and retry a few times (the pauses also naturally
   // pace the batch back under the limit) so a run rides through the throttle instead of choking.
   var TAG_RETRY_DELAYS = [2000, 5000, 12000, 25000]; // ms; ~44s total across retries lets a per-minute window reset
-  async function tagPhotoWithAI(doc){
+  async function tagPhotoWithAI(doc, deep){
     if (!cloudPhotosAvailable() || typeof firebase === 'undefined' || !firebase.functions){
       throw new Error('Sign in to use AI tagging.');
     }
     var callable = firebase.app().functions('us-east1').httpsCallable('tagPhoto');
     var res, lastErr = null;
     for (var attempt = 0; attempt <= TAG_RETRY_DELAYS.length; attempt++){
-      try{ res = await callable({ photoId: doc.id }); lastErr = null; break; }
+      try{ res = await callable({ photoId: doc.id, deep: !!deep }); lastErr = null; break; }
       catch(e){
         lastErr = e;
         if (attempt < TAG_RETRY_DELAYS.length){ await new Promise(function(r){ setTimeout(r, TAG_RETRY_DELAYS[attempt]); }); }
@@ -4154,9 +4154,9 @@
   document.getElementById('photoLightboxAiBtn').addEventListener('click', async function(){
     if (!galleryLightboxDoc) return;
     var doc = galleryLightboxDoc;
-    var btn = this; btn.disabled = true; btn.textContent = '🧠 Analyzing…';
+    var btn = this; btn.disabled = true; btn.textContent = '🧠 Deep-analyzing…';
     try {
-      await tagPhotoWithAI(doc);
+      await tagPhotoWithAI(doc, true); // single-photo tag/re-tag uses the deeper Opus + high-effort pass
       if (galleryLightboxDoc === doc) showGalleryPhoto(doc); // rebuild caption with the AI line
       renderGallery(); populateGalleryFilters(); refreshTagAllButton();
       showToast('AI: ' + (doc.ai && doc.ai.hasAnimal ? (doc.ai.primarySpecies || 'animal') : 'empty frame'));
