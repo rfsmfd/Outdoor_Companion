@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 157</div>
+    <div id="buildBadge">BUILD 158</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4880,12 +4880,16 @@
       var scroll = card.scrollTop;
       var n = selCount();
       var moveOpts = board.map(function(g, i){ return '<option value="' + g.id + '">→ Group ' + (i+1) + ' (' + escapeHtml(clusterDescriptor(g.members).slice(0, 28)) + ')</option>'; }).join('');
+      var namedOpts = buckProfiles.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).map(function(b){ return '<option value="' + escapeHtml(b.id) + '">🦌 ' + escapeHtml(b.name) + '</option>'; }).join('');
+      // Selection bar STICKS TO THE BOTTOM so the named-buck list is always in reach — no scrolling
+      // back to the folder strip up top on a long board.
       var bar = n > 0
-        ? '<div style="position:sticky;top:-18px;z-index:5;background:#26332B;padding:10px 0;margin:-6px 0 10px;border-bottom:1px solid #35443A;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
+        ? '<div style="position:sticky;bottom:-18px;z-index:6;background:#20302a;border:1px solid #3c4d42;border-radius:10px;padding:10px 12px;margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;box-shadow:0 -6px 22px rgba(0,0,0,.45);">' +
             '<span style="font-weight:700;font-size:13px;">' + n + ' selected</span>' +
-            '<button class="bcl-newbuck" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">➕ New buck from selected</button>' +
-            '<select class="bcl-moveto" style="flex:1;min-width:140px;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
-              '<option value="">Move to another group…</option>' + moveOpts + '<option value="__new__">➕ New empty group</option>' +
+            (buckProfiles.length ? '<select class="bcl-tagas" style="flex:1;min-width:170px;padding:8px;border-radius:8px;border:1px solid #6BBF59;background:#1E2B23;color:#e8f0ea;font-weight:600;"><option value="">🦌 Tag as… (named buck)</option>' + namedOpts + '</select>' : '') +
+            '<button class="bcl-newbuck" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">➕ New buck</button>' +
+            '<select class="bcl-moveto" style="flex:0 1 auto;min-width:130px;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
+              '<option value="">Move to group…</option>' + moveOpts + '<option value="__new__">➕ New empty group</option>' +
             '</select>' +
             '<button class="bcl-clearsel" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Clear</button>' +
           '</div>'
@@ -4939,9 +4943,10 @@
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
         '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
-        bucksStrip() + controls + bar + body + heldSection + noIntSection +
+        bucksStrip() + controls + body + heldSection + noIntSection +
         '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
-        (heldBack > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + heldBack + ' smaller/younger buck photo' + (heldBack===1?'':'s') + ' held back by the bar — still recorded as buck activity, just not sorted for individual ID.</div>' : '');
+        (heldBack > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + heldBack + ' smaller/younger buck photo' + (heldBack===1?'':'s') + ' held back by the bar — still recorded as buck activity, just not sorted for individual ID.</div>' : '') +
+        bar;
       wire();
       card.scrollTop = scroll;
     }
@@ -5127,6 +5132,7 @@
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-assign'), function(b){
         b.addEventListener('click', function(){ assignSelectedToBuck(b.getAttribute('data-bid')); });
       });
+      var ta = card.querySelector('.bcl-tagas'); if (ta) ta.addEventListener('change', function(){ if (this.value) assignSelectedToBuck(this.value); });
       var nb = card.querySelector('.bcl-newbuck'); if (nb) nb.addEventListener('click', newBuckFromSelected);
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-park'), function(b){
         b.addEventListener('click', function(){ if (Object.keys(selected).length) parkSelected(); else { showHeld = !showHeld; render(); } });
