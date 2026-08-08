@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 149</div>
+    <div id="buildBadge">BUILD 150</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3905,7 +3905,8 @@
     var src = p.thumb || p.downloadURL || '';
     var cam = cameras.filter(function(c){ return c.id === p.cameraId; })[0];
     var buckHtml = '';
-    if (p.buckProfileId){ var b = buckProfiles.filter(function(x){ return x.id === p.buckProfileId; })[0]; if (b) buckHtml = '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#ffb066;">🦌 ' + escapeHtml(b.name) + '</div>'; }
+    var _bids = photoBuckIds(p);
+    if (_bids.length){ var _names = _bids.map(function(id){ var b = buckProfiles.filter(function(x){ return x.id === id; })[0]; return b ? b.name : null; }).filter(Boolean); if (_names.length) buckHtml = '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#ffb066;">🦌 ' + escapeHtml(_names.join(', ')) + '</div>'; }
     card.innerHTML =
       '<img src="' + src + '" alt="' + escapeHtml(p.filename||'') + '">' +
       '<div class="meta">' +
@@ -4269,12 +4270,27 @@
   // ---------- Phase 2.5 Stage 3: AI buck recognition (suggest → confirm) ----------
   // Build each known buck's antler "fingerprint" from his linked photos (structured antler data
   // from the upgraded tagPhoto, falling back to free-text notes) so compareBucks can rank matches.
+  // ---------- Multi-buck linking: a photo can be credited to SEVERAL bucks (a frame with two
+  // shooters is a sighting of BOTH). buckProfileId stays the "primary" (first credited) for every
+  // existing single-link code path; buckProfileIds[] holds the full set. These helpers unify the two
+  // so every buck rollup counts a shared frame under each buck it shows. ----------
+  function photoBuckIds(p){
+    var ids = [];
+    if (p.buckProfileId) ids.push(p.buckProfileId);
+    if (Array.isArray(p.buckProfileIds)) p.buckProfileIds.forEach(function(x){ if (x && ids.indexOf(x) === -1) ids.push(x); });
+    return ids;
+  }
+  function photoLinkedToBuck(p, buckId){ return p.buckProfileId === buckId || (Array.isArray(p.buckProfileIds) && p.buckProfileIds.indexOf(buckId) !== -1); }
+  function unlinkBuckFromPhoto(p, buckId){
+    if (Array.isArray(p.buckProfileIds)) p.buckProfileIds = p.buckProfileIds.filter(function(x){ return x !== buckId; });
+    if (p.buckProfileId === buckId) p.buckProfileId = (p.buckProfileIds && p.buckProfileIds.length) ? p.buckProfileIds[0] : null;
+  }
   function buildBuckCandidates(){
     var candidates = [], refMap = {};
     buckProfiles.forEach(function(b, i){
       var ref = 'b' + (i + 1);
       refMap[ref] = b.id;
-      var photos = importedPhotos.filter(function(p){ return p.buckProfileId === b.id; });
+      var photos = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, b.id); });
       var sigs = [], feats = {};
       photos.forEach(function(p){
         var a = p.ai && p.ai.antler;
@@ -4649,7 +4665,7 @@
   // and move them between groups (or into new groups) to hand-curate, then name a clean group to link
   // all its photos to that buck at once. Singletons land in a "Loose" bucket to grab from. Nothing is
   // committed until you name a group. (Piece 2 — the paid "AI on the tough ones" — layers on later.)
-  var THUMB_CAP = 40; // per-group tiles rendered; "select all" still acts on the full group
+  var THUMB_CAP = 150; // per-group tiles rendered; "select all" still acts on the full group
   function showBuckClusterReview(){
     var pool = galleryUnlinkedBucksInView();
     // The "worth-IDing" bar (founder's "ID shooters, count the rest"): default to MATURE/older body so
@@ -4685,12 +4701,23 @@
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     function allGroups(){ var g = board.slice(); if (loose.members.length) g.push(loose); return g; }
     function allContainers(){ return board.concat([loose, held]); }  // everything selectable-from, incl. parked
+    function findMember(pid){ var r = null; allContainers().forEach(function(g){ g.members.forEach(function(m){ if (m.p.id === pid) r = m; }); }); return r; }
+    // Enlarge one photo to verify which deer it is — a self-contained zoom overlay above the board.
+    function enlargePhoto(p){
+      var src = p.downloadURL || p.thumb || '';
+      var ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out;';
+      ov.innerHTML = '<img src="' + src + '" alt="" style="max-width:94vw;max-height:92vh;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,.6);">';
+      ov.addEventListener('click', function(){ if (ov.parentNode) document.body.removeChild(ov); });
+      document.body.appendChild(ov);
+    }
     function selCount(){ return Object.keys(selected).length; }
     function tile(m){
       var src = m.p.thumb || m.p.downloadURL || '';
       var on = !!selected[m.p.id];
       return '<div class="bcl-tile" data-pid="' + escapeHtml(m.p.id) + '" style="position:relative;width:100%;aspect-ratio:1;border-radius:7px;overflow:hidden;cursor:pointer;background:#000;outline:' + (on ? '3px solid #6BBF59' : '1px solid #2a3830') + ';outline-offset:-1px;">' +
         '<img src="' + src + '" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;' + (on ? 'opacity:.72;' : '') + '">' +
+        '<div class="bcl-zoom" data-pid="' + escapeHtml(m.p.id) + '" title="Enlarge to verify" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.55);color:#fff;border-radius:6px;width:26px;height:26px;line-height:26px;text-align:center;font-size:13px;cursor:zoom-in;z-index:2;">🔍</div>' +
         (on ? '<div style="position:absolute;top:4px;right:4px;background:#6BBF59;color:#10240f;border-radius:50%;width:24px;height:24px;line-height:24px;text-align:center;font-size:15px;font-weight:800;">✓</div>' : '') +
       '</div>';
     }
@@ -4711,7 +4738,7 @@
           '<div>' + head + '<div style="font-size:11px;color:#9db0a3;margin:2px 0 8px;line-height:1.4;">' + escapeHtml(desc) + '</div></div>' +
           '<button class="bcl-selall" data-gid="' + g.id + '" style="flex:0 0 auto;font-size:11px;padding:5px 9px;border-radius:7px;border:1px solid #3c4d42;background:transparent;color:#9db0a3;cursor:pointer;white-space:nowrap;">select all</button>' +
         '</div>' +
-        '<div class="bcl-tiles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;">' + shown + more + '</div>' + actions +
+        '<div class="bcl-tiles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;">' + shown + more + '</div>' + actions +
       '</div>';
     }
     function render(){
@@ -4756,8 +4783,9 @@
             '<div style="font-weight:700;">🦌🦌 Multi-buck holding <span style="color:#9db0a3;font-size:11px;font-weight:500;">· ' + held.members.length + ' to sort</span></div>' +
             '<span style="color:#9db0a3;font-size:12px;">' + (showHeld ? '▾ hide' : '▸ sort these') + '</span>' +
           '</div>' +
-          (showHeld ? ('<div style="font-size:11px;color:#9db0a3;margin:8px 0;line-height:1.4;">Select the frames that show a given buck and tap his folder up top to credit him. (One buck per photo for now — crediting several per frame is coming.)</div>' +
-            '<div class="bcl-tiles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;">' + held.members.slice(0, THUMB_CAP).map(tile).join('') + moreHeld + '</div>') : '') +
+          (showHeld ? ('<div style="font-size:11px;color:#9db0a3;margin:8px 0;line-height:1.4;">Select a frame and tap a buck up top to credit him — <b>tag the same frame to several bucks</b> (tap one, then another; it counts as a sighting for each). Select and hit <b>Done</b> to release a frame once it\'s fully credited.</div>' +
+            '<div class="bcl-tiles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;">' + held.members.slice(0, THUMB_CAP).map(tile).join('') + moreHeld + '</div>' +
+            '<button class="bcl-release" style="margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#dff0e4;cursor:pointer;">✓ Done with selected — release from bin</button>') : '') +
         '</div>' : '';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
@@ -4799,18 +4827,38 @@
     async function assignSelectedToBuck(buckId){
       var ids = Object.keys(selected);
       if (!ids.length){ showToast('Tap a few photos first, then tap the buck.'); return; }
-      var moving = [];
-      allContainers().forEach(function(g){ g.members = g.members.filter(function(m){ if (selected[m.p.id]){ moving.push(m); return false; } return true; }); });
-      for (var i = 0; i < moving.length; i++){
-        var p = moving[i].p;
-        p.buckProfileId = buckId; p.buckSuggestion = null; p.buckMatchedAt = Date.now(); p.multiBuckHold = false;  // crediting a buck clears any parked-hold
+      var affected = [], binCount = 0;
+      allContainers().forEach(function(g){ g.members.forEach(function(m){ if (selected[m.p.id]) affected.push({ p: m.p, held: !!g.held }); }); });
+      for (var i = 0; i < affected.length; i++){
+        var p = affected[i].p;
+        if (!Array.isArray(p.buckProfileIds)) p.buckProfileIds = [];
+        if (p.buckProfileId && p.buckProfileIds.indexOf(p.buckProfileId) === -1) p.buckProfileIds.push(p.buckProfileId);
+        if (p.buckProfileIds.indexOf(buckId) === -1) p.buckProfileIds.push(buckId);   // ADD this buck (multi-credit)
+        if (!p.buckProfileId) p.buckProfileId = buckId;                               // primary = first credited
+        p.buckSuggestion = null; p.buckMatchedAt = Date.now();
+        if (affected[i].held) binCount++;
         if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} }
       }
+      // Cluster/loose photos are done once credited and leave the board; bin (held) frames STAY parked
+      // so you can credit additional bucks to the same frame, until you release them.
+      board.forEach(function(g){ g.members = g.members.filter(function(m){ return !selected[m.p.id]; }); });
+      loose.members = loose.members.filter(function(m){ return !selected[m.p.id]; });
       board = board.filter(function(g){ return g.members.length > 0; });
       selected = {};
       renderGallery(); populateGalleryFilters(); refreshTagAllButton();
       var b = buckProfiles.filter(function(x){ return x.id === buckId; })[0];
-      showToast('Tagged ' + moving.length + ' as ' + (b ? b.name : 'buck'));
+      showToast(binCount ? ('Added ' + affected.length + ' to ' + (b ? b.name : 'buck') + ' — release when fully credited') : ('Tagged ' + affected.length + ' as ' + (b ? b.name : 'buck')));
+      if (!board.length && !loose.members.length && !held.members.length) close(); else render();
+    }
+    // Release the selected bin frames — they're fully credited; drop the hold so they leave the bin.
+    async function releaseSelected(){
+      var released = [];
+      held.members = held.members.filter(function(m){ if (selected[m.p.id]){ released.push(m.p); return false; } return true; });
+      if (!released.length){ showToast('Select frames in the bin to release.'); return; }
+      for (var i = 0; i < released.length; i++){ var p = released[i]; p.multiBuckHold = false; if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} } }
+      selected = {};
+      renderGallery(); populateGalleryFilters(); refreshTagAllButton();
+      showToast('Released ' + released.length + ' from the bin');
       if (!board.length && !loose.members.length && !held.members.length) close(); else render();
     }
     // Park the selected photos as MULTI-BUCK frames — set them aside (they leave the single-buck sort)
@@ -4852,7 +4900,7 @@
         '<div style="font-size:10px;color:#9db0a3;">park / sort later</div>' +
       '</button>';
       var cards = buckProfiles.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).map(function(b){
-        var photos = importedPhotos.filter(function(p){ return p.buckProfileId === b.id; });
+        var photos = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, b.id); });
         photos.sort(function(a, c){ var sa=(a.ai&&a.ai.antler&&a.ai.antler.signature)?1:0, sc=(c.ai&&c.ai.antler&&c.ai.antler.signature)?1:0; return sc - sa; });
         var thumbs = photos.slice(0, 3).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:46px;height:46px;object-fit:cover;border-radius:4px;background:#000;">'; }).join('');
         return '<button class="bcl-assign" data-bid="' + escapeHtml(b.id) + '" title="Tag selected photos as ' + escapeHtml(b.name) + '" style="flex:0 0 auto;text-align:left;padding:8px;border-radius:9px;border:1px solid #3c4d42;background:#22302a;color:#e8f0ea;cursor:pointer;">' +
@@ -4867,6 +4915,9 @@
       card.querySelector('.bcl-close').addEventListener('click', close);
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-tile'), function(t){
         t.addEventListener('click', function(){ var pid = t.getAttribute('data-pid'); if (selected[pid]) delete selected[pid]; else selected[pid] = true; render(); });
+      });
+      Array.prototype.forEach.call(card.querySelectorAll('.bcl-zoom'), function(z){
+        z.addEventListener('click', function(e){ e.stopPropagation(); var m = findMember(z.getAttribute('data-pid')); if (m) enlargePhoto(m.p); });
       });
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-selall'), function(b){
         b.addEventListener('click', function(){
@@ -4884,6 +4935,7 @@
         b.addEventListener('click', function(){ if (Object.keys(selected).length) parkSelected(); else { showHeld = !showHeld; render(); } });
       });
       var ht = card.querySelector('.bcl-heldtoggle'); if (ht) ht.addEventListener('click', function(){ showHeld = !showHeld; render(); });
+      var rl = card.querySelector('.bcl-release'); if (rl) rl.addEventListener('click', releaseSelected);
       var mat = card.querySelector('.bcl-mature'); if (mat) mat.addEventListener('change', function(){ filtMature = this.value === '1'; computeBoard(); render(); });
       var mp = card.querySelector('.bcl-minpts'); if (mp) mp.addEventListener('change', function(){ filtMinPts = parseInt(this.value, 10) || 0; computeBoard(); render(); });
       var mv = card.querySelector('.bcl-moveto'); if (mv) mv.addEventListener('change', function(){ if (this.value) moveSelectedTo(this.value); });
@@ -6886,7 +6938,7 @@
     buckProfiles.forEach(function(profile){
       var linkedObs = observations.filter(function(o){ return o.buckProfileId === profile.id; })
         .sort(function(a,b){ return b.createdAt - a.createdAt; });
-      var linkedPhotos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return p.buckProfileId === profile.id; })
+      var linkedPhotos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return photoLinkedToBuck(p, profile.id); })
         .sort(function(a,b){ return (b.timestamp||0) - (a.timestamp||0); });
       var totalLinked = linkedObs.length + linkedPhotos.length;
       var mostRecentPhoto = linkedObs.filter(function(o){ return o.photoThumb; })[0];
@@ -6996,9 +7048,9 @@
         // Also unlink any trail-cam photos tagged to this buck — never delete the
         // photos themselves (they are valuable cloud data), just clear the link so
         // the "becomes unlinked" promise holds and no photo carries a dangling id.
-        var photosToClear = importedPhotos.filter(function(p){ return p.buckProfileId === profile.id; });
+        var photosToClear = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, profile.id); });
         for (var j=0; j<photosToClear.length; j++){
-          photosToClear[j].buckProfileId = null;
+          unlinkBuckFromPhoto(photosToClear[j], profile.id);  // removes from multi-link set; keeps other bucks' credit
           if (hasChatStorage){ try{ await window.storage.set('photo:' + photosToClear[j].id, JSON.stringify(photosToClear[j]), false); }catch(err){} }
         }
         renderAll();
@@ -7017,9 +7069,9 @@
         }
         // Sightings are true field-log entries and get deleted; trail-cam photos are
         // not — we only unlink them so the actual cloud photos survive a profile wipe.
-        var photosToUnlink = importedPhotos.filter(function(p){ return p.buckProfileId === profile.id; });
+        var photosToUnlink = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, profile.id); });
         for (var k=0; k<photosToUnlink.length; k++){
-          photosToUnlink[k].buckProfileId = null;
+          unlinkBuckFromPhoto(photosToUnlink[k], profile.id);  // multi-link aware: only drops THIS buck's credit
           if (hasChatStorage){ try{ await window.storage.set('photo:' + photosToUnlink[k].id, JSON.stringify(photosToUnlink[k]), false); }catch(err){} }
         }
         renderAll();
@@ -9602,7 +9654,7 @@
   // the founder's "shows where he spends most of his time" view. Client-only; no AI, no deploy.
   function buckMapEvents(profileId){
     var events = [];
-    var buckPhotos = importedPhotos.filter(function(p){ return p.buckProfileId === profileId && p.matchedSiteId; });
+    var buckPhotos = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, profileId) && p.matchedSiteId; });
     var visits = computeVisits(buckPhotos, (galleryVisitGapMin || 30) * 60000);
     visits.forEach(function(v){
       var s = v.siteId ? sites.filter(function(x){ return x.id === v.siteId; })[0] : null;
