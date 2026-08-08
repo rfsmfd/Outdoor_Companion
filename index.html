@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 170</div>
+    <div id="buildBadge">BUILD 171</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3532,27 +3532,24 @@
   };
   // Colored deer-head silhouette so buck (gold) and doe (its own color) read distinctly — no blending
   // circle behind them. Buck gets antlers; doe doesn't. Reused by map markers AND the sidebar.
-  // Buck/doe now use the founder's supplied transparent-PNG artwork (icons/buck.png, icons/doe.png).
-  // Portrait art (102×142) sized by HEIGHT. color param kept for call-site compatibility (unused).
-  function deerHeadSvg(color, isBuck, px){
-    var src = isBuck ? 'icons/buck.png' : 'icons/doe.png';
-    var w = Math.round(px * 102 / 142);
-    return '<img src="'+src+'" alt="" style="width:'+w+'px;height:'+px+'px;object-fit:contain;display:inline-block;vertical-align:middle;filter:drop-shadow(0 1px 2px rgba(0,0,0,.5));">';
+  // Types with founder-supplied artwork (transparent PNGs in icons/). Others fall back to an emoji.
+  var OBS_TYPE_IMG = { buck:'icons/buck.png', doe:'icons/doe.png', bear:'icons/bear.png' };
+  // Inner glyph — the artwork image if we have it, else the type emoji — sized to fit a px box.
+  function obsTypeInner(type, px){
+    return OBS_TYPE_IMG[type]
+      ? '<img src="'+OBS_TYPE_IMG[type]+'" alt="" style="max-width:'+Math.round(px*0.84)+'px;max-height:'+Math.round(px*0.84)+'px;object-fit:contain;">'
+      : '<span style="font-size:'+Math.round(px*0.6)+'px;line-height:1;">'+(OBS_TYPE_EMOJI[type]||'📍')+'</span>';
   }
-  // Inline glyph for a type — deer silhouette for buck/doe, emoji for everything else. Used in the sidebar.
+  // Every observation type = its glyph inside a WHITE circle with a colored ring, so animals and emoji
+  // alike stay visible on dark / aerial backgrounds (founder's call). Shared by the sidebar and the map.
   function obsGlyphInline(type, px){
-    if (type === 'buck' || type === 'doe'){ var td = getActiveObsTypes()[type] || getFallbackTypeEntry(true); return deerHeadSvg(td.color, type === 'buck', px); }
-    return '<span style="font-size:'+Math.round(px*0.72)+'px;line-height:1;">'+(OBS_TYPE_EMOJI[type]||'📍')+'</span>';
+    var t = getActiveObsTypes()[type] || getFallbackTypeEntry(true);
+    return '<span style="display:inline-flex;box-sizing:border-box;width:'+px+'px;height:'+px+'px;border-radius:50%;background:#fff;border:2px solid '+t.color+';align-items:center;justify-content:center;overflow:hidden;vertical-align:middle;">'+obsTypeInner(type, px)+'</span>';
   }
   function obsMarkerIcon(type){
     var t = getActiveObsTypes()[type] || getFallbackTypeEntry(true);
-    if (type === 'buck' || type === 'doe'){
-      var src = type === 'buck' ? 'icons/buck.png' : 'icons/doe.png';
-      var h = 42, w = Math.round(h * 102 / 142);   // portrait art, anchored at its feet
-      return L.divIcon({ className:'', html:'<img src="'+src+'" alt="" style="width:'+w+'px;height:'+h+'px;object-fit:contain;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));">', iconSize:[w,h], iconAnchor:[Math.round(w/2), h], popupAnchor:[0,-h] });
-    }
-    var html = '<div style="width:26px;height:26px;border-radius:50%;background:#fff;border:2.5px solid '+t.color+';box-shadow:0 1px 3px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:15px;">'+(OBS_TYPE_EMOJI[type]||'📍')+'</div>';
-    return L.divIcon({ className:'', html:html, iconSize:[26,26], iconAnchor:[13,13], popupAnchor:[0,-15] });
+    var d = 38;
+    return L.divIcon({ className:'', html:'<div style="box-sizing:border-box;width:'+d+'px;height:'+d+'px;border-radius:50%;background:#fff;border:2px solid '+t.color+';box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;overflow:hidden;">'+obsTypeInner(type, d)+'</div>', iconSize:[d,d], iconAnchor:[d/2,d/2], popupAnchor:[0,-d/2-3] });
   }
 
   // Distance in meters between two lat/lng points (haversine)
@@ -8589,11 +8586,7 @@
       var t = getActiveObsTypes()[key];
       var tile = document.createElement('div');
       tile.className = 'obs-tile';
-      tile.innerHTML = '<div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;">' +
-        (key === 'buck' || key === 'doe'
-          ? deerHeadSvg(t.color, key === 'buck', 38)
-          : '<div style="width:34px;height:34px;border-radius:50%;background:#fff;border:2.5px solid '+t.color+';display:flex;align-items:center;justify-content:center;font-size:19px;">'+(OBS_TYPE_EMOJI[key]||'📍')+'</div>') +
-        '</div><div class="lbl">'+t.label+'</div>';
+      tile.innerHTML = '<div style="width:42px;height:42px;display:flex;align-items:center;justify-content:center;">'+obsGlyphInline(key, 40)+'</div><div class="lbl">'+t.label+'</div>';
       tile.addEventListener('click', function(){ logObservation(key); });
       obsGrid.appendChild(tile);
     });
