@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 160</div>
+    <div id="buildBadge">BUILD 161</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4780,14 +4780,20 @@
     // a FREE best-guess buck below it (reading the antlers helps you place him), and a paid "Which
     // buck? (AI)" escalation for the tough ones. Scroll zooms; drag pans; ✕ / Esc / click-away closes.
     function enlargePhoto(p){
-      lastViewedId = p.id; render();  // amber-highlight this tile on the board so you can find it after closing
-      var src = p.downloadURL || p.thumb || '';
+      // Build a flat, display-ordered list of the board's photos (groups time-ordered, then Loose) so
+      // the ‹ › arrows flip through frames in the same order you see them — no leaving the enlarged view.
+      var navPhotos = [];
+      board.forEach(function(g){ g.members.slice().sort(function(a, b){ return (a.p.timestamp||0) - (b.p.timestamp||0); }).forEach(function(m){ navPhotos.push(m.p); }); });
+      loose.members.slice().sort(function(a, b){ return (a.p.timestamp||0) - (b.p.timestamp||0); }).forEach(function(m){ navPhotos.push(m.p); });
+      var idx = -1;
+      for (var k = 0; k < navPhotos.length; k++){ if (navPhotos[k].id === p.id){ idx = k; break; } }
+      if (idx < 0){ navPhotos = [p]; idx = 0; }   // enlarged from a bin — just this one
+      var multi = navPhotos.length > 1;
       var ov = document.createElement('div');
       ov.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.92);display:flex;flex-direction:column;';
       var stage = document.createElement('div');
       stage.style.cssText = 'flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:0;';
       var img = document.createElement('img');
-      img.src = src;
       img.style.cssText = 'max-width:96vw;max-height:100%;border-radius:6px;box-shadow:0 6px 30px rgba(0,0,0,.6);transform-origin:center center;will-change:transform;user-select:none;-webkit-user-drag:none;cursor:zoom-in;';
       var scale = 1, tx = 0, ty = 0, dragging = false, sx = 0, sy = 0;
       function apply(){ img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; img.style.cursor = scale > 1 ? 'grab' : 'zoom-in'; }
@@ -4795,8 +4801,8 @@
       function onDown(e){ if (scale <= 1) return; dragging = true; sx = e.clientX - tx; sy = e.clientY - ty; e.preventDefault(); }
       function onMove(e){ if (!dragging) return; tx = e.clientX - sx; ty = e.clientY - sy; apply(); }
       function onUp(){ dragging = false; }
-      function onKey(e){ if (e.key === 'Escape') close(); }
-      function close(){ document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('keydown', onKey); if (ov.parentNode) document.body.removeChild(ov); }
+      function onKey(e){ if (e.key === 'Escape') close(); else if (e.key === 'ArrowLeft'){ go(-1); } else if (e.key === 'ArrowRight'){ go(1); } }
+      function close(){ document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('keydown', onKey); if (ov.parentNode) document.body.removeChild(ov); render(); }  // repaint board so the last-viewed tile is highlighted
       stage.addEventListener('wheel', onWheel, { passive: false });
       img.addEventListener('mousedown', onDown);
       document.addEventListener('mousemove', onMove);
@@ -4806,35 +4812,51 @@
       stage.addEventListener('click', function(e){ if (e.target === stage) close(); });
       var closeBtn = document.createElement('button');
       closeBtn.textContent = '✕';
-      closeBtn.style.cssText = 'position:absolute;top:12px;right:14px;z-index:3;width:36px;height:36px;border-radius:50%;border:1px solid #4a5548;background:rgba(0,0,0,.5);color:#fff;font-size:16px;cursor:pointer;';
+      closeBtn.style.cssText = 'position:absolute;top:12px;right:14px;z-index:4;width:36px;height:36px;border-radius:50%;border:1px solid #4a5548;background:rgba(0,0,0,.5);color:#fff;font-size:16px;cursor:pointer;';
       closeBtn.addEventListener('click', close);
       stage.appendChild(img); stage.appendChild(closeBtn);
-      // ---- info panel: AI read + free guess + AI escalation ----
+      var counter = null;
+      if (multi){
+        var arrowCss = 'position:absolute;top:50%;transform:translateY(-50%);z-index:4;width:54px;height:70px;border:none;border-radius:12px;background:rgba(0,0,0,.42);color:#fff;font-size:38px;line-height:1;cursor:pointer;';
+        var leftBtn = document.createElement('button'); leftBtn.textContent = '‹'; leftBtn.title = 'Previous frame'; leftBtn.style.cssText = arrowCss + 'left:10px;';
+        var rightBtn = document.createElement('button'); rightBtn.textContent = '›'; rightBtn.title = 'Next frame'; rightBtn.style.cssText = arrowCss + 'right:10px;';
+        leftBtn.addEventListener('click', function(e){ e.stopPropagation(); go(-1); });
+        rightBtn.addEventListener('click', function(e){ e.stopPropagation(); go(1); });
+        counter = document.createElement('div');
+        counter.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:4;background:rgba(0,0,0,.5);color:#dfeee5;font:600 12px ui-monospace,monospace;padding:4px 11px;border-radius:20px;font-variant-numeric:tabular-nums;';
+        stage.appendChild(leftBtn); stage.appendChild(rightBtn); stage.appendChild(counter);
+      }
       var panel = document.createElement('div');
       panel.style.cssText = 'flex:0 0 auto;max-height:42vh;overflow:auto;background:#1b2018;border-top:1px solid #333a2c;padding:14px 18px;color:#e8f0ea;font-family:inherit;';
-      var descHtml = aiSummaryHtml(p) || '<span style="color:#9db0a3;">Not tagged yet — run AI tagging on this photo first.</span>';
-      var guesses = suggestBucksFree(p);
-      var guessHtml = '';
-      if (guesses.length && guesses[0].score >= 4){
-        var g0 = guesses[0], conf = g0.score >= 7 ? 'strong' : (g0.score >= 5 ? 'good' : 'possible');
-        guessHtml = '<div style="margin-top:12px;font-size:14px;"><span style="color:#8aa080;font-weight:600;">Free guess:</span> most like <b style="color:#E8B04B;">🦌 ' + escapeHtml(g0.name) + '</b> <span style="color:#9db0a3;font-size:12px;">(' + conf + ' match from the antler notes)</span>' +
-          (guesses[1] && guesses[1].score >= 4 ? '<span style="color:#9db0a3;font-size:12px;"> · or maybe ' + escapeHtml(guesses[1].name) + '</span>' : '') + '</div>';
-      } else if (buckProfiles.length){
-        guessHtml = '<div style="margin-top:12px;font-size:13px;color:#9db0a3;">No confident free match against your named bucks — he may be new, or try the AI check.</div>';
-      }
-      panel.innerHTML = '<div style="font:600 11px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#8aa080;margin-bottom:6px;">AI read of this frame</div>' +
-        '<div style="font-size:14px;line-height:1.55;">' + descHtml + '</div>' + guessHtml +
-        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">' +
-          '<button class="bcl-tagthis" style="padding:10px 18px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:700;">🦌 Tag this buck</button>' +
-          (buckProfiles.length ? '<button class="bcl-whichai" style="padding:10px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#dff0e4;cursor:pointer;font-weight:600;">🔍 Which buck? (AI · ~1-2¢)</button>' : '') +
-        '</div>' +
-        '<div style="font-size:11px;color:#6f8377;margin-top:10px;">scroll image to zoom · drag to pan · double-click resets · Esc closes</div>';
       ov.appendChild(stage); ov.appendChild(panel);
-      var tt = panel.querySelector('.bcl-tagthis');
-      if (tt) tt.addEventListener('click', function(){ close(); openTagAsPicker(p); });
-      var wa = panel.querySelector('.bcl-whichai');
-      if (wa) wa.addEventListener('click', function(){ close(); identifyBuck(p); });
-      document.body.appendChild(ov); apply();
+      document.body.appendChild(ov);
+      function go(d){ idx = (idx + d + navPhotos.length) % navPhotos.length; showCur(); }
+      function showCur(){
+        var cur = navPhotos[idx];
+        lastViewedId = cur.id;
+        scale = 1; tx = 0; ty = 0;
+        img.src = cur.downloadURL || cur.thumb || ''; apply();
+        if (counter) counter.textContent = (idx + 1) + ' / ' + navPhotos.length;
+        var descHtml = aiSummaryHtml(cur) || '<span style="color:#9db0a3;">Not tagged yet — run AI tagging on this photo first.</span>';
+        var guesses = suggestBucksFree(cur), guessHtml = '';
+        if (guesses.length && guesses[0].score >= 4){
+          var g0 = guesses[0], conf = g0.score >= 7 ? 'strong' : (g0.score >= 5 ? 'good' : 'possible');
+          guessHtml = '<div style="margin-top:12px;font-size:14px;"><span style="color:#8aa080;font-weight:600;">Free guess:</span> most like <b style="color:#E8B04B;">🦌 ' + escapeHtml(g0.name) + '</b> <span style="color:#9db0a3;font-size:12px;">(' + conf + ' match from the antler notes)</span>' +
+            (guesses[1] && guesses[1].score >= 4 ? '<span style="color:#9db0a3;font-size:12px;"> · or maybe ' + escapeHtml(guesses[1].name) + '</span>' : '') + '</div>';
+        } else if (buckProfiles.length){
+          guessHtml = '<div style="margin-top:12px;font-size:13px;color:#9db0a3;">No confident free match against your named bucks — he may be new, or try the AI check.</div>';
+        }
+        panel.innerHTML = '<div style="font:600 11px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#8aa080;margin-bottom:6px;">AI read of this frame</div>' +
+          '<div style="font-size:14px;line-height:1.55;">' + descHtml + '</div>' + guessHtml +
+          '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">' +
+            '<button class="bcl-tagthis" style="padding:10px 18px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:700;">🦌 Tag this buck</button>' +
+            (buckProfiles.length ? '<button class="bcl-whichai" style="padding:10px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#dff0e4;cursor:pointer;font-weight:600;">🔍 Which buck? (AI · ~1-2¢)</button>' : '') +
+          '</div>' +
+          '<div style="font-size:11px;color:#6f8377;margin-top:10px;">' + (multi ? '‹ › or ← → keys flip frames · ' : '') + 'scroll to zoom · drag to pan · Esc closes</div>';
+        var tt = panel.querySelector('.bcl-tagthis'); if (tt) tt.addEventListener('click', function(){ close(); openTagAsPicker(cur); });
+        var wa = panel.querySelector('.bcl-whichai'); if (wa) wa.addEventListener('click', function(){ close(); identifyBuck(cur); });
+      }
+      showCur();
     }
     function selCount(){ return Object.keys(selected).length; }
     // Compact one-line capture stamp — e.g. "8/6 · 8:50p" — so a run of frames a minute apart reads as
