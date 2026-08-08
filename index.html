@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 162</div>
+    <div id="buildBadge">BUILD 163</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5128,12 +5128,12 @@
       var back = document.createElement('div');
       back.style.cssText = 'position:fixed;inset:0;z-index:100007;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;padding:18px;font-family:inherit;';
       var card2 = document.createElement('div');
-      card2.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:600px;width:100%;max-height:82vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+      card2.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:min(960px,96vw);width:96vw;max-height:86vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
       function close(){ if (back.parentNode) document.body.removeChild(back); }
       var rows = buckProfiles.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).map(function(b){
         var photos = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, b.id); });
         photos.sort(function(a, c){ var sa=(a.ai&&a.ai.antler&&a.ai.antler.signature)?1:0, sc=(c.ai&&c.ai.antler&&c.ai.antler.signature)?1:0; return sc - sa; });
-        var thumbs = photos.slice(0, 4).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:92px;height:92px;object-fit:cover;border-radius:6px;background:#000;">'; }).join('') || '<div style="width:92px;height:92px;border-radius:6px;background:#1b2620;"></div>';
+        var thumbs = photos.slice(0, 4).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:160px;height:160px;object-fit:cover;border-radius:8px;background:#000;">'; }).join('') || '<div style="width:160px;height:160px;border-radius:8px;background:#1b2620;"></div>';
         var fids = buckPropertyIds(b);
         var fnames = (typeof properties !== 'undefined') ? fids.map(function(id){ var fp = properties.filter(function(x){ return x.id === id; })[0]; return fp ? (fp.name || 'farm') : null; }).filter(Boolean) : [];
         return '<button class="tap-pick" data-bid="' + escapeHtml(b.id) + '" style="display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:10px;border:1px solid #3c4d42;border-radius:10px;background:#1E2B23;color:#e8f0ea;cursor:pointer;margin-bottom:8px;">' +
