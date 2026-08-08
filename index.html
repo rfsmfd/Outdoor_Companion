@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 146</div>
+    <div id="buildBadge">BUILD 147</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4649,7 +4649,7 @@
   // and move them between groups (or into new groups) to hand-curate, then name a clean group to link
   // all its photos to that buck at once. Singletons land in a "Loose" bucket to grab from. Nothing is
   // committed until you name a group. (Piece 2 — the paid "AI on the tough ones" — layers on later.)
-  var THUMB_CAP = 48; // per-group tiles rendered; "select all" still acts on the full group
+  var THUMB_CAP = 24; // per-group tiles rendered; "select all" still acts on the full group
   function showBuckClusterReview(){
     var pool = galleryUnlinkedBucksInView();
     // The "worth-IDing" bar (founder's "ID shooters, count the rest"): default to MATURE/older body so
@@ -4685,9 +4685,9 @@
     function tile(m){
       var src = m.p.thumb || m.p.downloadURL || '';
       var on = !!selected[m.p.id];
-      return '<div class="bcl-tile" data-pid="' + escapeHtml(m.p.id) + '" style="position:relative;width:70px;height:70px;border-radius:6px;overflow:hidden;cursor:pointer;background:#000;outline:' + (on ? '3px solid #6BBF59' : '1px solid #2a3830') + ';outline-offset:-1px;">' +
+      return '<div class="bcl-tile" data-pid="' + escapeHtml(m.p.id) + '" style="position:relative;width:112px;height:112px;border-radius:7px;overflow:hidden;cursor:pointer;background:#000;outline:' + (on ? '3px solid #6BBF59' : '1px solid #2a3830') + ';outline-offset:-1px;">' +
         '<img src="' + src + '" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;' + (on ? 'opacity:.72;' : '') + '">' +
-        (on ? '<div style="position:absolute;top:2px;right:2px;background:#6BBF59;color:#10240f;border-radius:50%;width:18px;height:18px;line-height:18px;text-align:center;font-size:12px;font-weight:800;">✓</div>' : '') +
+        (on ? '<div style="position:absolute;top:3px;right:3px;background:#6BBF59;color:#10240f;border-radius:50%;width:22px;height:22px;line-height:22px;text-align:center;font-size:14px;font-weight:800;">✓</div>' : '') +
       '</div>';
     }
     function groupCard(g){
@@ -4717,8 +4717,9 @@
       var bar = n > 0
         ? '<div style="position:sticky;top:-18px;z-index:5;background:#26332B;padding:10px 0;margin:-6px 0 10px;border-bottom:1px solid #35443A;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">' +
             '<span style="font-weight:700;font-size:13px;">' + n + ' selected</span>' +
-            '<select class="bcl-moveto" style="flex:1;min-width:160px;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
-              '<option value="">Move to…</option>' + moveOpts + '<option value="__new__">➕ New group</option>' +
+            '<button class="bcl-newbuck" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">➕ New buck from selected</button>' +
+            '<select class="bcl-moveto" style="flex:1;min-width:140px;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
+              '<option value="">Move to another group…</option>' + moveOpts + '<option value="__new__">➕ New empty group</option>' +
             '</select>' +
             '<button class="bcl-clearsel" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Clear</button>' +
           '</div>'
@@ -4746,8 +4747,8 @@
         '<div style="font-size:12.5px;color:#9db0a3;margin-bottom:12px;line-height:1.45;">No bucks meet this bar in view. Loosen it (try “Any body size”), and remember early-velvet point counts read low — body size is the better bar this time of year. It fills in as racks grow.</div>';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
-        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Only bucks worth telling apart are shown — set the bar below. Small/young bucks are held back (still counted as buck activity, just not sorted for ID). <b>Tap to select</b>, move between groups, then <b>Name &amp; link all</b> a clean group. Nothing links until you name it.</div>' +
-        controls + bar + body +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
+        bucksStrip() + controls + bar + body +
         '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
         (heldBack > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + heldBack + ' smaller/younger buck photo' + (heldBack===1?'':'s') + ' held back by the bar — still recorded as buck activity, just not sorted for individual ID.</div>' : '');
       wire();
@@ -4780,6 +4781,51 @@
       board = board.filter(function(x){ return x.id !== g.id; });
       if (!board.length && !loose.members.length) close(); else render();
     }
+    // Assign the currently-selected photos to an EXISTING named buck (tap his folder up top).
+    async function assignSelectedToBuck(buckId){
+      var ids = Object.keys(selected);
+      if (!ids.length){ showToast('Tap a few photos first, then tap the buck.'); return; }
+      var moving = [];
+      allGroups().forEach(function(g){ g.members = g.members.filter(function(m){ if (selected[m.p.id]){ moving.push(m); return false; } return true; }); });
+      for (var i = 0; i < moving.length; i++){
+        var p = moving[i].p;
+        p.buckProfileId = buckId; p.buckSuggestion = null; p.buckMatchedAt = Date.now();
+        if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} }
+      }
+      board = board.filter(function(g){ return g.members.length > 0; });
+      selected = {};
+      renderGallery(); populateGalleryFilters(); refreshTagAllButton();
+      var b = buckProfiles.filter(function(x){ return x.id === buckId; })[0];
+      showToast('Tagged ' + moving.length + ' as ' + (b ? b.name : 'buck'));
+      if (!board.length && !loose.members.length) close(); else render();
+    }
+    // Make a NEW named buck from the selected photos (his own folder from the jump).
+    async function newBuckFromSelected(){
+      var ids = Object.keys(selected);
+      if (!ids.length){ showToast('Tap a few photos first.'); return; }
+      var name = (window.prompt('Name this buck — tags the ' + ids.length + ' selected photo' + (ids.length===1?'':'s') + ':') || '').trim();
+      if (!name) return;
+      var profile = { id: uid(), name: name, notes: '', createdAt: Date.now() };
+      buckProfiles.push(profile);
+      try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
+      await assignSelectedToBuck(profile.id);
+    }
+    // Reference row of already-named bucks — a few photos each to show his look. Doubles as the
+    // "folder" you tap to send your selected photos to.
+    function bucksStrip(){
+      if (!buckProfiles.length) return '';
+      var cards = buckProfiles.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).map(function(b){
+        var photos = importedPhotos.filter(function(p){ return p.buckProfileId === b.id; });
+        photos.sort(function(a, c){ var sa=(a.ai&&a.ai.antler&&a.ai.antler.signature)?1:0, sc=(c.ai&&c.ai.antler&&c.ai.antler.signature)?1:0; return sc - sa; });
+        var thumbs = photos.slice(0, 3).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:46px;height:46px;object-fit:cover;border-radius:4px;background:#000;">'; }).join('');
+        return '<button class="bcl-assign" data-bid="' + escapeHtml(b.id) + '" title="Tag selected photos as ' + escapeHtml(b.name) + '" style="flex:0 0 auto;text-align:left;padding:8px;border-radius:9px;border:1px solid #3c4d42;background:#22302a;color:#e8f0ea;cursor:pointer;">' +
+          '<div style="display:flex;gap:3px;margin-bottom:5px;">' + (thumbs || '<div style="width:46px;height:46px;border-radius:4px;background:#1b2620;"></div>') + '</div>' +
+          '<div style="font-weight:700;font-size:12px;">🦌 ' + escapeHtml(b.name) + ' <span style="color:#9db0a3;font-weight:500;">· ' + photos.length + '</span></div>' +
+        '</button>';
+      }).join('');
+      return '<div style="font-size:11.5px;color:#9db0a3;font-weight:600;margin-bottom:6px;">Your bucks — tap one to tag the photos you\'ve selected as him</div>' +
+        '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:12px;">' + cards + '</div>';
+    }
     function wire(){
       card.querySelector('.bcl-close').addEventListener('click', close);
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-tile'), function(t){
@@ -4793,6 +4839,10 @@
           render();
         });
       });
+      Array.prototype.forEach.call(card.querySelectorAll('.bcl-assign'), function(b){
+        b.addEventListener('click', function(){ assignSelectedToBuck(b.getAttribute('data-bid')); });
+      });
+      var nb = card.querySelector('.bcl-newbuck'); if (nb) nb.addEventListener('click', newBuckFromSelected);
       var mat = card.querySelector('.bcl-mature'); if (mat) mat.addEventListener('change', function(){ filtMature = this.value === '1'; computeBoard(); render(); });
       var mp = card.querySelector('.bcl-minpts'); if (mp) mp.addEventListener('change', function(){ filtMinPts = parseInt(this.value, 10) || 0; computeBoard(); render(); });
       var mv = card.querySelector('.bcl-moveto'); if (mv) mv.addEventListener('change', function(){ if (this.value) moveSelectedTo(this.value); });
