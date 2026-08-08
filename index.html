@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 150</div>
+    <div id="buildBadge">BUILD 151</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4702,14 +4702,41 @@
     function allGroups(){ var g = board.slice(); if (loose.members.length) g.push(loose); return g; }
     function allContainers(){ return board.concat([loose, held]); }  // everything selectable-from, incl. parked
     function findMember(pid){ var r = null; allContainers().forEach(function(g){ g.members.forEach(function(m){ if (m.p.id === pid) r = m; }); }); return r; }
-    // Enlarge one photo to verify which deer it is — a self-contained zoom overlay above the board.
+    // Enlarge one photo to verify which deer it is — a zoom/pan overlay above the board. Scroll wheel
+    // zooms (to check sticker points / split tines); drag pans when zoomed; click outside or Esc closes.
     function enlargePhoto(p){
       var src = p.downloadURL || p.thumb || '';
       var ov = document.createElement('div');
-      ov.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out;';
-      ov.innerHTML = '<img src="' + src + '" alt="" style="max-width:94vw;max-height:92vh;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,.6);">';
-      ov.addEventListener('click', function(){ if (ov.parentNode) document.body.removeChild(ov); });
-      document.body.appendChild(ov);
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;overflow:hidden;';
+      var img = document.createElement('img');
+      img.src = src;
+      img.style.cssText = 'max-width:94vw;max-height:92vh;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,.6);transform-origin:center center;will-change:transform;user-select:none;-webkit-user-drag:none;cursor:zoom-in;';
+      var scale = 1, tx = 0, ty = 0, dragging = false, sx = 0, sy = 0, moved = false;
+      function apply(){ img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; img.style.cursor = scale > 1 ? 'grab' : 'zoom-in'; }
+      function onWheel(e){
+        e.preventDefault();
+        scale *= (e.deltaY < 0 ? 1.15 : 1 / 1.15);
+        scale = Math.max(1, Math.min(10, scale));
+        if (scale === 1){ tx = 0; ty = 0; }
+        apply();
+      }
+      function onDown(e){ if (scale <= 1) return; dragging = true; moved = false; sx = e.clientX - tx; sy = e.clientY - ty; e.preventDefault(); }
+      function onMove(e){ if (!dragging) return; tx = e.clientX - sx; ty = e.clientY - sy; moved = true; apply(); }
+      function onUp(){ dragging = false; }
+      function onKey(e){ if (e.key === 'Escape') close(); }
+      function close(){ document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('keydown', onKey); if (ov.parentNode) document.body.removeChild(ov); }
+      ov.addEventListener('wheel', onWheel, { passive: false });
+      img.addEventListener('mousedown', onDown);
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      document.addEventListener('keydown', onKey);
+      img.addEventListener('dblclick', function(e){ e.stopPropagation(); if (scale > 1){ scale = 1; tx = 0; ty = 0; } else { scale = 3; } apply(); });
+      ov.addEventListener('click', function(e){ if (e.target === img && (scale > 1 || moved)) return; close(); });  // interacting → don't close
+      var hint = document.createElement('div');
+      hint.textContent = 'scroll to zoom · drag to pan · double-click to reset · click outside or Esc to close';
+      hint.style.cssText = 'position:absolute;bottom:14px;left:0;right:0;text-align:center;color:#dfeee5;opacity:.65;font-size:12px;pointer-events:none;';
+      ov.appendChild(img); ov.appendChild(hint);
+      document.body.appendChild(ov); apply();
     }
     function selCount(){ return Object.keys(selected).length; }
     function tile(m){
