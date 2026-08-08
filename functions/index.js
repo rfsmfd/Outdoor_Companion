@@ -69,6 +69,12 @@ const OUTPUT_SCHEMA = {
             "Inside spread vs the ears (ear tip-to-tip ~16-18 in on a whitetail): narrow=inside the ears, average=about ear width, wide=beyond the ears, very-wide=well beyond.",
         },
         mass: { type: "string", enum: ["unknown", "light", "average", "heavy"], description: "Antler/beam mass (thickness)." },
+        frameHeight: {
+          type: "string",
+          enum: ["unknown", "short", "medium", "tall"],
+          description:
+            "Overall rack/tine HEIGHT independent of width: short=stubby/low tines, medium=average, tall=long tines / tall G2-G3 / tall typical frame. Combined with spreadClass this distinguishes 'tall & narrow' from 'wide & low' etc. 'unknown' if not a clear buck or can't tell.",
+        },
         features: {
           type: "array",
           items: { type: "string" },
@@ -80,7 +86,7 @@ const OUTPUT_SCHEMA = {
           description: "One-line human-readable rack summary, e.g. 'wide 5x4, split left G2, heavy mass'. Empty string if not a buck.",
         },
       },
-      required: ["pointsLeft", "pointsRight", "totalPoints", "spreadClass", "mass", "features", "signature"],
+      required: ["pointsLeft", "pointsRight", "totalPoints", "spreadClass", "mass", "frameHeight", "features", "signature"],
     },
     bodyClass: {
       type: "string",
