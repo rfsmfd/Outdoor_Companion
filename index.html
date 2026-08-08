@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 145</div>
+    <div id="buildBadge">BUILD 146</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4596,9 +4596,10 @@
   }
   // Greedy single-linkage clustering. Seeds with the most distinctive racks first (more points +
   // features) so strong fingerprints anchor groups; O(n^2) but trivial for a few thousand photos.
-  function clusterUnlinkedBucks(photos){
-    // FILTER FIRST (the key fix): only cluster identifiable bucks; the velvet nubs are held back.
-    var items = photos.filter(isIdentifiableBuck).map(function(p){ return { p: p, v: buckFpVec(p) }; });
+  function clusterUnlinkedBucks(photos, filterFn){
+    // FILTER FIRST (the key fix): only cluster bucks worth telling apart; the rest are held back.
+    filterFn = filterFn || isIdentifiableBuck;
+    var items = photos.filter(filterFn).map(function(p){ return { p: p, v: buckFpVec(p) }; });
     // Seed with the most distinctive racks first (oddities + points) so strong fingerprints anchor.
     items.sort(function(a, b){ return (b.v.feats.length*3 + b.v.pts) - (a.v.feats.length*3 + a.v.pts); });
     var clusters = [], THRESH = 4;
@@ -4651,16 +4652,27 @@
   var THUMB_CAP = 48; // per-group tiles rendered; "select all" still acts on the full group
   function showBuckClusterReview(){
     var pool = galleryUnlinkedBucksInView();
-    var idCount = pool.filter(isIdentifiableBuck).length;
-    var excluded = pool.length - idCount;
-    var raw = clusterUnlinkedBucks(pool);
-    var nextId = 0;
-    var board = raw.filter(function(c){ return c.members.length >= 2; })
-      .sort(function(a, b){ return b.members.length - a.members.length; })
-      .map(function(c){ return { id: 'g' + (nextId++), members: c.members, loose: false }; });
-    var looseMembers = raw.filter(function(c){ return c.members.length < 2; }).reduce(function(acc, c){ return acc.concat(c.members); }, []);
-    var loose = { id: 'loose', members: looseMembers, loose: true };
+    // The "worth-IDing" bar (founder's "ID shooters, count the rest"): default to MATURE/older body so
+    // the little 4-pointers and young bucks drop off the board. Body size is the reliable maturity
+    // signal in velvet (point counts read low on every buck this time of year). User-tunable live.
+    var filtMature = true, filtMinPts = 0;
+    var nextId = 0, board = [], loose = { id: 'loose', members: [], loose: true };
     var selected = {};
+    function boardFilter(p){
+      var v = buckFpVec(p); if (!v) return false;                                  // need antler detail to cluster
+      if (filtMature && !(v.body === 'mature' || v.body === 'old')) return false;  // shooters/up-and-comers only
+      if (filtMinPts && v.pts < filtMinPts) return false;
+      return true;
+    }
+    function computeBoard(){
+      var raw = clusterUnlinkedBucks(pool, boardFilter);
+      board = raw.filter(function(c){ return c.members.length >= 2; })
+        .sort(function(a, b){ return b.members.length - a.members.length; })
+        .map(function(c){ return { id: 'g' + (nextId++), members: c.members, loose: false }; });
+      loose = { id: 'loose', members: raw.filter(function(c){ return c.members.length < 2; }).reduce(function(acc, c){ return acc.concat(c.members); }, []), loose: true };
+      selected = {};
+    }
+    computeBoard();
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
     var card = document.createElement('div');
@@ -4712,14 +4724,32 @@
           '</div>'
         : '';
       var groups = allGroups();
+      var shownCount = board.reduce(function(s, g){ return s + g.members.length; }, 0) + loose.members.length;
+      var heldBack = pool.filter(function(p){ return buckFpVec(p); }).length - shownCount;
+      var controls =
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;font-size:12px;">' +
+          '<span style="color:#9db0a3;font-weight:600;">Only show:</span>' +
+          '<select class="bcl-mature" style="padding:7px 8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
+            '<option value="1"' + (filtMature ? ' selected' : '') + '>Mature &amp; older bucks</option>' +
+            '<option value="0"' + (!filtMature ? ' selected' : '') + '>Any body size</option>' +
+          '</select>' +
+          '<select class="bcl-minpts" style="padding:7px 8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
+            '<option value="0"' + (filtMinPts === 0 ? ' selected' : '') + '>Any points</option>' +
+            '<option value="6"' + (filtMinPts === 6 ? ' selected' : '') + '>6+ points</option>' +
+            '<option value="8"' + (filtMinPts === 8 ? ' selected' : '') + '>8+ points</option>' +
+            '<option value="10"' + (filtMinPts === 10 ? ' selected' : '') + '>10+ points</option>' +
+          '</select>' +
+          '<span style="color:#6f8377;">' + shownCount + ' shown</span>' +
+        '</div>' +
+        (filtMinPts ? '<div style="font-size:10.5px;color:#6f8377;margin:-6px 0 12px;line-height:1.4;">Heads up: in velvet, point counts read low on every buck — the body-size bar is more reliable right now.</div>' : '');
       var body = groups.length ? groups.map(groupCard).join('') :
-        '<div style="font-size:12.5px;color:#9db0a3;margin-bottom:12px;line-height:1.45;">No identifiable bucks to group in view right now — in early velvet most racks are still too alike to tell apart. This fills in as antlers grow (and as you deep-tag clear photos).</div>';
+        '<div style="font-size:12.5px;color:#9db0a3;margin-bottom:12px;line-height:1.45;">No bucks meet this bar in view. Loosen it (try “Any body size”), and remember early-velvet point counts read low — body size is the better bar this time of year. It fills in as racks grow.</div>';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
-        '<div style="font-size:12px;color:#9db0a3;margin-bottom:12px;line-height:1.45;">Free first cut, grouped by antler traits (spread, frame, mass, body, oddities). <b>Tap photos to select</b>, then move them between groups or into a new one. When a group is clean, <b>Name &amp; link all</b> to create that buck. Nothing links until you name it.</div>' +
-        bar + body +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Only bucks worth telling apart are shown — set the bar below. Small/young bucks are held back (still counted as buck activity, just not sorted for ID). <b>Tap to select</b>, move between groups, then <b>Name &amp; link all</b> a clean group. Nothing links until you name it.</div>' +
+        controls + bar + body +
         '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
-        (excluded > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + excluded + ' smaller/velvet buck photo' + (excluded===1?'':'s') + ' held back — not distinct enough to tell apart yet. They\'ll become groupable as racks develop.</div>' : '');
+        (heldBack > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + heldBack + ' smaller/younger buck photo' + (heldBack===1?'':'s') + ' held back by the bar — still recorded as buck activity, just not sorted for individual ID.</div>' : '');
       wire();
       card.scrollTop = scroll;
     }
@@ -4763,6 +4793,8 @@
           render();
         });
       });
+      var mat = card.querySelector('.bcl-mature'); if (mat) mat.addEventListener('change', function(){ filtMature = this.value === '1'; computeBoard(); render(); });
+      var mp = card.querySelector('.bcl-minpts'); if (mp) mp.addEventListener('change', function(){ filtMinPts = parseInt(this.value, 10) || 0; computeBoard(); render(); });
       var mv = card.querySelector('.bcl-moveto'); if (mv) mv.addEventListener('change', function(){ if (this.value) moveSelectedTo(this.value); });
       var cl = card.querySelector('.bcl-clearsel'); if (cl) cl.addEventListener('click', function(){ selected = {}; render(); });
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-name'), function(b){
