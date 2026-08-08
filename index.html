@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 165</div>
+    <div id="buildBadge">BUILD 166</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3522,14 +3522,22 @@
     });
   }
 
+  // Per-type glyph so a logged sighting reads at a glance — a deer for buck/doe, turkey, sign, etc. —
+  // instead of a generic colored diamond. (Emoji has no separate doe, so buck & doe share the deer
+  // glyph, distinguished by the type color: buck gold, doe tan.)
+  var OBS_TYPE_EMOJI = {
+    buck:'🦌', doe:'🦌', turkey:'🦃', scrape:'🍂', rub:'🌲', track:'🐾', trail:'👣', bedding:'💤', feeding:'🌾', hunt:'🎯', custom:'📍',
+    bass:'🐟', catfish:'🐟', crappie:'🐟', bluegill:'🐟', trout:'🐟', walleye:'🐟', pike:'🐟', nocatch:'🚫', fishnote:'📝', fishcustom2:'📍'
+  };
   function obsMarkerIcon(type){
     var t = getActiveObsTypes()[type] || getFallbackTypeEntry(true);
+    var emoji = OBS_TYPE_EMOJI[type] || '📍';
     return L.divIcon({
       className: '',
-      html: '<div class="obs-marker" style="--mc:'+t.color+'"></div>',
-      iconSize: [18,18],
-      iconAnchor: [9,9],
-      popupAnchor: [0,-12]
+      html: '<div style="width:27px;height:27px;border-radius:50%;background:'+t.color+';border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;font-size:15px;">'+emoji+'</div>',
+      iconSize: [27,27],
+      iconAnchor: [13,13],
+      popupAnchor: [0,-15]
     });
   }
 
@@ -10030,7 +10038,17 @@
       if (idx >= list.length) idx = list.length-1;
       var pts = [];
       for (var k=0; k<=idx; k++){ pts.push([list[k].lat, list[k].lng]); }
-      if (pts.length > 1){ layers.push(L.polyline(pts, { color:'#E8862E', weight:2.5, opacity:0.8, dashArray:'5 7', pane:'buckMovePane' }).addTo(map)); }
+      if (pts.length > 1){
+        layers.push(L.polyline(pts, { color:'#E8862E', weight:2.5, opacity:0.8, dashArray:'5 7', pane:'buckMovePane' }).addTo(map));
+        // Direction arrows woven along the track (midpoint of each leg, rotated to travel heading) — so
+        // even a loop back to the same spot reads directionally: first → … → last.
+        for (var a=0; a<idx; a++){
+          var p1 = list[a], p2 = list[a+1];
+          if (p1.lat === p2.lat && p1.lng === p2.lng) continue;   // no movement on this leg
+          var deg = Math.atan2(-(p2.lat - p1.lat), (p2.lng - p1.lng)) * 180 / Math.PI;  // screen heading for a right-pointing glyph
+          layers.push(L.marker([(p1.lat+p2.lat)/2, (p1.lng+p2.lng)/2], { pane:'buckMovePane', interactive:false, icon: L.divIcon({ className:'', html:'<div style="color:#ffb066;font-size:17px;line-height:17px;transform:rotate('+deg+'deg);text-shadow:0 0 3px #000;">➤</div>', iconSize:[17,17], iconAnchor:[8,8] }) }).addTo(map));
+        }
+      }
       for (var k=0; k<=idx; k++){
         var cur = (k === idx), isSight = (list[k].source === 'sighting');
         var html;
