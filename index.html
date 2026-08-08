@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 159</div>
+    <div id="buildBadge">BUILD 160</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4824,9 +4824,14 @@
       }
       panel.innerHTML = '<div style="font:600 11px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#8aa080;margin-bottom:6px;">AI read of this frame</div>' +
         '<div style="font-size:14px;line-height:1.55;">' + descHtml + '</div>' + guessHtml +
-        (buckProfiles.length ? '<button class="bcl-whichai" style="margin-top:12px;padding:9px 14px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">🔍 Which buck? (AI check · ~1-2¢)</button>' : '') +
+        '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">' +
+          '<button class="bcl-tagthis" style="padding:10px 18px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:700;">🦌 Tag this buck</button>' +
+          (buckProfiles.length ? '<button class="bcl-whichai" style="padding:10px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#dff0e4;cursor:pointer;font-weight:600;">🔍 Which buck? (AI · ~1-2¢)</button>' : '') +
+        '</div>' +
         '<div style="font-size:11px;color:#6f8377;margin-top:10px;">scroll image to zoom · drag to pan · double-click resets · Esc closes</div>';
       ov.appendChild(stage); ov.appendChild(panel);
+      var tt = panel.querySelector('.bcl-tagthis');
+      if (tt) tt.addEventListener('click', function(){ close(); openTagAsPicker(p); });
       var wa = panel.querySelector('.bcl-whichai');
       if (wa) wa.addEventListener('click', function(){ close(); identifyBuck(p); });
       document.body.appendChild(ov); apply();
@@ -4977,11 +4982,12 @@
       if (!board.length && !loose.members.length && !held.members.length && !noInt.members.length) close(); else render();
     }
     // Assign the currently-selected photos to an EXISTING named buck (tap his folder up top).
-    async function assignSelectedToBuck(buckId){
-      var ids = Object.keys(selected);
+    async function assignSelectedToBuck(buckId, idsOverride){
+      var useIds = idsOverride || selected;   // idsOverride lets a single-photo flow (enlarge) tag without touching the live selection
+      var ids = Object.keys(useIds);
       if (!ids.length){ showToast('Tap a few photos first, then tap the buck.'); return; }
       var affected = [], binCount = 0;
-      allContainers().forEach(function(g){ g.members.forEach(function(m){ if (selected[m.p.id]) affected.push({ p: m.p, held: !!g.held }); }); });
+      allContainers().forEach(function(g){ g.members.forEach(function(m){ if (useIds[m.p.id]) affected.push({ p: m.p, held: !!g.held }); }); });
       for (var i = 0; i < affected.length; i++){
         var p = affected[i].p;
         if (!Array.isArray(p.buckProfileIds)) p.buckProfileIds = [];
@@ -4994,11 +5000,11 @@
       }
       // Cluster/loose photos are done once credited and leave the board; bin (held) frames STAY parked
       // so you can credit additional bucks to the same frame, until you release them.
-      board.forEach(function(g){ g.members = g.members.filter(function(m){ return !selected[m.p.id]; }); });
-      loose.members = loose.members.filter(function(m){ return !selected[m.p.id]; });
-      noInt.members = noInt.members.filter(function(m){ return !selected[m.p.id]; });
+      board.forEach(function(g){ g.members = g.members.filter(function(m){ return !useIds[m.p.id]; }); });
+      loose.members = loose.members.filter(function(m){ return !useIds[m.p.id]; });
+      noInt.members = noInt.members.filter(function(m){ return !useIds[m.p.id]; });
       board = board.filter(function(g){ return g.members.length > 0; });
-      selected = {};
+      if (!idsOverride) selected = {};
       renderGallery(); populateGalleryFilters(); refreshTagAllButton();
       var b = buckProfiles.filter(function(x){ return x.id === buckId; })[0];
       showToast(binCount ? ('Added ' + affected.length + ' to ' + (b ? b.name : 'buck') + ' — release when fully credited') : ('Tagged ' + affected.length + ' as ' + (b ? b.name : 'buck')));
@@ -5068,22 +5074,25 @@
       render();
     }
     // Make a NEW named buck from the selected photos (his own folder from the jump).
-    async function newBuckFromSelected(){
-      var ids = Object.keys(selected);
+    async function newBuckFromSelected(idsOverride){
+      var useIds = idsOverride || selected;
+      var ids = Object.keys(useIds);
       if (!ids.length){ showToast('Tap a few photos first.'); return; }
-      var det = await promptBuckDetails({ title: 'New buck — tags the ' + ids.length + ' selected photo' + (ids.length===1?'':'s') });
+      var det = await promptBuckDetails({ title: 'New buck — tags the ' + ids.length + ' photo' + (ids.length===1?'':'s') });
       if (!det) return;
       var profile = { id: uid(), name: det.name, notes: det.notes, propertyIds: det.propertyIds || [], createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
-      await assignSelectedToBuck(profile.id);
+      await assignSelectedToBuck(profile.id, idsOverride);
     }
     // Rich "Tag as…" picker from the bottom bar — each named buck shown WITH his reference photos +
     // distinguishing marks + farms, so you can tell look-alikes apart without scrolling to the top strip.
-    function openTagAsPicker(){
-      var ids = Object.keys(selected);
+    function openTagAsPicker(targetPhoto){
+      var single = !!targetPhoto;
+      var idsObj = single ? (function(){ var o = {}; o[targetPhoto.id] = true; return o; })() : selected;
+      var ids = Object.keys(idsObj);
       if (!ids.length){ showToast('Select photos first.'); return; }
-      if (!buckProfiles.length){ newBuckFromSelected(); return; }
+      if (!buckProfiles.length){ newBuckFromSelected(single ? idsObj : undefined); return; }
       var back = document.createElement('div');
       back.style.cssText = 'position:fixed;inset:0;z-index:100007;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;padding:18px;font-family:inherit;';
       var card2 = document.createElement('div');
@@ -5092,7 +5101,7 @@
       var rows = buckProfiles.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).map(function(b){
         var photos = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, b.id); });
         photos.sort(function(a, c){ var sa=(a.ai&&a.ai.antler&&a.ai.antler.signature)?1:0, sc=(c.ai&&c.ai.antler&&c.ai.antler.signature)?1:0; return sc - sa; });
-        var thumbs = photos.slice(0, 4).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:58px;height:58px;object-fit:cover;border-radius:5px;background:#000;">'; }).join('') || '<div style="width:58px;height:58px;border-radius:5px;background:#1b2620;"></div>';
+        var thumbs = photos.slice(0, 4).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:92px;height:92px;object-fit:cover;border-radius:6px;background:#000;">'; }).join('') || '<div style="width:92px;height:92px;border-radius:6px;background:#1b2620;"></div>';
         var fids = buckPropertyIds(b);
         var fnames = (typeof properties !== 'undefined') ? fids.map(function(id){ var fp = properties.filter(function(x){ return x.id === id; })[0]; return fp ? (fp.name || 'farm') : null; }).filter(Boolean) : [];
         return '<button class="tap-pick" data-bid="' + escapeHtml(b.id) + '" style="display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:10px;border:1px solid #3c4d42;border-radius:10px;background:#1E2B23;color:#e8f0ea;cursor:pointer;margin-bottom:8px;">' +
@@ -5107,13 +5116,13 @@
       card2.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">Tag ' + ids.length + ' photo' + (ids.length===1?'':'s') + ' as…</div>' +
         '<div style="font-size:12px;color:#9db0a3;margin-bottom:14px;">Photos &amp; marks shown so you can tell them apart without scrolling up.</div>' +
         rows +
-        '<button class="tap-new" style="width:100%;padding:10px;border-radius:9px;border:1px dashed #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-bottom:8px;">➕ New buck from these</button>' +
+        '<button class="tap-new" style="width:100%;padding:10px;border-radius:9px;border:1px dashed #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-bottom:8px;">➕ New buck from ' + (single ? 'this' : 'these') + '</button>' +
         '<button class="tap-cancel" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>';
       back.appendChild(card2); document.body.appendChild(back);
       back.addEventListener('click', function(e){ if (e.target === back) close(); });
       card2.querySelector('.tap-cancel').addEventListener('click', close);
-      Array.prototype.forEach.call(card2.querySelectorAll('.tap-pick'), function(btn){ btn.addEventListener('click', function(){ close(); assignSelectedToBuck(btn.getAttribute('data-bid')); }); });
-      card2.querySelector('.tap-new').addEventListener('click', function(){ close(); newBuckFromSelected(); });
+      Array.prototype.forEach.call(card2.querySelectorAll('.tap-pick'), function(btn){ btn.addEventListener('click', function(){ close(); assignSelectedToBuck(btn.getAttribute('data-bid'), single ? idsObj : undefined); }); });
+      card2.querySelector('.tap-new').addEventListener('click', function(){ close(); newBuckFromSelected(single ? idsObj : undefined); });
     }
     // Reference row of already-named bucks — a few photos each to show his look. Doubles as the
     // "folder" you tap to send your selected photos to.
