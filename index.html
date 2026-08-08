@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 155</div>
+    <div id="buildBadge">BUILD 156</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4251,7 +4251,7 @@
     if (val === '__new__'){
       var det = await promptBuckDetails();
       if (!det){ this.value = doc.buckProfileId || ''; return; }
-      var profile = { id: uid(), name: det.name, notes: det.notes, propertyId: det.propertyId || null, createdAt: Date.now() };
+      var profile = { id: uid(), name: det.name, notes: det.notes, propertyIds: det.propertyIds || [], createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       doc.buckProfileId = profile.id;
@@ -4296,12 +4296,15 @@
       var card = document.createElement('div');
       card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:20px;max-width:430px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
       var __props = (typeof properties !== 'undefined' && properties) ? properties.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||''); }) : [];
+      var __defProps = Array.isArray(defaults.propertyIds) ? defaults.propertyIds : (defaults.propertyId ? [defaults.propertyId] : []);
       var propField = __props.length ? (
-        '<label style="display:block;font-size:12px;color:#9db0a3;margin-bottom:4px;">Home farm / property <span style="opacity:.7;">— where he mainly lives (optional)</span></label>' +
-        '<select class="pbd-prop" style="width:100%;padding:9px 10px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-bottom:16px;font-size:14px;font-family:inherit;">' +
-          '<option value="">— not set —</option>' +
-          __props.map(function(p){ return '<option value="' + escapeHtml(p.id) + '"' + (defaults.propertyId === p.id ? ' selected' : '') + '>' + escapeHtml(p.name || '(unnamed farm)') + '</option>'; }).join('') +
-        '</select>'
+        '<label style="display:block;font-size:12px;color:#9db0a3;margin-bottom:6px;">Home farm(s) <span style="opacity:.7;">— where he lives; pick any he ranges (optional)</span></label>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">' +
+          __props.map(function(p){
+            var on = __defProps.indexOf(p.id) !== -1;
+            return '<label style="display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #3c4d42;border-radius:8px;background:#1E2B23;cursor:pointer;font-size:13px;"><input type="checkbox" class="pbd-prop" value="' + escapeHtml(p.id) + '"' + (on ? ' checked' : '') + ' style="accent-color:#6BBF59;"> ' + escapeHtml(p.name || '(unnamed farm)') + '</label>';
+          }).join('') +
+        '</div>'
       ) : '';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:14px;">🦌 ' + (defaults.title ? escapeHtml(defaults.title) : 'Name this buck') + '</div>' +
@@ -4318,7 +4321,7 @@
       var nameI = card.querySelector('.pbd-name'), notesI = card.querySelector('.pbd-notes');
       nameI.value = defaults.name || ''; notesI.value = defaults.notes || '';
       function done(v){ if (back.parentNode) document.body.removeChild(back); resolve(v); }
-      function save(){ var nm = nameI.value.trim(); if (!nm){ nameI.focus(); return; } var ps = card.querySelector('.pbd-prop'); done({ name: nm, notes: notesI.value.trim(), propertyId: ps ? (ps.value || null) : null }); }
+      function save(){ var nm = nameI.value.trim(); if (!nm){ nameI.focus(); return; } var pids = []; Array.prototype.forEach.call(card.querySelectorAll('.pbd-prop'), function(c){ if (c.checked) pids.push(c.value); }); done({ name: nm, notes: notesI.value.trim(), propertyIds: pids }); }
       card.querySelector('.pbd-cancel').addEventListener('click', function(){ done(null); });
       back.addEventListener('click', function(e){ if (e.target === back) done(null); });
       card.querySelector('.pbd-save').addEventListener('click', save);
@@ -4326,14 +4329,29 @@
       setTimeout(function(){ nameI.focus(); }, 50);
     });
   }
+  // Farms a buck is known to range (multi; legacy single propertyId folded in).
+  function buckPropertyIds(b){
+    var ids = [];
+    if (b.propertyId) ids.push(b.propertyId);
+    if (Array.isArray(b.propertyIds)) b.propertyIds.forEach(function(x){ if (x && ids.indexOf(x) === -1) ids.push(x); });
+    return ids;
+  }
+  // Which property a photo was taken on (via its located site) — a location prior for buck matching.
+  function photoPropertyId(p){
+    if (!p || !p.matchedSiteId || typeof sites === 'undefined') return null;
+    var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0];
+    return s ? (s.propertyId || null) : null;
+  }
   // FREE "which buck?" — compares THIS photo's already-stored antler fingerprint to each named buck's
-  // linked photos (same trait math the clustering uses). No AI call, no cost. Best-effort hint; the paid
-  // image matcher ("Which buck? (AI)") is the escalation for the tough ones.
+  // linked photos (same trait math the clustering uses), then nudges up any buck known to range the
+  // SAME farm this photo was taken on. No AI call, no cost. The paid image matcher is the escalation.
   function suggestBucksFree(p){
     var pv = buckFpVec(p); if (!pv) return [];
+    var photoProp = photoPropertyId(p);
     return buckProfiles.map(function(b){
       var best = 0;
       importedPhotos.forEach(function(x){ if (!photoLinkedToBuck(x, b.id)) return; var v = buckFpVec(x); if (v){ var s = buckSim(pv, v); if (s > best) best = s; } });
+      if (best > 0 && photoProp && buckPropertyIds(b).indexOf(photoProp) !== -1) best += 2;  // same-farm prior
       return { id: b.id, name: b.name, score: best };
     }).filter(function(r){ return r.score > 0; }).sort(function(a, b){ return b.score - a.score; });
   }
@@ -4420,7 +4438,7 @@
     card.querySelector('.bm-new').addEventListener('click', async function(){
       var det = await promptBuckDetails();
       if (!det) return;
-      var profile = { id: uid(), name: det.name, notes: det.notes, propertyId: det.propertyId || null, createdAt: Date.now() };
+      var profile = { id: uid(), name: det.name, notes: det.notes, propertyIds: det.propertyIds || [], createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       await linkPhotoToBuckId(doc, profile.id);
@@ -4937,7 +4955,7 @@
     async function nameGroup(g){
       var det = await promptBuckDetails({ title: 'Name this buck — links all ' + g.members.length + ' photo' + (g.members.length===1?'':'s') });
       if (!det) return;
-      var profile = { id: uid(), name: det.name, notes: det.notes, propertyId: det.propertyId || null, createdAt: Date.now() };
+      var profile = { id: uid(), name: det.name, notes: det.notes, propertyIds: det.propertyIds || [], createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       for (var i = 0; i < g.members.length; i++){
@@ -5047,7 +5065,7 @@
       if (!ids.length){ showToast('Tap a few photos first.'); return; }
       var det = await promptBuckDetails({ title: 'New buck — tags the ' + ids.length + ' selected photo' + (ids.length===1?'':'s') });
       if (!det) return;
-      var profile = { id: uid(), name: det.name, notes: det.notes, propertyId: det.propertyId || null, createdAt: Date.now() };
+      var profile = { id: uid(), name: det.name, notes: det.notes, propertyIds: det.propertyIds || [], createdAt: Date.now() };
       buckProfiles.push(profile);
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       await assignSelectedToBuck(profile.id);
@@ -5073,7 +5091,11 @@
         var thumbs = photos.slice(0, 3).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:46px;height:46px;object-fit:cover;border-radius:4px;background:#000;">'; }).join('');
         var mark = b.notes ? '<div style="font-size:10px;color:#9db0a3;margin-top:2px;max-width:158px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + escapeHtml(b.notes) + '</div>' : '';
         var farm = '';
-        if (b.propertyId && typeof properties !== 'undefined'){ var fp = properties.filter(function(x){ return x.id === b.propertyId; })[0]; if (fp) farm = '<div style="font-size:10px;color:#8aa080;margin-top:2px;">📍 ' + escapeHtml(fp.name || 'farm') + '</div>'; }
+        var fids = buckPropertyIds(b);
+        if (fids.length && typeof properties !== 'undefined'){
+          var fnames = fids.map(function(id){ var fp = properties.filter(function(x){ return x.id === id; })[0]; return fp ? (fp.name || 'farm') : null; }).filter(Boolean);
+          if (fnames.length) farm = '<div style="font-size:10px;color:#8aa080;margin-top:2px;max-width:158px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">📍 ' + escapeHtml(fnames.join(', ')) + '</div>';
+        }
         return '<button class="bcl-assign" data-bid="' + escapeHtml(b.id) + '" title="Tag selected photos as ' + escapeHtml(b.name) + (b.notes ? ' — ' + escapeHtml(b.notes) : '') + '" style="flex:0 0 auto;text-align:left;padding:8px;border-radius:9px;border:1px solid #3c4d42;background:#22302a;color:#e8f0ea;cursor:pointer;">' +
           '<div style="display:flex;gap:3px;margin-bottom:5px;">' + (thumbs || '<div style="width:46px;height:46px;border-radius:4px;background:#1b2620;"></div>') + '</div>' +
           '<div style="font-weight:700;font-size:12px;">🦌 ' + escapeHtml(b.name) + ' <span style="color:#9db0a3;font-weight:500;">· ' + photos.length + '</span></div>' + mark + farm +
