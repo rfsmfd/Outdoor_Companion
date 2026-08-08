@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 143</div>
+    <div id="buildBadge">BUILD 144</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2086,6 +2086,7 @@
         <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
         <button type="button" class="btn-ghost" id="galleryBuckMatchBtn" style="width:100%;margin-top:6px;display:none;">🦌 Match buck photos to known bucks</button>
         <button type="button" class="btn-ghost" id="galleryBuckReviewBtn" style="width:100%;margin-top:6px;display:none;">🦌 Review buck suggestions</button>
+        <button type="button" class="btn-ghost" id="galleryBuckClusterBtn" style="width:100%;margin-top:6px;display:none;">🧩 Group look-alike bucks (free, no AI)</button>
         <button type="button" class="btn-ghost" id="galleryCleanupBtn" style="width:100%;margin-top:6px;display:none;">🧹 Clean up empty frames</button>
         <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
         <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
@@ -4524,6 +4525,150 @@
     });
   }
 
+  // ---------- Phase 2.5 Stage 3c: FREE look-alike clustering (group unknown bucks, no AI) ----------
+  // For a big backlog, matching every photo against a short list of named bucks is slow + costs money
+  // and most come back "unknown." Instead, group the UNLINKED buck photos by the antler fingerprint the
+  // tagger already stored (points / spread / mass / distinctive features) — pure client-side math, FREE
+  // and instant. Each group is likely one buck; you name a group once and all its photos link at once.
+  // It's a rough first pass (lookalikes may merge, one buck may split across very different frames), so
+  // it's presented for you to name/split/skip — never auto-committed.
+  var SPREAD_ORD = { narrow:0, average:1, wide:2, 'very-wide':3 };
+  function buckFpVec(p){
+    var a = p.ai && p.ai.antler; if (!a) return null;
+    var pts = a.totalPoints || ((a.pointsLeft||0) + (a.pointsRight||0));
+    var feats = (Array.isArray(a.features) ? a.features : []).map(function(f){ return String(f||'').toLowerCase().trim(); }).filter(Boolean);
+    return { pts: pts, spread: a.spreadClass || 'unknown', mass: a.mass || 'unknown', feats: feats, sig: a.signature || '' };
+  }
+  // Similarity score between two rack fingerprints. Shared DISTINCTIVE features weigh most (they're what
+  // truly fingerprint a buck); point count/spread/mass are supporting signals; a big point gap penalizes.
+  function buckSim(a, b){
+    if (!a || !b) return 0;
+    var s = 0;
+    if (a.pts > 0 && b.pts > 0){
+      var pd = Math.abs(a.pts - b.pts);
+      if (pd === 0) s += 3; else if (pd === 1) s += 2; else if (pd === 2) s += 0.5; else s -= 1.5;
+    }
+    if (a.spread !== 'unknown' && b.spread !== 'unknown'){
+      if (a.spread === b.spread) s += 1.5;
+      else if (Math.abs(SPREAD_ORD[a.spread] - SPREAD_ORD[b.spread]) === 1) s += 0.5;
+    }
+    if (a.mass !== 'unknown' && a.mass === b.mass) s += 1;
+    var shared = a.feats.filter(function(f){ return b.feats.indexOf(f) !== -1; }).length;
+    s += shared * 2;
+    return s;
+  }
+  function galleryUnlinkedBucksInView(){
+    return galleryPhotoList().filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId; });
+  }
+  // Greedy single-linkage clustering. Seeds with the most distinctive racks first (more points +
+  // features) so strong fingerprints anchor groups; O(n^2) but trivial for a few thousand photos.
+  function clusterUnlinkedBucks(photos){
+    var items = photos.map(function(p){ return { p: p, v: buckFpVec(p) }; }).filter(function(x){ return x.v; });
+    items.sort(function(a, b){ return (b.v.pts + b.v.feats.length*2) - (a.v.pts + a.v.feats.length*2); });
+    var clusters = [], THRESH = 3;
+    items.forEach(function(x){
+      var best = null, bestScore = THRESH;
+      for (var i = 0; i < clusters.length; i++){
+        var sc = 0, mem = clusters[i].members;
+        for (var j = 0; j < mem.length; j++){ var v = buckSim(x.v, mem[j].v); if (v > sc) sc = v; }
+        if (sc > bestScore){ bestScore = sc; best = clusters[i]; }
+      }
+      if (best) best.members.push(x); else clusters.push({ members: [x] });
+    });
+    return clusters;
+  }
+  function clusterDescriptor(members){
+    var ptsC = {}, sprC = {}, masC = {}, featC = {};
+    members.forEach(function(m){
+      var v = m.v;
+      if (v.pts > 0) ptsC[v.pts] = (ptsC[v.pts]||0) + 1;
+      if (v.spread !== 'unknown') sprC[v.spread] = (sprC[v.spread]||0) + 1;
+      if (v.mass !== 'unknown') masC[v.mass] = (masC[v.mass]||0) + 1;
+      v.feats.forEach(function(f){ featC[f] = (featC[f]||0) + 1; });
+    });
+    function top(o){ var k=null,c=-1; Object.keys(o).forEach(function(x){ if(o[x]>c){c=o[x];k=x;} }); return k; }
+    var pts = top(ptsC), spr = top(sprC), mas = top(masC);
+    var feats = Object.keys(featC).sort(function(a,b){ return featC[b]-featC[a]; }).slice(0, 3);
+    var bits = [];
+    if (spr) bits.push(spr);
+    if (mas) bits.push(mas + ' mass');
+    var head = (pts ? ('~' + pts + ' pt') : 'buck') + (bits.length ? ' · ' + bits.join(', ') : '');
+    if (feats.length) head += ' · ' + feats.join(', ');
+    return head;
+  }
+  function refreshBuckClusterButton(){
+    var btn = document.getElementById('galleryBuckClusterBtn');
+    if (!btn) return;
+    var n = cloudPhotosAvailable() ? galleryUnlinkedBucksInView().filter(function(p){ return buckFpVec(p); }).length : 0;
+    btn.style.display = n >= 2 ? 'block' : 'none';
+    btn.textContent = '🧩 Group look-alike bucks (' + n + ', free)';
+  }
+  document.getElementById('galleryBuckClusterBtn').addEventListener('click', function(){ showBuckClusterReview(); });
+  function showBuckClusterReview(){
+    var pool = galleryUnlinkedBucksInView();
+    var clusters = clusterUnlinkedBucks(pool).filter(function(c){ return c.members.length >= 2; })
+      .sort(function(a, b){ return b.members.length - a.members.length; });
+    var loners = pool.filter(function(p){ return buckFpVec(p); }).length - clusters.reduce(function(s, c){ return s + c.members.length; }, 0);
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:660px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    function close(){ if (back.parentNode) document.body.removeChild(back); refreshTagAllButton(); }
+    if (!clusters.length){
+      card.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:8px;">🧩 Group look-alike bucks</div>' +
+        '<div style="font-size:12.5px;color:#9db0a3;margin-bottom:14px;line-height:1.45;">No clear look-alike groups in view — these bucks are too different from each other, or their photos don\'t have enough antler detail to group. Deep-tag a few clear ones, or name them individually from their photos.</div>' +
+        '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Close</button>';
+      back.appendChild(card); document.body.appendChild(back);
+      card.querySelector('.bcl-close').addEventListener('click', close);
+      back.addEventListener('click', function(e){ if (e.target === back) close(); });
+      return;
+    }
+    var html = '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Group look-alike bucks</div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:14px;line-height:1.45;">Grouped by antler look — free, no AI, so it\'s a rough first cut. Each group is likely one buck. Name a group to create that buck and link all its photos at once. If a group looks mixed, hit “Not one buck” and sort those from their photos.</div>';
+    clusters.forEach(function(c, idx){
+      var desc = clusterDescriptor(c.members);
+      var thumbs = c.members.slice(0, 8).map(function(m){ var src = m.p.thumb || m.p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:72px;height:72px;object-fit:cover;border-radius:6px;background:#000;">'; }).join('');
+      var more = c.members.length > 8 ? ('<div style="width:72px;height:72px;border-radius:6px;background:#1b2620;display:flex;align-items:center;justify-content:center;color:#9db0a3;font-size:12px;">+' + (c.members.length - 8) + '</div>') : '';
+      html += '<div class="bcl-group" data-idx="' + idx + '" style="border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:12px;background:#1E2B23;">' +
+        '<div style="font-weight:700;margin-bottom:2px;">🦌 Likely one buck <span style="font-size:11px;color:#E8B04B;font-weight:600;">· ' + c.members.length + ' photos</span></div>' +
+        '<div style="font-size:11px;color:#9db0a3;margin-bottom:8px;line-height:1.4;">' + escapeHtml(desc) + '</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">' + thumbs + more + '</div>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button class="bcl-name" data-idx="' + idx + '" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">🦌 Name &amp; link all ' + c.members.length + '</button>' +
+        '<button class="bcl-skip" data-idx="' + idx + '" style="flex:0 0 auto;padding:9px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Not one buck</button>' +
+        '</div></div>';
+    });
+    html += '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
+      (loners > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + loners + ' buck photo' + (loners===1?'':'s') + ' didn\'t fit any group (one-of-a-kind rack or thin antler detail) — handle those from their own photos.</div>' : '');
+    card.innerHTML = html;
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.bcl-close').addEventListener('click', close);
+    function removeGroup(idx){ var el = card.querySelector('.bcl-group[data-idx="' + idx + '"]'); if (el && el.parentNode) el.parentNode.removeChild(el); if (!card.querySelector('.bcl-group')) close(); }
+    Array.prototype.forEach.call(card.querySelectorAll('.bcl-name'), function(b){
+      b.addEventListener('click', async function(){
+        var idx = parseInt(b.getAttribute('data-idx'), 10);
+        var members = clusters[idx].members;
+        var name = (window.prompt('Name this buck — links all ' + members.length + ' photos to him:') || '').trim();
+        if (!name) return;
+        var profile = { id: uid(), name: name, notes: '', createdAt: Date.now() };
+        buckProfiles.push(profile);
+        try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
+        for (var i = 0; i < members.length; i++){
+          var p = members[i].p;
+          p.buckProfileId = profile.id; p.buckSuggestion = null; p.buckMatchedAt = Date.now();
+          if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} }
+        }
+        renderGallery(); populateGalleryFilters(); refreshTagAllButton();
+        showToast('Created ' + name + ' · linked ' + members.length + ' photo' + (members.length===1?'':'s'));
+        removeGroup(idx);
+      });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll('.bcl-skip'), function(b){
+      b.addEventListener('click', function(){ removeGroup(parseInt(b.getAttribute('data-idx'), 10)); });
+    });
+  }
+
   document.getElementById('photoLightboxDelete').addEventListener('click', async function(){
     if (!galleryLightboxDoc) return;
     var doc = galleryLightboxDoc;
@@ -4583,6 +4728,7 @@
     btn.textContent = n === 0 ? '🧠 Everything in view is tagged' : ('🧠 Tag all untagged with AI (' + n + ')');
     refreshCleanupButton();
     refreshBuckMatchButtons();
+    refreshBuckClusterButton();
     refreshAssignLocButton();
     refreshWeatherButton();
   }
