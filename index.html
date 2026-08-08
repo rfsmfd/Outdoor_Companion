@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 164</div>
+    <div id="buildBadge">BUILD 165</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9994,10 +9994,16 @@
   var _buckMoveCleanup = null;
   function showBuckMovement(profile){
     if (_buckMoveCleanup) _buckMoveCleanup();
-    // His located sightings: linked photo + its site's coords + capture time, oldest→newest.
-    var full = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, profile.id) && p.matchedSiteId && p.timestamp; })
-      .map(function(p){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; return (s && typeof s.lat === 'number') ? { p:p, ts:p.timestamp, lat:s.lat, lng:s.lng, name:(s.name || 'Unnamed spot') } : null; })
-      .filter(Boolean).sort(function(a,b){ return a.ts - b.ts; });
+    if (!document.getElementById('bmvStyle')){ var st = document.createElement('style'); st.id = 'bmvStyle'; st.textContent = '@keyframes bmvBlink{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(1.16);}}.bmv-blink{animation:bmvBlink .9s ease-in-out infinite;}'; document.head.appendChild(st); }
+    // Two kinds of events on his timeline, merged and time-sorted:
+    //  • CAMERA frames — linked photos at their site's coords/capture time.
+    //  • real SIGHTINGS — field-log observations linked to this buck (you or, once sharing is on, buddies).
+    var photoEvents = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, profile.id) && p.matchedSiteId && p.timestamp; })
+      .map(function(p){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; return (s && typeof s.lat === 'number') ? { source:'cam', p:p, ts:p.timestamp, lat:s.lat, lng:s.lng, name:(s.name || 'Unnamed spot') } : null; })
+      .filter(Boolean);
+    var obsEvents = observations.filter(function(o){ return o.buckProfileId === profile.id && o.lat != null && o.lng != null && o.createdAt; })
+      .map(function(o){ var s = o.siteId ? sites.filter(function(x){ return x.id === o.siteId; })[0] : null; return { source:'sighting', o:o, ts:o.createdAt, lat:o.lat, lng:o.lng, name:(s && s.name) ? s.name : 'Field sighting' }; });
+    var full = photoEvents.concat(obsEvents).sort(function(a,b){ return a.ts - b.ts; });
     closeAllModals();
     if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();
     if (!map.getPane('buckMovePane')){ map.createPane('buckMovePane'); map.getPane('buckMovePane').style.zIndex = 650; }
@@ -10026,11 +10032,17 @@
       for (var k=0; k<=idx; k++){ pts.push([list[k].lat, list[k].lng]); }
       if (pts.length > 1){ layers.push(L.polyline(pts, { color:'#E8862E', weight:2.5, opacity:0.8, dashArray:'5 7', pane:'buckMovePane' }).addTo(map)); }
       for (var k=0; k<=idx; k++){
-        var cur = (k === idx);
-        var html = cur ? '<div style="font-size:26px;line-height:34px;text-align:center;filter:drop-shadow(0 1px 3px #000);">🦌</div>'
-                       : '<div style="width:12px;height:12px;border-radius:50%;background:#E8862E;opacity:.55;border:2px solid #12201a;"></div>';
+        var cur = (k === idx), isSight = (list[k].source === 'sighting');
+        var html;
+        if (cur){
+          html = isSight
+            ? '<div class="bmv-blink" style="width:34px;height:34px;border-radius:50%;background:rgba(56,178,92,.92);border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 12px rgba(80,220,120,.95);">🦌</div>'
+            : '<div style="font-size:26px;line-height:34px;text-align:center;filter:drop-shadow(0 1px 3px #000);">🦌</div>';
+        } else {
+          html = '<div style="width:12px;height:12px;border-radius:50%;background:' + (isSight ? '#38B25C' : '#E8862E') + ';opacity:.6;border:2px solid #12201a;"></div>';
+        }
         var mk = L.marker([list[k].lat, list[k].lng], { pane:'buckMovePane', zIndexOffset: cur?1000:0, icon: L.divIcon({ className:'', html:html, iconSize: cur?[34,34]:[12,12], iconAnchor: cur?[17,17]:[6,6] }) }).addTo(map);
-        if (cur){ mk.bindTooltip('🦌 ' + escapeHtml(fmt(list[k])) + '<br>' + escapeHtml(list[k].name), { permanent:true, direction:'top', offset:[0,-16] }); }
+        if (cur){ mk.bindTooltip((isSight ? '👁 Seen · ' : '📷 ') + escapeHtml(fmt(list[k])) + '<br>' + escapeHtml(list[k].name), { permanent:true, direction:'top', offset:[0,-16] }); }
         layers.push(mk);
       }
       map.panTo([list[idx].lat, list[idx].lng], { animate:true });
@@ -10049,16 +10061,28 @@
         if (!list.length){
           body = rangeRow + '<div style="font-size:12px;color:var(--text-dim);">No sightings in that date range.</div>';
         } else {
-          var ev = list[idx], src = ev.p.thumb || ev.p.downloadURL || '';
+          var ev = list[idx], isSight = (ev.source === 'sighting'), left, kind;
+          if (isSight){
+            var othumb = ev.o.photoThumb || '';
+            left = othumb
+              ? '<img class="bmv-img" src="' + othumb + '" alt="" style="width:150px;height:100px;object-fit:cover;border-radius:8px;background:#000;cursor:zoom-in;flex:0 0 auto;">'
+              : '<div style="width:150px;height:100px;border-radius:8px;background:rgba(56,178,92,.14);border:1px solid rgba(56,178,92,.5);display:flex;align-items:center;justify-content:center;font-size:36px;flex:0 0 auto;">👁</div>';
+            kind = '<span style="color:#4bd07a;font-weight:700;">👁 Seen in person</span>' + (ev.o.notes ? ' <span style="color:var(--text-dim);">· ' + escapeHtml(ev.o.notes.slice(0, 60)) + '</span>' : '');
+          } else {
+            var src = ev.p.thumb || ev.p.downloadURL || '';
+            left = '<img class="bmv-img" src="' + src + '" alt="" style="width:150px;height:100px;object-fit:cover;border-radius:8px;background:#000;cursor:zoom-in;flex:0 0 auto;">';
+            kind = '<span style="color:#E8B04B;font-weight:700;">📷 Trail-cam</span>';
+          }
           body = rangeRow +
-            '<div style="display:flex;gap:10px;align-items:center;">' +
-              '<img class="bmv-img" src="' + src + '" alt="" style="width:150px;height:100px;object-fit:cover;border-radius:8px;background:#000;cursor:zoom-in;flex:0 0 auto;">' +
+            '<div style="display:flex;gap:10px;align-items:center;">' + left +
               '<div style="flex:1;min-width:0;">' +
+                '<div style="font-size:11px;margin-bottom:3px;">' + kind + '</div>' +
                 '<div style="font-weight:700;font-size:13px;">📍 ' + escapeHtml(ev.name) + '</div>' +
                 '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">' + escapeHtml(fmt(ev)) + '</div>' +
-                '<div style="font-size:11px;color:var(--text-dim);margin-top:3px;">sighting ' + (idx+1) + ' of ' + list.length + '</div>' +
+                '<div style="font-size:11px;color:var(--text-dim);margin-top:3px;">event ' + (idx+1) + ' of ' + list.length + '</div>' +
               '</div>' +
             '</div>' +
+            '<div style="font-size:10.5px;color:var(--text-dim);margin-top:8px;">📷 trail-cam &nbsp;·&nbsp; <span style="color:#4bd07a;">🟢 seen in person (blinks)</span></div>' +
             '<input class="bmv-scrub" type="range" min="0" max="' + (list.length-1) + '" value="' + idx + '" style="width:100%;margin-top:10px;accent-color:var(--accent);">' +
             '<div style="display:flex;gap:8px;margin-top:8px;">' +
               '<button class="bmv-prev" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--text);cursor:pointer;">‹ Prev</button>' +
@@ -10077,7 +10101,7 @@
       var nx = panel.querySelector('.bmv-next'); if (nx) nx.addEventListener('click', function(){ stop(); if (idx<list.length-1){ idx++; draw(); } });
       var sc = panel.querySelector('.bmv-scrub'); if (sc) sc.addEventListener('input', function(){ stop(); idx = parseInt(this.value,10)||0; draw(); });
       var pl = panel.querySelector('.bmv-play'); if (pl) pl.addEventListener('click', togglePlay);
-      var im = panel.querySelector('.bmv-img'); if (im) im.addEventListener('click', function(){ if (list[idx]) showPhotoLightbox(list[idx].p.downloadURL || list[idx].p.thumb); });
+      var im = panel.querySelector('.bmv-img'); if (im) im.addEventListener('click', function(){ var e = list[idx]; if (!e) return; var s = e.p ? (e.p.downloadURL || e.p.thumb) : (e.o && e.o.photoThumb); if (s) showPhotoLightbox(s); });
       var fr = panel.querySelector('.bmv-from'), to = panel.querySelector('.bmv-to');
       function applyRange(){
         fromStr = fr.value; toStr = to.value;
