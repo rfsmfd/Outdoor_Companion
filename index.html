@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 152</div>
+    <div id="buildBadge">BUILD 154</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4285,6 +4285,17 @@
     if (Array.isArray(p.buckProfileIds)) p.buckProfileIds = p.buckProfileIds.filter(function(x){ return x !== buckId; });
     if (p.buckProfileId === buckId) p.buckProfileId = (p.buckProfileIds && p.buckProfileIds.length) ? p.buckProfileIds[0] : null;
   }
+  // FREE "which buck?" — compares THIS photo's already-stored antler fingerprint to each named buck's
+  // linked photos (same trait math the clustering uses). No AI call, no cost. Best-effort hint; the paid
+  // image matcher ("Which buck? (AI)") is the escalation for the tough ones.
+  function suggestBucksFree(p){
+    var pv = buckFpVec(p); if (!pv) return [];
+    return buckProfiles.map(function(b){
+      var best = 0;
+      importedPhotos.forEach(function(x){ if (!photoLinkedToBuck(x, b.id)) return; var v = buckFpVec(x); if (v){ var s = buckSim(pv, v); if (s > best) best = s; } });
+      return { id: b.id, name: b.name, score: best };
+    }).filter(function(r){ return r.score > 0; }).sort(function(a, b){ return b.score - a.score; });
+  }
   function buildBuckCandidates(){
     var candidates = [], refMap = {};
     buckProfiles.forEach(function(b, i){
@@ -4399,7 +4410,7 @@
   // the matcher. (Scoped to the current gallery view so filters can narrow it — set filters to All
   // to sweep everything.)
   function galleryBuckPhotosToMatch(){
-    return galleryPhotoList().filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && !p.buckMatchedAt && !p.multiBuckHold; });
+    return galleryPhotoList().filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && !p.buckMatchedAt && !p.multiBuckHold && !p.notInterested; });
   }
   function pendingBuckSuggestions(){
     return importedPhotos.filter(function(p){ return p.buckSuggestion && !p.buckProfileId; });
@@ -4434,7 +4445,7 @@
   // as a "re-check" once the fresh ones are done — so after you name more bucks, one tap re-tries them
   // against the fuller roster (deliberate + cost-confirmed, so we never silently re-spend).
   function galleryStampedUnlinkedBucks(){
-    return galleryPhotoList().filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && p.buckMatchedAt && !p.multiBuckHold; });
+    return galleryPhotoList().filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && p.buckMatchedAt && !p.multiBuckHold && !p.notInterested; });
   }
   function refreshBuckMatchButtons(){
     var mBtn = document.getElementById('galleryBuckMatchBtn');
@@ -4674,10 +4685,13 @@
     var filtMature = true, filtMinPts = 0;
     var nextId = 0, board = [], loose = { id: 'loose', members: [], loose: true };
     var held = { id: 'held', members: [], held: true };  // multi-buck frames parked to sort later
-    var showHeld = false, selected = {};
+    var noInt = { id: 'noint', members: [], noint: true };  // bucks you don't care about — dumped off the board
+    var showHeld = false, showNoInt = false, selected = {};
     function boardFilter(p){
       var v = buckFpVec(p); if (!v) return false;                                  // need antler detail to cluster
+      if (p.buckProfileId) return false;                                           // already tagged — never re-cluster
       if (p.multiBuckHold) return false;                                           // parked as a multi-buck frame
+      if (p.notInterested) return false;                                           // dumped in the not-interested bin
       if (filtMature && !(v.body === 'mature' || v.body === 'old')) return false;  // shooters/up-and-comers only
       if (filtMinPts && v.pts < filtMinPts) return false;
       return true;
@@ -4688,7 +4702,8 @@
         .sort(function(a, b){ return b.members.length - a.members.length; })
         .map(function(c){ return { id: 'g' + (nextId++), members: c.members, loose: false }; });
       loose = { id: 'loose', members: raw.filter(function(c){ return c.members.length < 2; }).reduce(function(acc, c){ return acc.concat(c.members); }, []), loose: true };
-      held = { id: 'held', members: pool.filter(function(p){ return p.multiBuckHold; }).map(function(p){ return { p: p, v: buckFpVec(p) }; }), held: true };
+      held = { id: 'held', members: pool.filter(function(p){ return p.multiBuckHold && !p.buckProfileId; }).map(function(p){ return { p: p, v: buckFpVec(p) }; }), held: true };
+      noInt = { id: 'noint', members: pool.filter(function(p){ return p.notInterested && !p.buckProfileId; }).map(function(p){ return { p: p, v: buckFpVec(p) }; }), noint: true };
       selected = {};
     }
     computeBoard();
@@ -4700,42 +4715,60 @@
     function close(){ if (back.parentNode) document.body.removeChild(back); refreshTagAllButton(); }
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     function allGroups(){ var g = board.slice(); if (loose.members.length) g.push(loose); return g; }
-    function allContainers(){ return board.concat([loose, held]); }  // everything selectable-from, incl. parked
+    function allContainers(){ return board.concat([loose, held, noInt]); }  // everything selectable-from, incl. parked/dumped
     function findMember(pid){ var r = null; allContainers().forEach(function(g){ g.members.forEach(function(m){ if (m.p.id === pid) r = m; }); }); return r; }
-    // Enlarge one photo to verify which deer it is — a zoom/pan overlay above the board. Scroll wheel
-    // zooms (to check sticker points / split tines); drag pans when zoomed; click outside or Esc closes.
+    // Enlarge one photo to verify which deer it is — zoom/pan image on top, the AI's tagging notes +
+    // a FREE best-guess buck below it (reading the antlers helps you place him), and a paid "Which
+    // buck? (AI)" escalation for the tough ones. Scroll zooms; drag pans; ✕ / Esc / click-away closes.
     function enlargePhoto(p){
       var src = p.downloadURL || p.thumb || '';
       var ov = document.createElement('div');
-      ov.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;overflow:hidden;';
+      ov.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.92);display:flex;flex-direction:column;';
+      var stage = document.createElement('div');
+      stage.style.cssText = 'flex:1;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:0;';
       var img = document.createElement('img');
       img.src = src;
-      img.style.cssText = 'max-width:94vw;max-height:92vh;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,.6);transform-origin:center center;will-change:transform;user-select:none;-webkit-user-drag:none;cursor:zoom-in;';
-      var scale = 1, tx = 0, ty = 0, dragging = false, sx = 0, sy = 0, moved = false;
+      img.style.cssText = 'max-width:96vw;max-height:100%;border-radius:6px;box-shadow:0 6px 30px rgba(0,0,0,.6);transform-origin:center center;will-change:transform;user-select:none;-webkit-user-drag:none;cursor:zoom-in;';
+      var scale = 1, tx = 0, ty = 0, dragging = false, sx = 0, sy = 0;
       function apply(){ img.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + scale + ')'; img.style.cursor = scale > 1 ? 'grab' : 'zoom-in'; }
-      function onWheel(e){
-        e.preventDefault();
-        scale *= (e.deltaY < 0 ? 1.15 : 1 / 1.15);
-        scale = Math.max(1, Math.min(10, scale));
-        if (scale === 1){ tx = 0; ty = 0; }
-        apply();
-      }
-      function onDown(e){ if (scale <= 1) return; dragging = true; moved = false; sx = e.clientX - tx; sy = e.clientY - ty; e.preventDefault(); }
-      function onMove(e){ if (!dragging) return; tx = e.clientX - sx; ty = e.clientY - sy; moved = true; apply(); }
+      function onWheel(e){ e.preventDefault(); scale *= (e.deltaY < 0 ? 1.15 : 1 / 1.15); scale = Math.max(1, Math.min(10, scale)); if (scale === 1){ tx = 0; ty = 0; } apply(); }
+      function onDown(e){ if (scale <= 1) return; dragging = true; sx = e.clientX - tx; sy = e.clientY - ty; e.preventDefault(); }
+      function onMove(e){ if (!dragging) return; tx = e.clientX - sx; ty = e.clientY - sy; apply(); }
       function onUp(){ dragging = false; }
       function onKey(e){ if (e.key === 'Escape') close(); }
       function close(){ document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); document.removeEventListener('keydown', onKey); if (ov.parentNode) document.body.removeChild(ov); }
-      ov.addEventListener('wheel', onWheel, { passive: false });
+      stage.addEventListener('wheel', onWheel, { passive: false });
       img.addEventListener('mousedown', onDown);
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
       document.addEventListener('keydown', onKey);
       img.addEventListener('dblclick', function(e){ e.stopPropagation(); if (scale > 1){ scale = 1; tx = 0; ty = 0; } else { scale = 3; } apply(); });
-      ov.addEventListener('click', function(e){ if (e.target === img && (scale > 1 || moved)) return; close(); });  // interacting → don't close
-      var hint = document.createElement('div');
-      hint.textContent = 'scroll to zoom · drag to pan · double-click to reset · click outside or Esc to close';
-      hint.style.cssText = 'position:absolute;bottom:14px;left:0;right:0;text-align:center;color:#dfeee5;opacity:.65;font-size:12px;pointer-events:none;';
-      ov.appendChild(img); ov.appendChild(hint);
+      stage.addEventListener('click', function(e){ if (e.target === stage) close(); });
+      var closeBtn = document.createElement('button');
+      closeBtn.textContent = '✕';
+      closeBtn.style.cssText = 'position:absolute;top:12px;right:14px;z-index:3;width:36px;height:36px;border-radius:50%;border:1px solid #4a5548;background:rgba(0,0,0,.5);color:#fff;font-size:16px;cursor:pointer;';
+      closeBtn.addEventListener('click', close);
+      stage.appendChild(img); stage.appendChild(closeBtn);
+      // ---- info panel: AI read + free guess + AI escalation ----
+      var panel = document.createElement('div');
+      panel.style.cssText = 'flex:0 0 auto;max-height:42vh;overflow:auto;background:#1b2018;border-top:1px solid #333a2c;padding:14px 18px;color:#e8f0ea;font-family:inherit;';
+      var descHtml = aiSummaryHtml(p) || '<span style="color:#9db0a3;">Not tagged yet — run AI tagging on this photo first.</span>';
+      var guesses = suggestBucksFree(p);
+      var guessHtml = '';
+      if (guesses.length && guesses[0].score >= 4){
+        var g0 = guesses[0], conf = g0.score >= 7 ? 'strong' : (g0.score >= 5 ? 'good' : 'possible');
+        guessHtml = '<div style="margin-top:12px;font-size:14px;"><span style="color:#8aa080;font-weight:600;">Free guess:</span> most like <b style="color:#E8B04B;">🦌 ' + escapeHtml(g0.name) + '</b> <span style="color:#9db0a3;font-size:12px;">(' + conf + ' match from the antler notes)</span>' +
+          (guesses[1] && guesses[1].score >= 4 ? '<span style="color:#9db0a3;font-size:12px;"> · or maybe ' + escapeHtml(guesses[1].name) + '</span>' : '') + '</div>';
+      } else if (buckProfiles.length){
+        guessHtml = '<div style="margin-top:12px;font-size:13px;color:#9db0a3;">No confident free match against your named bucks — he may be new, or try the AI check.</div>';
+      }
+      panel.innerHTML = '<div style="font:600 11px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#8aa080;margin-bottom:6px;">AI read of this frame</div>' +
+        '<div style="font-size:14px;line-height:1.55;">' + descHtml + '</div>' + guessHtml +
+        (buckProfiles.length ? '<button class="bcl-whichai" style="margin-top:12px;padding:9px 14px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">🔍 Which buck? (AI check · ~1-2¢)</button>' : '') +
+        '<div style="font-size:11px;color:#6f8377;margin-top:10px;">scroll image to zoom · drag to pan · double-click resets · Esc closes</div>';
+      ov.appendChild(stage); ov.appendChild(panel);
+      var wa = panel.querySelector('.bcl-whichai');
+      if (wa) wa.addEventListener('click', function(){ close(); identifyBuck(p); });
       document.body.appendChild(ov); apply();
     }
     function selCount(){ return Object.keys(selected).length; }
@@ -4826,10 +4859,24 @@
             '<div class="bcl-tiles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;">' + held.members.slice().sort(function(a, b){ return (a.p.timestamp||0) - (b.p.timestamp||0); }).slice(0, THUMB_CAP).map(tile).join('') + moreHeld + '</div>' +
             '<button class="bcl-release" style="margin-top:10px;padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#dff0e4;cursor:pointer;">✓ Done with selected — release from bin</button>') : '') +
         '</div>' : '';
+      var moreNoInt = noInt.members.length > THUMB_CAP ? '<div style="width:100%;aspect-ratio:1;border-radius:7px;background:#1b2620;display:flex;align-items:center;justify-content:center;color:#9db0a3;font-size:13px;">+' + (noInt.members.length - THUMB_CAP) + '</div>' : '';
+      var noIntSection = noInt.members.length ?
+        '<div style="border:1px dashed #6a5245;border-radius:10px;padding:12px;margin-bottom:12px;background:#241d18;">' +
+          '<div class="bcl-nointtoggle" style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;">' +
+            '<div style="font-weight:700;">🚫 Not interested <span style="color:#9db0a3;font-size:11px;font-weight:500;">· ' + noInt.members.length + ' set aside</span></div>' +
+            '<span style="color:#9db0a3;font-size:12px;">' + (showNoInt ? '▾ hide' : '▸ open') + '</span>' +
+          '</div>' +
+          (showNoInt ? ('<div style="font-size:11px;color:#9db0a3;margin:8px 0;line-height:1.4;">Off the board (still counted as buck activity). Select any → <b>Bring back</b> to un-dump, or <b>Delete</b> to remove the photos for good.</div>' +
+            '<div class="bcl-tiles" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:6px;">' + noInt.members.slice().sort(function(a, b){ return (a.p.timestamp||0) - (b.p.timestamp||0); }).slice(0, THUMB_CAP).map(tile).join('') + moreNoInt + '</div>' +
+            '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">' +
+              '<button class="bcl-restore-noint" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#dff0e4;cursor:pointer;">↩ Bring back selected</button>' +
+              '<button class="bcl-delint" style="padding:8px 12px;border-radius:8px;border:1px solid #6a4a42;background:transparent;color:#e6b5a8;cursor:pointer;">🗑 Delete selected</button>' +
+            '</div>') : '') +
+        '</div>' : '';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
         '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
-        bucksStrip() + controls + bar + body + heldSection +
+        bucksStrip() + controls + bar + body + heldSection + noIntSection +
         '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
         (heldBack > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + heldBack + ' smaller/younger buck photo' + (heldBack===1?'':'s') + ' held back by the bar — still recorded as buck activity, just not sorted for individual ID.</div>' : '');
       wire();
@@ -4860,7 +4907,7 @@
       renderGallery(); populateGalleryFilters(); refreshTagAllButton();
       showToast('Created ' + name + ' · linked ' + g.members.length + ' photo' + (g.members.length===1?'':'s'));
       board = board.filter(function(x){ return x.id !== g.id; });
-      if (!board.length && !loose.members.length && !held.members.length) close(); else render();
+      if (!board.length && !loose.members.length && !held.members.length && !noInt.members.length) close(); else render();
     }
     // Assign the currently-selected photos to an EXISTING named buck (tap his folder up top).
     async function assignSelectedToBuck(buckId){
@@ -4874,7 +4921,7 @@
         if (p.buckProfileId && p.buckProfileIds.indexOf(p.buckProfileId) === -1) p.buckProfileIds.push(p.buckProfileId);
         if (p.buckProfileIds.indexOf(buckId) === -1) p.buckProfileIds.push(buckId);   // ADD this buck (multi-credit)
         if (!p.buckProfileId) p.buckProfileId = buckId;                               // primary = first credited
-        p.buckSuggestion = null; p.buckMatchedAt = Date.now();
+        p.buckSuggestion = null; p.buckMatchedAt = Date.now(); p.notInterested = false;  // tagging overrides a stray dismiss
         if (affected[i].held) binCount++;
         if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} }
       }
@@ -4882,12 +4929,13 @@
       // so you can credit additional bucks to the same frame, until you release them.
       board.forEach(function(g){ g.members = g.members.filter(function(m){ return !selected[m.p.id]; }); });
       loose.members = loose.members.filter(function(m){ return !selected[m.p.id]; });
+      noInt.members = noInt.members.filter(function(m){ return !selected[m.p.id]; });
       board = board.filter(function(g){ return g.members.length > 0; });
       selected = {};
       renderGallery(); populateGalleryFilters(); refreshTagAllButton();
       var b = buckProfiles.filter(function(x){ return x.id === buckId; })[0];
       showToast(binCount ? ('Added ' + affected.length + ' to ' + (b ? b.name : 'buck') + ' — release when fully credited') : ('Tagged ' + affected.length + ' as ' + (b ? b.name : 'buck')));
-      if (!board.length && !loose.members.length && !held.members.length) close(); else render();
+      if (!board.length && !loose.members.length && !held.members.length && !noInt.members.length) close(); else render();
     }
     // Release the selected bin frames — they're fully credited; drop the hold so they leave the bin.
     async function releaseSelected(){
@@ -4898,7 +4946,41 @@
       selected = {};
       renderGallery(); populateGalleryFilters(); refreshTagAllButton();
       showToast('Released ' + released.length + ' from the bin');
-      if (!board.length && !loose.members.length && !held.members.length) close(); else render();
+      if (!board.length && !loose.members.length && !held.members.length && !noInt.members.length) close(); else render();
+    }
+    // Dump the selected photos in the NOT-INTERESTED bin — bucks you won't tag, off the board for a
+    // clean workspace. Still recorded as buck activity elsewhere; just hidden here (and from the matcher).
+    async function dismissSelected(){
+      var ids = Object.keys(selected);
+      if (!ids.length){ showToast('Select the bucks you don’t want first.'); return; }
+      var moving = [];
+      allContainers().forEach(function(g){ if (g.noint) return; g.members = g.members.filter(function(m){ if (selected[m.p.id]){ moving.push(m); return false; } return true; }); });
+      for (var i = 0; i < moving.length; i++){ var p = moving[i].p; p.notInterested = true; p.multiBuckHold = false; if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} } }
+      noInt.members = noInt.members.concat(moving);
+      board = board.filter(function(g){ return g.members.length > 0; });
+      selected = {};
+      showToast('Set aside ' + moving.length + ' — off the board');
+      render();
+    }
+    async function restoreFromNoInt(){
+      var restored = [];
+      noInt.members = noInt.members.filter(function(m){ if (selected[m.p.id]){ restored.push(m.p); return false; } return true; });
+      if (!restored.length){ showToast('Select set-aside photos to bring back.'); return; }
+      for (var i = 0; i < restored.length; i++){ var p = restored[i]; p.notInterested = false; if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} } }
+      selected = {};
+      showToast('Brought back ' + restored.length + ' to the board');
+      computeBoard(); render();  // recompute so restored frames re-cluster into the board
+    }
+    async function deleteFromNoInt(){
+      var toDel = noInt.members.filter(function(m){ return selected[m.p.id]; });
+      if (!toDel.length){ showToast('Select set-aside photos to delete.'); return; }
+      if (!confirm('Permanently delete ' + toDel.length + ' photo' + (toDel.length===1?'':'s') + ' from your cloud account?\n\nThis frees their storage and cannot be undone.')) return;
+      for (var i = 0; i < toDel.length; i++){ var p = toDel[i].p; try{ await deletePhotoStorage(p); }catch(e){} importedPhotos = importedPhotos.filter(function(x){ return x.id !== p.id; }); }
+      noInt.members = noInt.members.filter(function(m){ return !selected[m.p.id]; });
+      selected = {};
+      renderGallery(); populateGalleryFilters(); refreshTagAllButton();
+      showToast('Deleted ' + toDel.length + ' photo' + (toDel.length===1?'':'s'));
+      if (!board.length && !loose.members.length && !held.members.length && !noInt.members.length) close(); else render();
     }
     // Park the selected photos as MULTI-BUCK frames — set them aside (they leave the single-buck sort)
     // to credit later, one buck at a time. This is how you handle a frame with several bucks without
@@ -4938,6 +5020,12 @@
         '<div style="font-weight:700;font-size:12px;">Multi-buck <span style="color:#9db0a3;font-weight:500;">· ' + held.members.length + '</span></div>' +
         '<div style="font-size:10px;color:#9db0a3;">park / sort later</div>' +
       '</button>';
+      // Not-interested "folder" — dump bucks you won't tag off the board (tap with nothing selected to open it).
+      var noIntCard = '<button class="bcl-dismiss" title="Dump selected bucks you don’t care about off the board (or tap with nothing selected to open the bin)" style="flex:0 0 auto;text-align:left;padding:8px;border-radius:9px;border:1px dashed #6a5245;background:#2c241f;color:#e8f0ea;cursor:pointer;min-width:96px;">' +
+        '<div style="font-size:22px;line-height:1;margin-bottom:6px;">🚫</div>' +
+        '<div style="font-weight:700;font-size:12px;">Not interested <span style="color:#9db0a3;font-weight:500;">· ' + noInt.members.length + '</span></div>' +
+        '<div style="font-size:10px;color:#9db0a3;">dump / clean up</div>' +
+      '</button>';
       var cards = buckProfiles.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).map(function(b){
         var photos = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, b.id); });
         photos.sort(function(a, c){ var sa=(a.ai&&a.ai.antler&&a.ai.antler.signature)?1:0, sc=(c.ai&&c.ai.antler&&c.ai.antler.signature)?1:0; return sc - sa; });
@@ -4948,7 +5036,7 @@
         '</button>';
       }).join('');
       return '<div style="font-size:11.5px;color:#9db0a3;font-weight:600;margin-bottom:6px;">Your bucks — select photos, then tap a buck to tag them as him. Several bucks in one frame? Park it in Multi-buck to sort later.</div>' +
-        '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:12px;">' + multiCard + cards + '</div>';
+        '<div style="display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:12px;">' + multiCard + noIntCard + cards + '</div>';
     }
     function wire(){
       card.querySelector('.bcl-close').addEventListener('click', close);
@@ -4975,6 +5063,12 @@
       });
       var ht = card.querySelector('.bcl-heldtoggle'); if (ht) ht.addEventListener('click', function(){ showHeld = !showHeld; render(); });
       var rl = card.querySelector('.bcl-release'); if (rl) rl.addEventListener('click', releaseSelected);
+      Array.prototype.forEach.call(card.querySelectorAll('.bcl-dismiss'), function(b){
+        b.addEventListener('click', function(){ if (Object.keys(selected).length) dismissSelected(); else { showNoInt = !showNoInt; render(); } });
+      });
+      var nit = card.querySelector('.bcl-nointtoggle'); if (nit) nit.addEventListener('click', function(){ showNoInt = !showNoInt; render(); });
+      var rn = card.querySelector('.bcl-restore-noint'); if (rn) rn.addEventListener('click', restoreFromNoInt);
+      var di = card.querySelector('.bcl-delint'); if (di) di.addEventListener('click', deleteFromNoInt);
       var mat = card.querySelector('.bcl-mature'); if (mat) mat.addEventListener('change', function(){ filtMature = this.value === '1'; computeBoard(); render(); });
       var mp = card.querySelector('.bcl-minpts'); if (mp) mp.addEventListener('change', function(){ filtMinPts = parseInt(this.value, 10) || 0; computeBoard(); render(); });
       var mv = card.querySelector('.bcl-moveto'); if (mv) mv.addEventListener('change', function(){ if (this.value) moveSelectedTo(this.value); });
@@ -5459,7 +5553,7 @@
     // you have buck profiles to match against (disclosed in the confirm above). High-confidence links
     // itself; anything unsure opens the one-tap review. Skipped if you have no named bucks yet.
     if (buckProfiles.length){
-      var freshBucks = list.filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && !p.buckMatchedAt && !p.multiBuckHold; });
+      var freshBucks = list.filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && !p.buckMatchedAt && !p.multiBuckHold && !p.notInterested; });
       if (freshBucks.length){
         var mr = await matchBucksInList(freshBucks, function(d, t){ status.textContent = tagMsg + ' Matching bucks ' + Math.min(d,t) + ' of ' + t + '…'; });
         populateGalleryFilters(); refreshTagAllButton();
