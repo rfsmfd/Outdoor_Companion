@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 163</div>
+    <div id="buildBadge">BUILD 164</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7261,6 +7261,7 @@
       actionsRow.style.cssText = 'margin-top:8px;';
       actionsRow.innerHTML =
         '<button class="btn-ghost" data-act="buck-map" style="width:100%;font-size:12px;font-weight:600;margin-bottom:5px;background:var(--accent);color:#fff;border-color:var(--accent);">📍 Where he\'s been (map)</button>' +
+        '<button class="btn-ghost" data-act="buck-move" style="width:100%;font-size:12px;font-weight:600;margin-bottom:5px;background:#20302a;color:#dff0e4;border-color:#3c4d42;">🎬 Movement timeline (play his track)</button>' +
         '<button class="btn-ghost" data-act="edit-buck" style="width:100%;font-size:11px;margin-bottom:5px;">Edit</button>' +
         '<div style="display:flex;gap:6px;">' +
           '<button class="btn-ghost" data-act="delete-buck" style="flex:1;font-size:11px;color:#D94A2E;">Delete Profile</button>' +
@@ -7306,6 +7307,10 @@
       actionsRow.querySelector('[data-act="buck-map"]').addEventListener('click', function(e){
         e.stopPropagation();
         showBuckOnMap(profile);
+      });
+      actionsRow.querySelector('[data-act="buck-move"]').addEventListener('click', function(e){
+        e.stopPropagation();
+        showBuckMovement(profile);
       });
       actionsRow.querySelector('[data-act="edit-buck"]').addEventListener('click', function(e){
         e.stopPropagation();
@@ -9981,6 +9986,113 @@
       return;
     }
     renderCountMarkers(events, resultsEl);
+  }
+
+  // ---------- Buck MOVEMENT timeline — step/play through his sightings in time order, watching a
+  // buck icon hop across the map with a connecting track + date/time labels. The "data-to-map" dream
+  // per buck: literally see his movement pattern. Reuses the main map; own layer set + floating panel.
+  var _buckMoveCleanup = null;
+  function showBuckMovement(profile){
+    if (_buckMoveCleanup) _buckMoveCleanup();
+    // His located sightings: linked photo + its site's coords + capture time, oldest→newest.
+    var full = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, profile.id) && p.matchedSiteId && p.timestamp; })
+      .map(function(p){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; return (s && typeof s.lat === 'number') ? { p:p, ts:p.timestamp, lat:s.lat, lng:s.lng, name:(s.name || 'Unnamed spot') } : null; })
+      .filter(Boolean).sort(function(a,b){ return a.ts - b.ts; });
+    closeAllModals();
+    if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();
+    if (!map.getPane('buckMovePane')){ map.createPane('buckMovePane'); map.getPane('buckMovePane').style.zIndex = 650; }
+    var layers = [], playTimer = null, list = full.slice(), idx = 0;
+    var fromStr = full.length ? fmtDateInput(full[0].ts) : '';
+    var toStr = full.length ? fmtDateInput(full[full.length-1].ts) : '';
+    var panel = document.getElementById('buckMovePanel');
+    if (!panel){ panel = document.createElement('div'); panel.id = 'buckMovePanel'; document.body.appendChild(panel); }
+    panel.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:1600;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px;width:min(470px,94vw);box-shadow:0 6px 24px rgba(0,0,0,.5);color:var(--text);';
+    panel.style.display = 'block';
+
+    function fmtDateInput(ts){ var d=new Date(ts), mo=d.getMonth()+1, da=d.getDate(); return d.getFullYear()+'-'+(mo<10?'0'+mo:mo)+'-'+(da<10?'0'+da:da); }
+    function fmt(ev){ var d=new Date(ev.ts), h=d.getHours(), h12=h%12; if(h12===0)h12=12; var mm=d.getMinutes(); mm=mm<10?'0'+mm:mm; return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear()+' · '+h12+':'+mm+(h>=12?'p':'a'); }
+    function clearLayers(){ layers.forEach(function(l){ try{ map.removeLayer(l); }catch(e){} }); layers = []; }
+    function stop(){ if (playTimer){ clearInterval(playTimer); playTimer = null; } }
+    function closeAll(){ stop(); clearLayers(); if (panel) panel.style.display = 'none'; document.removeEventListener('keydown', onKey); _buckMoveCleanup = null; }
+    function onKey(e){ if (e.key === 'ArrowLeft'){ stop(); if (idx>0){ idx--; draw(); } } else if (e.key === 'ArrowRight'){ stop(); if (idx<list.length-1){ idx++; draw(); } } else if (e.key === 'Escape'){ closeAll(); } }
+    function step(){ if (idx < list.length-1){ idx++; draw(); } else { stop(); renderPanel(); } }
+    function togglePlay(){ if (playTimer){ stop(); renderPanel(); } else { if (idx >= list.length-1) idx = 0; playTimer = setInterval(step, 1300); draw(); } }
+
+    function draw(){
+      clearLayers();
+      if (!list.length){ renderPanel(); return; }
+      if (idx >= list.length) idx = list.length-1;
+      var pts = [];
+      for (var k=0; k<=idx; k++){ pts.push([list[k].lat, list[k].lng]); }
+      if (pts.length > 1){ layers.push(L.polyline(pts, { color:'#E8862E', weight:2.5, opacity:0.8, dashArray:'5 7', pane:'buckMovePane' }).addTo(map)); }
+      for (var k=0; k<=idx; k++){
+        var cur = (k === idx);
+        var html = cur ? '<div style="font-size:26px;line-height:34px;text-align:center;filter:drop-shadow(0 1px 3px #000);">🦌</div>'
+                       : '<div style="width:12px;height:12px;border-radius:50%;background:#E8862E;opacity:.55;border:2px solid #12201a;"></div>';
+        var mk = L.marker([list[k].lat, list[k].lng], { pane:'buckMovePane', zIndexOffset: cur?1000:0, icon: L.divIcon({ className:'', html:html, iconSize: cur?[34,34]:[12,12], iconAnchor: cur?[17,17]:[6,6] }) }).addTo(map);
+        if (cur){ mk.bindTooltip('🦌 ' + escapeHtml(fmt(list[k])) + '<br>' + escapeHtml(list[k].name), { permanent:true, direction:'top', offset:[0,-16] }); }
+        layers.push(mk);
+      }
+      map.panTo([list[idx].lat, list[idx].lng], { animate:true });
+      renderPanel();
+    }
+
+    function renderPanel(){
+      var body;
+      if (!full.length){
+        body = '<div style="font-size:12.5px;color:var(--text-dim);line-height:1.5;">No located sightings yet for ' + escapeHtml(profile.name) + '. Tag some of his photos to a location first, then come back.</div>';
+      } else {
+        var rangeRow = '<div style="display:flex;gap:6px;align-items:center;margin-bottom:9px;font-size:11px;color:var(--text-dim);">' +
+            '<span>From</span><input class="bmv-from" type="date" value="' + fromStr + '" style="flex:1;min-width:0;padding:4px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--text);">' +
+            '<span>To</span><input class="bmv-to" type="date" value="' + toStr + '" style="flex:1;min-width:0;padding:4px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--text);">' +
+          '</div>';
+        if (!list.length){
+          body = rangeRow + '<div style="font-size:12px;color:var(--text-dim);">No sightings in that date range.</div>';
+        } else {
+          var ev = list[idx], src = ev.p.thumb || ev.p.downloadURL || '';
+          body = rangeRow +
+            '<div style="display:flex;gap:10px;align-items:center;">' +
+              '<img class="bmv-img" src="' + src + '" alt="" style="width:150px;height:100px;object-fit:cover;border-radius:8px;background:#000;cursor:zoom-in;flex:0 0 auto;">' +
+              '<div style="flex:1;min-width:0;">' +
+                '<div style="font-weight:700;font-size:13px;">📍 ' + escapeHtml(ev.name) + '</div>' +
+                '<div style="font-size:12px;color:var(--text-dim);margin-top:2px;">' + escapeHtml(fmt(ev)) + '</div>' +
+                '<div style="font-size:11px;color:var(--text-dim);margin-top:3px;">sighting ' + (idx+1) + ' of ' + list.length + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<input class="bmv-scrub" type="range" min="0" max="' + (list.length-1) + '" value="' + idx + '" style="width:100%;margin-top:10px;accent-color:var(--accent);">' +
+            '<div style="display:flex;gap:8px;margin-top:8px;">' +
+              '<button class="bmv-prev" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--text);cursor:pointer;">‹ Prev</button>' +
+              '<button class="bmv-play" style="flex:1.4;padding:8px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-weight:600;cursor:pointer;">' + (playTimer ? '⏸ Pause' : '▶ Play') + '</button>' +
+              '<button class="bmv-next" style="flex:1;padding:8px;border-radius:8px;border:1px solid var(--line);background:rgba(0,0,0,.25);color:var(--text);cursor:pointer;">Next ›</button>' +
+            '</div>';
+        }
+      }
+      panel.innerHTML =
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">' +
+          '<div style="font-weight:700;font-size:14px;">🎬 ' + escapeHtml(profile.name) + ' — movement</div>' +
+          '<button class="bmv-close" style="background:none;border:none;color:var(--text-dim);font-size:22px;line-height:1;cursor:pointer;">×</button>' +
+        '</div>' + body;
+      var c = panel.querySelector('.bmv-close'); if (c) c.addEventListener('click', closeAll);
+      var pv = panel.querySelector('.bmv-prev'); if (pv) pv.addEventListener('click', function(){ stop(); if (idx>0){ idx--; draw(); } });
+      var nx = panel.querySelector('.bmv-next'); if (nx) nx.addEventListener('click', function(){ stop(); if (idx<list.length-1){ idx++; draw(); } });
+      var sc = panel.querySelector('.bmv-scrub'); if (sc) sc.addEventListener('input', function(){ stop(); idx = parseInt(this.value,10)||0; draw(); });
+      var pl = panel.querySelector('.bmv-play'); if (pl) pl.addEventListener('click', togglePlay);
+      var im = panel.querySelector('.bmv-img'); if (im) im.addEventListener('click', function(){ if (list[idx]) showPhotoLightbox(list[idx].p.downloadURL || list[idx].p.thumb); });
+      var fr = panel.querySelector('.bmv-from'), to = panel.querySelector('.bmv-to');
+      function applyRange(){
+        fromStr = fr.value; toStr = to.value;
+        var f = fromStr ? new Date(fromStr + 'T00:00:00').getTime() : -Infinity;
+        var t = toStr ? new Date(toStr + 'T23:59:59').getTime() : Infinity;
+        list = full.filter(function(e){ return e.ts >= f && e.ts <= t; });
+        idx = 0; stop(); draw();
+      }
+      if (fr) fr.addEventListener('change', applyRange);
+      if (to) to.addEventListener('change', applyRange);
+    }
+
+    document.addEventListener('keydown', onKey);
+    _buckMoveCleanup = closeAll;
+    if (full.length){ draw(); } else { renderPanel(); }
   }
 
   // ---------- Analytics panel collapse — see the map (with its count rings), then restore ----------
