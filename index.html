@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 158</div>
+    <div id="buildBadge">BUILD 159</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4880,13 +4880,12 @@
       var scroll = card.scrollTop;
       var n = selCount();
       var moveOpts = board.map(function(g, i){ return '<option value="' + g.id + '">→ Group ' + (i+1) + ' (' + escapeHtml(clusterDescriptor(g.members).slice(0, 28)) + ')</option>'; }).join('');
-      var namedOpts = buckProfiles.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).map(function(b){ return '<option value="' + escapeHtml(b.id) + '">🦌 ' + escapeHtml(b.name) + '</option>'; }).join('');
       // Selection bar STICKS TO THE BOTTOM so the named-buck list is always in reach — no scrolling
       // back to the folder strip up top on a long board.
       var bar = n > 0
         ? '<div style="position:sticky;bottom:-18px;z-index:6;background:#20302a;border:1px solid #3c4d42;border-radius:10px;padding:10px 12px;margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;box-shadow:0 -6px 22px rgba(0,0,0,.45);">' +
             '<span style="font-weight:700;font-size:13px;">' + n + ' selected</span>' +
-            (buckProfiles.length ? '<select class="bcl-tagas" style="flex:1;min-width:170px;padding:8px;border-radius:8px;border:1px solid #6BBF59;background:#1E2B23;color:#e8f0ea;font-weight:600;"><option value="">🦌 Tag as… (named buck)</option>' + namedOpts + '</select>' : '') +
+            (buckProfiles.length ? '<button class="bcl-tagas-btn" style="flex:1;min-width:170px;padding:9px 12px;border-radius:8px;border:1px solid #6BBF59;background:#1E2B23;color:#e8f0ea;font-weight:600;cursor:pointer;text-align:left;">🦌 Tag as… (pick a buck) ▾</button>' : '') +
             '<button class="bcl-newbuck" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">➕ New buck</button>' +
             '<select class="bcl-moveto" style="flex:0 1 auto;min-width:130px;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
               '<option value="">Move to group…</option>' + moveOpts + '<option value="__new__">➕ New empty group</option>' +
@@ -5079,6 +5078,43 @@
       try{ await saveBuckProfile(profile); }catch(e){ console.error('Outdoor Companion: failed to save buck profile', e); }
       await assignSelectedToBuck(profile.id);
     }
+    // Rich "Tag as…" picker from the bottom bar — each named buck shown WITH his reference photos +
+    // distinguishing marks + farms, so you can tell look-alikes apart without scrolling to the top strip.
+    function openTagAsPicker(){
+      var ids = Object.keys(selected);
+      if (!ids.length){ showToast('Select photos first.'); return; }
+      if (!buckProfiles.length){ newBuckFromSelected(); return; }
+      var back = document.createElement('div');
+      back.style.cssText = 'position:fixed;inset:0;z-index:100007;background:rgba(0,0,0,.6);display:flex;align-items:flex-end;justify-content:center;padding:18px;font-family:inherit;';
+      var card2 = document.createElement('div');
+      card2.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:600px;width:100%;max-height:82vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+      function close(){ if (back.parentNode) document.body.removeChild(back); }
+      var rows = buckProfiles.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).map(function(b){
+        var photos = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, b.id); });
+        photos.sort(function(a, c){ var sa=(a.ai&&a.ai.antler&&a.ai.antler.signature)?1:0, sc=(c.ai&&c.ai.antler&&c.ai.antler.signature)?1:0; return sc - sa; });
+        var thumbs = photos.slice(0, 4).map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:58px;height:58px;object-fit:cover;border-radius:5px;background:#000;">'; }).join('') || '<div style="width:58px;height:58px;border-radius:5px;background:#1b2620;"></div>';
+        var fids = buckPropertyIds(b);
+        var fnames = (typeof properties !== 'undefined') ? fids.map(function(id){ var fp = properties.filter(function(x){ return x.id === id; })[0]; return fp ? (fp.name || 'farm') : null; }).filter(Boolean) : [];
+        return '<button class="tap-pick" data-bid="' + escapeHtml(b.id) + '" style="display:flex;gap:12px;align-items:center;width:100%;text-align:left;padding:10px;border:1px solid #3c4d42;border-radius:10px;background:#1E2B23;color:#e8f0ea;cursor:pointer;margin-bottom:8px;">' +
+          '<div style="display:flex;gap:4px;flex:0 0 auto;">' + thumbs + '</div>' +
+          '<div style="flex:1;min-width:0;">' +
+            '<div style="font-weight:700;font-size:14px;">🦌 ' + escapeHtml(b.name) + ' <span style="color:#9db0a3;font-weight:500;font-size:12px;">· ' + photos.length + ' photo' + (photos.length===1?'':'s') + '</span></div>' +
+            (b.notes ? '<div style="font-size:12px;color:#c7d4cc;margin-top:3px;line-height:1.4;">' + escapeHtml(b.notes) + '</div>' : '<div style="font-size:12px;color:#6f8377;margin-top:3px;font-style:italic;">no marks noted yet</div>') +
+            (fnames.length ? '<div style="font-size:11px;color:#8aa080;margin-top:2px;">📍 ' + escapeHtml(fnames.join(', ')) + '</div>' : '') +
+          '</div>' +
+        '</button>';
+      }).join('');
+      card2.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">Tag ' + ids.length + ' photo' + (ids.length===1?'':'s') + ' as…</div>' +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:14px;">Photos &amp; marks shown so you can tell them apart without scrolling up.</div>' +
+        rows +
+        '<button class="tap-new" style="width:100%;padding:10px;border-radius:9px;border:1px dashed #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-bottom:8px;">➕ New buck from these</button>' +
+        '<button class="tap-cancel" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>';
+      back.appendChild(card2); document.body.appendChild(back);
+      back.addEventListener('click', function(e){ if (e.target === back) close(); });
+      card2.querySelector('.tap-cancel').addEventListener('click', close);
+      Array.prototype.forEach.call(card2.querySelectorAll('.tap-pick'), function(btn){ btn.addEventListener('click', function(){ close(); assignSelectedToBuck(btn.getAttribute('data-bid')); }); });
+      card2.querySelector('.tap-new').addEventListener('click', function(){ close(); newBuckFromSelected(); });
+    }
     // Reference row of already-named bucks — a few photos each to show his look. Doubles as the
     // "folder" you tap to send your selected photos to.
     function bucksStrip(){
@@ -5132,7 +5168,7 @@
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-assign'), function(b){
         b.addEventListener('click', function(){ assignSelectedToBuck(b.getAttribute('data-bid')); });
       });
-      var ta = card.querySelector('.bcl-tagas'); if (ta) ta.addEventListener('change', function(){ if (this.value) assignSelectedToBuck(this.value); });
+      var ta = card.querySelector('.bcl-tagas-btn'); if (ta) ta.addEventListener('click', openTagAsPicker);
       var nb = card.querySelector('.bcl-newbuck'); if (nb) nb.addEventListener('click', newBuckFromSelected);
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-park'), function(b){
         b.addEventListener('click', function(){ if (Object.keys(selected).length) parkSelected(); else { showHeld = !showHeld; render(); } });
