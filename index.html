@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 167</div>
+    <div id="buildBadge">BUILD 168</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6227,7 +6227,7 @@
       var row = document.createElement('div');
       row.className = 'toggle-row';
       row.innerHTML =
-        '<div class="toggle-row-label"><span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>' + t.label + '</div>' +
+        '<div class="toggle-row-label"><span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;vertical-align:middle;margin-right:4px;">'+obsGlyphInline(key, 22)+'</span>' + t.label + '</div>' +
         '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>';
       row.querySelector('.toggle-switch').addEventListener('click', function(){
         if (activeObsFilters.has(key)) activeObsFilters.delete(key); else activeObsFilters.add(key);
