@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 156</div>
+    <div id="buildBadge">BUILD 157</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4745,7 +4745,7 @@
     var nextId = 0, board = [], loose = { id: 'loose', members: [], loose: true };
     var held = { id: 'held', members: [], held: true };  // multi-buck frames parked to sort later
     var noInt = { id: 'noint', members: [], noint: true };  // bucks you don't care about — dumped off the board
-    var showHeld = false, showNoInt = false, selected = {};
+    var showHeld = false, showNoInt = false, selected = {}, lastViewedId = null;
     function boardFilter(p){
       var v = buckFpVec(p); if (!v) return false;                                  // need antler detail to cluster
       if (p.buckProfileId) return false;                                           // already tagged — never re-cluster
@@ -4780,6 +4780,7 @@
     // a FREE best-guess buck below it (reading the antlers helps you place him), and a paid "Which
     // buck? (AI)" escalation for the tough ones. Scroll zooms; drag pans; ✕ / Esc / click-away closes.
     function enlargePhoto(p){
+      lastViewedId = p.id; render();  // amber-highlight this tile on the board so you can find it after closing
       var src = p.downloadURL || p.thumb || '';
       var ov = document.createElement('div');
       ov.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.92);display:flex;flex-direction:column;';
@@ -4843,11 +4844,14 @@
     function tile(m){
       var src = m.p.thumb || m.p.downloadURL || '';
       var on = !!selected[m.p.id];
+      var lastV = (m.p.id === lastViewedId);
       var stamp = tileStamp(m.p.timestamp);
-      return '<div class="bcl-tile" data-pid="' + escapeHtml(m.p.id) + '" style="position:relative;width:100%;aspect-ratio:1;border-radius:7px;overflow:hidden;cursor:pointer;background:#000;outline:' + (on ? '3px solid #6BBF59' : '1px solid #2a3830') + ';outline-offset:-1px;">' +
+      var outline = on ? '3px solid #6BBF59' : (lastV ? '3px solid #E8B04B' : '1px solid #2a3830');
+      return '<div class="bcl-tile" data-pid="' + escapeHtml(m.p.id) + '" style="position:relative;width:100%;aspect-ratio:1;border-radius:7px;overflow:hidden;cursor:pointer;background:#000;outline:' + outline + ';outline-offset:-1px;">' +
         '<img src="' + src + '" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;' + (on ? 'opacity:.72;' : '') + '">' +
         '<div class="bcl-zoom" data-pid="' + escapeHtml(m.p.id) + '" title="Enlarge to verify" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.55);color:#fff;border-radius:6px;width:26px;height:26px;line-height:26px;text-align:center;font-size:13px;cursor:zoom-in;z-index:2;">🔍</div>' +
-        (on ? '<div style="position:absolute;top:4px;right:4px;background:#6BBF59;color:#10240f;border-radius:50%;width:24px;height:24px;line-height:24px;text-align:center;font-size:15px;font-weight:800;">✓</div>' : '') +
+        (on ? '<div style="position:absolute;top:4px;right:4px;background:#6BBF59;color:#10240f;border-radius:50%;width:24px;height:24px;line-height:24px;text-align:center;font-size:15px;font-weight:800;">✓</div>'
+             : (lastV ? '<div style="position:absolute;top:4px;right:4px;background:#E8B04B;color:#241d18;border-radius:6px;padding:0 7px;height:22px;line-height:22px;text-align:center;font-size:11px;font-weight:700;">👁 last</div>' : '')) +
         (stamp ? '<div style="position:absolute;left:0;right:0;bottom:0;padding:12px 5px 3px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.74));color:#fff;font:600 11px ui-monospace,Menlo,monospace;text-align:center;font-variant-numeric:tabular-nums;letter-spacing:.02em;pointer-events:none;">' + escapeHtml(stamp) + '</div>' : '') +
       '</div>';
     }
