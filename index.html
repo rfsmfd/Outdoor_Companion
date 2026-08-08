@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 142</div>
+    <div id="buildBadge">BUILD 143</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2084,6 +2084,8 @@
       <div id="galleryAiRow" style="margin:0 0 10px 0;">
         <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
         <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
+        <button type="button" class="btn-ghost" id="galleryBuckMatchBtn" style="width:100%;margin-top:6px;display:none;">🦌 Match buck photos to known bucks</button>
+        <button type="button" class="btn-ghost" id="galleryBuckReviewBtn" style="width:100%;margin-top:6px;display:none;">🦌 Review buck suggestions</button>
         <button type="button" class="btn-ghost" id="galleryCleanupBtn" style="width:100%;margin-top:6px;display:none;">🧹 Clean up empty frames</button>
         <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
         <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
@@ -4357,6 +4359,171 @@
     });
   }
 
+  // ---------- Phase 2.5 Stage 3b: BATCH buck matching (auto-sort many photos to known bucks) ----------
+  // Runs the SAME compareBucks matcher "Which buck?" uses, but across many photos at once so you don't
+  // re-tag/link a buck one frame at a time. HIGH-confidence matches auto-link (zero clicks); MEDIUM
+  // matches are queued for one-tap review; LOW/none are left alone. Every processed photo gets a
+  // buckMatchedAt stamp so re-runs never re-spend on the same frame — and as you name MORE bucks,
+  // re-running picks up frames that had no match before. Human still confirms anything less than high.
+  var BUCK_MATCH_RETRY_DELAYS = [2000, 5000, 12000, 25000];
+  async function compareBucksWithRetry(doc, candidates){
+    var callable = firebase.app().functions('us-east1').httpsCallable('compareBucks');
+    var lastErr = null;
+    for (var attempt = 0; attempt <= BUCK_MATCH_RETRY_DELAYS.length; attempt++){
+      try{ var res = await callable({ photoId: doc.id, candidates: candidates }); return res.data || {}; }
+      catch(e){
+        lastErr = e;
+        if (attempt < BUCK_MATCH_RETRY_DELAYS.length){ await new Promise(function(r){ setTimeout(r, BUCK_MATCH_RETRY_DELAYS[attempt]); }); }
+      }
+    }
+    throw lastErr;
+  }
+  // Buck frames eligible for matching: tagged as a buck, not already linked, not already run through
+  // the matcher. (Scoped to the current gallery view so filters can narrow it — set filters to All
+  // to sweep everything.)
+  function galleryBuckPhotosToMatch(){
+    return galleryPhotoList().filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && !p.buckMatchedAt; });
+  }
+  function pendingBuckSuggestions(){
+    return importedPhotos.filter(function(p){ return p.buckSuggestion && !p.buckProfileId; });
+  }
+  async function matchBucksInList(list, statusCb){
+    var built = buildBuckCandidates(), refMap = built.refMap;
+    var linked = 0, suggested = 0, noMatch = 0, failed = 0, done = 0;
+    var CONCURRENCY = 3; // gentle on the AI per-minute limit; compareBucksWithRetry rides out throttles
+    for (var start = 0; start < list.length; start += CONCURRENCY){
+      var chunk = list.slice(start, start + CONCURRENCY);
+      await Promise.all(chunk.map(async function(doc){
+        try{
+          var data = await compareBucksWithRetry(doc, built.candidates);
+          var top = (Array.isArray(data.ranked) && data.ranked.length) ? data.ranked[0] : null;
+          var buckId = top ? refMap[top.ref] : null;
+          doc.buckMatchedAt = Date.now();
+          if (top && buckId && top.confidence === 'high'){
+            doc.buckProfileId = buckId; doc.buckAutoLinked = true; doc.buckSuggestion = null; linked++;
+          } else if (top && buckId && top.confidence === 'medium'){
+            doc.buckSuggestion = { buckId: buckId, name: top.name || '', confidence: top.confidence, reason: top.reason || '' }; suggested++;
+          } else { noMatch++; }
+          if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
+        }catch(e){ failed++; }
+        done++;
+        if (statusCb) statusCb(done, list.length, failed);
+      }));
+      renderGallery(); // linked badges appear as each chunk finishes
+    }
+    return { linked: linked, suggested: suggested, noMatch: noMatch, failed: failed };
+  }
+  // Unlinked bucks that WERE already run through the matcher (no confident match last time). Offered
+  // as a "re-check" once the fresh ones are done — so after you name more bucks, one tap re-tries them
+  // against the fuller roster (deliberate + cost-confirmed, so we never silently re-spend).
+  function galleryStampedUnlinkedBucks(){
+    return galleryPhotoList().filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && p.buckMatchedAt; });
+  }
+  function refreshBuckMatchButtons(){
+    var mBtn = document.getElementById('galleryBuckMatchBtn');
+    var rBtn = document.getElementById('galleryBuckReviewBtn');
+    if (!mBtn || !rBtn) return;
+    if (!cloudPhotosAvailable() || !buckProfiles.length){ mBtn.style.display = 'none'; rBtn.style.display = 'none'; return; }
+    var fresh = galleryBuckPhotosToMatch().length;
+    if (fresh > 0){
+      mBtn.style.display = 'block'; mBtn.disabled = false;
+      mBtn.textContent = '🦌 Match ' + fresh + ' buck photo' + (fresh===1?'':'s') + ' to known bucks';
+    } else {
+      var stamped = galleryStampedUnlinkedBucks().length;
+      mBtn.style.display = stamped > 0 ? 'block' : 'none';
+      mBtn.disabled = false;
+      mBtn.textContent = '🦌 Re-check ' + stamped + ' unmatched buck photo' + (stamped===1?'':'s');
+    }
+    var q = pendingBuckSuggestions().length;
+    rBtn.style.display = q === 0 ? 'none' : 'block';
+    rBtn.textContent = '🦌 Review ' + q + ' buck suggestion' + (q===1?'':'s');
+  }
+  document.getElementById('galleryBuckMatchBtn').addEventListener('click', async function(){
+    if (!buckProfiles.length){ alert('Name at least one buck first (open a clear photo of him → 🦌 Link to buck → ＋ New buck). Then this can match others against him.'); return; }
+    var list = galleryBuckPhotosToMatch(), recheck = false;
+    if (!list.length){ list = galleryStampedUnlinkedBucks(); recheck = true; }
+    if (!list.length){ showToast('No unmatched buck photos in view.'); return; }
+    var est = (list.length * 0.015).toFixed(2);
+    if (!confirm((recheck ? 'Re-check ' : 'Match ') + list.length + ' buck photo' + (list.length===1?'':'s') + ' against your ' + buckProfiles.length + ' named buck' + (buckProfiles.length===1?'':'s') + '?\n\n' + (recheck ? 'These had no confident match before — worth a retry now that you\'ve named more bucks. ' : '') + 'Runs the AI matcher once per photo (~1-2¢ each, about $' + est + ' total). Confident matches link automatically; anything unsure is queued for a one-tap review. You can keep using the app while it runs.')) return;
+    var btn = this; btn.disabled = true;
+    var status = document.getElementById('galleryTagAllStatus');
+    var r = await matchBucksInList(list, function(done, total, failed){
+      status.textContent = 'Matching ' + Math.min(done,total) + ' of ' + total + '…' + (failed ? ' (' + failed + ' failed)' : '');
+    });
+    populateGalleryFilters(); refreshTagAllButton();
+    status.textContent = 'Done — ' + r.linked + ' auto-linked, ' + r.suggested + ' to review, ' + r.noMatch + ' no match' + (r.failed ? ', ' + r.failed + ' failed' : '') + '.';
+    if (r.suggested > 0){ showBuckReviewQueue(); }
+    else if (r.linked > 0){ showToast(r.linked + ' photo' + (r.linked===1?'':'s') + ' auto-linked'); }
+    else { showToast('No confident matches yet — name a few more bucks, then re-run to catch these.'); }
+  });
+  document.getElementById('galleryBuckReviewBtn').addEventListener('click', function(){ showBuckReviewQueue(); });
+  // One-tap review of MEDIUM-confidence suggestions, grouped by the buck the AI thinks each is.
+  // Confirm-all links a whole group; Skip clears the group's suggestions (buckMatchedAt stays, so
+  // they won't re-suggest) leaving them unlinked for manual handling.
+  function showBuckReviewQueue(){
+    var pending = pendingBuckSuggestions();
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:640px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    function close(){ if (back.parentNode) document.body.removeChild(back); refreshTagAllButton(); }
+    if (!pending.length){
+      card.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:8px;">🦌 Buck review</div><div style="font-size:12.5px;color:#9db0a3;margin-bottom:12px;">Nothing to review — every suggestion has been handled.</div><button class="brv-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Close</button>';
+      back.appendChild(card); document.body.appendChild(back);
+      card.querySelector('.brv-close').addEventListener('click', close);
+      back.addEventListener('click', function(e){ if (e.target === back) close(); });
+      return;
+    }
+    // Group pending suggestions by suggested buck.
+    var groups = {};
+    pending.forEach(function(p){ var id = p.buckSuggestion.buckId; (groups[id] = groups[id] || []).push(p); });
+    var html = '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🦌 Review buck suggestions</div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:14px;line-height:1.45;">The AI is fairly sure of these but wants your OK. Confirm a whole group at once, or skip it. High-confidence matches were already linked automatically.</div>';
+    Object.keys(groups).forEach(function(id){
+      var bp = buckProfiles.filter(function(b){ return b.id === id; })[0];
+      var name = bp ? bp.name : '(buck)';
+      var photos = groups[id];
+      var reason = photos[0].buckSuggestion.reason || '';
+      html += '<div class="brv-group" data-buck="' + escapeHtml(id) + '" style="border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:12px;background:#1E2B23;">' +
+        '<div style="font-weight:700;margin-bottom:2px;">🦌 ' + escapeHtml(name) + ' <span style="font-size:11px;color:#E8B04B;font-weight:600;">· ' + photos.length + ' photo' + (photos.length===1?'':'s') + '</span></div>' +
+        (reason ? '<div style="font-size:11px;color:#9db0a3;margin-bottom:8px;line-height:1.4;">' + escapeHtml(reason) + '</div>' : '') +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">' +
+        photos.map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:76px;height:76px;object-fit:cover;border-radius:6px;background:#000;">'; }).join('') +
+        '</div>' +
+        '<div style="display:flex;gap:8px;">' +
+        '<button class="brv-confirm" data-buck="' + escapeHtml(id) + '" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">✓ Yes, all ' + name.replace(/"/g,'') + '</button>' +
+        '<button class="brv-skip" data-buck="' + escapeHtml(id) + '" style="flex:0 0 auto;padding:9px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Not him</button>' +
+        '</div></div>';
+    });
+    html += '<button class="brv-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
+      '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">Tip: if a group has one that isn\'t him, hit “Not him,” then link the odd ones out from their photo. Skipped photos stay unlinked and won\'t be suggested again.</div>';
+    card.innerHTML = html;
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.brv-close').addEventListener('click', close);
+    async function resolveGroup(buckId, link){
+      var photos = pendingBuckSuggestions().filter(function(p){ return p.buckSuggestion.buckId === buckId; });
+      for (var i = 0; i < photos.length; i++){
+        var p = photos[i];
+        if (link){ p.buckProfileId = buckId; }
+        p.buckSuggestion = null;
+        if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} }
+      }
+      var grpEl = card.querySelector('.brv-group[data-buck="' + buckId + '"]');
+      if (grpEl && grpEl.parentNode) grpEl.parentNode.removeChild(grpEl);
+      renderGallery(); populateGalleryFilters();
+      var bp = buckProfiles.filter(function(b){ return b.id === buckId; })[0];
+      showToast(link ? ('Linked ' + photos.length + ' to ' + (bp ? bp.name : 'buck')) : ('Skipped ' + photos.length));
+      if (!pendingBuckSuggestions().length) close();
+    }
+    Array.prototype.forEach.call(card.querySelectorAll('.brv-confirm'), function(b){
+      b.addEventListener('click', function(){ resolveGroup(b.getAttribute('data-buck'), true); });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll('.brv-skip'), function(b){
+      b.addEventListener('click', function(){ resolveGroup(b.getAttribute('data-buck'), false); });
+    });
+  }
+
   document.getElementById('photoLightboxDelete').addEventListener('click', async function(){
     if (!galleryLightboxDoc) return;
     var doc = galleryLightboxDoc;
@@ -4415,6 +4582,7 @@
     btn.disabled = (n === 0);
     btn.textContent = n === 0 ? '🧠 Everything in view is tagged' : ('🧠 Tag all untagged with AI (' + n + ')');
     refreshCleanupButton();
+    refreshBuckMatchButtons();
     refreshAssignLocButton();
     refreshWeatherButton();
   }
@@ -4793,7 +4961,8 @@
     var btn = this;
     var list = galleryUntaggedInView();
     if (!list.length) return;
-    if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nThis calls Claude once per photo (about half a cent each). You can keep using the app while it runs.')) return;
+    var willMatch = buckProfiles.length > 0;
+    if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nThis calls Claude once per photo (about half a cent each).' + (willMatch ? ' Any bucks are then matched to your named bucks automatically (another ~1-2¢ per buck photo).' : '') + ' You can keep using the app while it runs.')) return;
     btn.disabled = true;
     var done = 0, failed = 0;
     // Tag several photos AT ONCE — each is still a full, independent AI analysis of that one image
@@ -4812,7 +4981,20 @@
     }
     populateGalleryFilters(); // new species may now exist to filter by
     refreshTagAllButton();
-    status.textContent = 'Done — tagged ' + (done - failed) + ' photo' + ((done-failed)===1?'':'s') + (failed ? ', ' + failed + ' failed (try again)' : '') + '.';
+    var tagMsg = 'Done — tagged ' + (done - failed) + ' photo' + ((done-failed)===1?'':'s') + (failed ? ', ' + failed + ' failed (try again)' : '') + '.';
+    status.textContent = tagMsg;
+    // Auto-sort freshly-tagged bucks against your named bucks — no per-photo clicks. Only runs when
+    // you have buck profiles to match against (disclosed in the confirm above). High-confidence links
+    // itself; anything unsure opens the one-tap review. Skipped if you have no named bucks yet.
+    if (buckProfiles.length){
+      var freshBucks = list.filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && !p.buckMatchedAt; });
+      if (freshBucks.length){
+        var mr = await matchBucksInList(freshBucks, function(d, t){ status.textContent = tagMsg + ' Matching bucks ' + Math.min(d,t) + ' of ' + t + '…'; });
+        populateGalleryFilters(); refreshTagAllButton();
+        status.textContent = tagMsg + ' Bucks: ' + mr.linked + ' auto-linked' + (mr.suggested ? ', ' + mr.suggested + ' to review' : '') + (mr.noMatch ? ', ' + mr.noMatch + ' new/unknown' : '') + '.';
+        if (mr.suggested > 0) showBuckReviewQueue();
+      }
+    }
   });
 
   function showPrompt(message, defaultValue){

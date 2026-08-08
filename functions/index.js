@@ -301,9 +301,12 @@ exports.compareBucks = onCall(
     let response;
     try {
       response = await client.messages.create({
-        model: MODEL,
+        // Individual-buck matching is the MOST demanding vision task (and low-volume, so cost is a
+        // non-issue) — always use the strongest model at high effort so it reads antlers/velvet the
+        // SAME way tagging does. A weak matcher misreads velvet vs. hard-antlered and breaks matches.
+        model: "claude-opus-5",
         max_tokens: 1024,
-        output_config: { effort: "low", format: { type: "json_schema", schema: COMPARE_SCHEMA } },
+        output_config: { effort: "high", format: { type: "json_schema", schema: COMPARE_SCHEMA } },
         system: COMPARE_SYSTEM,
         messages: [
           {
@@ -339,7 +342,7 @@ exports.compareBucks = onCall(
       throw new HttpsError("internal", "The model returned unreadable output.");
     }
     console.log("compareBucks ok:", photoId, "candidates=" + candidates.length, "likelyNew=" + parsed.likelyNew);
-    return Object.assign({}, parsed, { model: MODEL, comparedAt: Date.now() });
+    return Object.assign({}, parsed, { model: "claude-opus-5", comparedAt: Date.now() });
   }
 );
 
