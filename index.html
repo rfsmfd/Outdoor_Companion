@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 168</div>
+    <div id="buildBadge">BUILD 169</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3533,16 +3533,25 @@
   // Colored deer-head silhouette so buck (gold) and doe (its own color) read distinctly — no blending
   // circle behind them. Buck gets antlers; doe doesn't. Reused by map markers AND the sidebar.
   function deerHeadSvg(color, isBuck, px){
-    var ant = isBuck
-      ? '<path d="M16.5 11 L13 3 M13 3 L9.6 4 M13 3 L12 0.8 M15.2 7 L12.2 6.2" stroke="'+color+'" stroke-width="2.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' +
-        '<path d="M23.5 11 L27 3 M27 3 L30.4 4 M27 3 L28 0.8 M24.8 7 L27.8 6.2" stroke="'+color+'" stroke-width="2.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
-      : '';
-    return '<svg width="'+px+'" height="'+px+'" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6));">' +
-      '<g stroke="#fff" stroke-width="0.9" stroke-linejoin="round">' +
-        '<ellipse cx="12" cy="16" rx="4.6" ry="8.4" transform="rotate(-26 12 16)" fill="'+color+'"/>' +
-        '<ellipse cx="28" cy="16" rx="4.6" ry="8.4" transform="rotate(26 28 16)" fill="'+color+'"/>' +
-        '<path d="M20 12 C26 12 26.5 21 24 28 C22.6 32 21 35 20 35 C19 35 17.4 32 16 28 C13.5 21 14 12 20 12 Z" fill="'+color+'"/>' +
-      '</g>' + ant + '</svg>';
+    if (isBuck){
+      // BUCK = antler RACK silhouette. White halo (thick white strokes behind the colored ones) keeps
+      // the thin antlers visible on any background, incl. busy aerial imagery.
+      var rack = '<path d="M23 41 C17 38 9 33 6 23 C4.5 17 6 11 10 7"/><path d="M25 41 C31 38 39 33 42 23 C43.5 17 42 11 38 7"/>' +
+        '<path d="M17 34 L15.5 27"/><path d="M11 28 L8.5 20"/><path d="M7.5 22 L6 13"/><path d="M9.5 15 L7 9"/>' +
+        '<path d="M31 34 L32.5 27"/><path d="M37 28 L39.5 20"/><path d="M40.5 22 L42 13"/><path d="M38.5 15 L41 9"/>';
+      return '<svg width="'+px+'" height="'+px+'" viewBox="0 0 48 44" xmlns="http://www.w3.org/2000/svg" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.55));">' +
+        '<g fill="none" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.9">' + rack + '</g>' +
+        '<g fill="none" stroke="'+color+'" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">' + rack + '</g>' +
+      '</svg>';
+    }
+    // DOE = side-profile deer body (no antlers), white outline for contrast.
+    return '<svg width="'+px+'" height="'+px+'" viewBox="0 0 48 44" xmlns="http://www.w3.org/2000/svg" style="display:block;filter:drop-shadow(0 1px 2px rgba(0,0,0,.6));">' +
+      '<g fill="'+color+'" stroke="#fff" stroke-width="0.8" stroke-linejoin="round">' +
+        '<path d="M8 22 Q7 18 10 18 L14 19 Q19 15 27 17 L31 12 Q32 6 34 6 Q35.5 6 35 9 L34 13 Q36 15 36 19 Q40 20 40 24 L38 25 Q37 22 34 22 L31 22 Q29 26 22 25 L20 24 L11 25 Q8 25 8 22 Z"/>' +
+        '<rect x="12" y="24" width="2.4" height="12" rx="1.1"/><rect x="17" y="24" width="2.4" height="12" rx="1.1"/>' +
+        '<rect x="30" y="24" width="2.4" height="12" rx="1.1"/><rect x="34" y="24" width="2.4" height="12" rx="1.1"/>' +
+        '<path d="M33 7 Q31 4 32.5 3 Q34 5 34.5 7 Z"/>' +
+      '</g></svg>';
   }
   // Inline glyph for a type — deer silhouette for buck/doe, emoji for everything else. Used in the sidebar.
   function obsGlyphInline(type, px){
