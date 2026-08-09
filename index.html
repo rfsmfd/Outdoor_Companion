@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 175</div>
+    <div id="buildBadge">BUILD 176</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2492,6 +2492,7 @@
   var sites = [];
   var markers = {};
   var activeFilters = new Set(Object.keys(TYPES_HUNTING));
+  var showCameraFlags = false;  // the orange camera ICONS on deployed spots — OFF by default; the place dots+names stay. Flip on when working with cameras.
   var activeObsFilters = new Set(Object.keys(OBS_TYPES_HUNTING).concat(Object.keys(OBS_TYPES_FISHING)));
   var placing = false;
   var tempMarker = null;
@@ -3489,7 +3490,7 @@
       // The DOT is the true location anchor (always sits exactly on the spot) + the name. When a
       // camera is deployed here, its orange camera icon rides ABOVE the dot as a flag — so normal
       // map-reading is clean dots + names, and the camera icon just marks where a camera is now.
-      if (cam){
+      if (cam && showCameraFlags){
         var numMatch = cam.name ? cam.name.match(/\d+/) : null;
         // The lens shows the camera's NUMBER, or — for a non-numeric name (e.g. GardePro "FLCR"/
         // "POND") — its first two letters, so a deployed camera is never a blank lens.
@@ -6196,13 +6197,26 @@
   function renderChips(){
     var container = document.getElementById('displayTraySiteTypes');
     container.innerHTML = '';
+    // Camera ICONS (the orange flags on deployed spots) get their OWN toggle, OFF by default — flip on
+    // when working with cameras. Separate from the camera LOCATIONS (the dots + names like "Cox Gate"),
+    // which have their own type toggle below and stay on unless you turn them off.
+    if (activeModule === 'hunting'){
+      var camRow = document.createElement('div');
+      camRow.className = 'toggle-row';
+      camRow.innerHTML =
+        '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">📷</span> Camera icons</div>' +
+        '<div class="toggle-switch' + (showCameraFlags ? ' on' : '') + '"><div class="knob"></div></div>';
+      camRow.querySelector('.toggle-switch').addEventListener('click', function(){ showCameraFlags = !showCameraFlags; renderChips(); renderMarkers(); });
+      container.appendChild(camRow);
+    }
     Object.keys(getActiveTypes()).forEach(function(key){
       var t = getActiveTypes()[key];
       var isOn = activeFilters.has(key);
+      var lbl = (key === 'camera') ? 'Camera Locations' : t.label;   // clarify: the dots/names (places), not the camera icons
       var row = document.createElement('div');
       row.className = 'toggle-row';
       row.innerHTML =
-        '<div class="toggle-row-label"><span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>' + t.label + '</div>' +
+        '<div class="toggle-row-label"><span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>' + lbl + '</div>' +
         '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>';
       row.querySelector('.toggle-switch').addEventListener('click', function(){
         if (activeFilters.has(key)) activeFilters.delete(key); else activeFilters.add(key);
