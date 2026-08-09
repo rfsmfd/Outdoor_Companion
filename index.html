@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 172</div>
+    <div id="buildBadge">BUILD 173</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3535,11 +3535,17 @@
   // Types with founder-supplied artwork (transparent PNGs in icons/). Others fall back to an emoji.
   var OBS_TYPE_IMG = { buck:'icons/buck.png', doe:'icons/doe.png', bear:'icons/bear.png', rub:'icons/rub.png', track:'icons/track.png' };
   var OBS_IMG_FIT = 0.62;  // how much of the circle the artwork fills — nudge this one number to resize all icons
+  // Preload the artwork so markers never flash an empty circle while the images fetch.
+  Object.keys(OBS_TYPE_IMG).forEach(function(k){ var im = new Image(); im.src = OBS_TYPE_IMG[k]; });
   // Inner glyph — the artwork image if we have it, else the type emoji — sized to leave a white margin + ring.
+  // NOTE: artwork is a fixed-size BACKGROUND (not an <img>), because Leaflet forces its own sizing on
+  // <img> tags inside map markers — which was overriding our size and rendering the pictures full/clipped.
   function obsTypeInner(type, px){
-    return OBS_TYPE_IMG[type]
-      ? '<img src="'+OBS_TYPE_IMG[type]+'" alt="" style="max-width:'+Math.round(px*OBS_IMG_FIT)+'px;max-height:'+Math.round(px*OBS_IMG_FIT)+'px;object-fit:contain;">'
-      : '<span style="font-size:'+Math.round(px*0.6)+'px;line-height:1;">'+(OBS_TYPE_EMOJI[type]||'📍')+'</span>';
+    if (OBS_TYPE_IMG[type]){
+      var s = Math.round(px * OBS_IMG_FIT);
+      return '<span style="display:block;width:'+s+'px;height:'+s+'px;background:url('+OBS_TYPE_IMG[type]+') center/contain no-repeat;"></span>';
+    }
+    return '<span style="font-size:'+Math.round(px*0.6)+'px;line-height:1;">'+(OBS_TYPE_EMOJI[type]||'📍')+'</span>';
   }
   // Every observation type = its glyph inside a WHITE circle with a colored ring, so animals and emoji
   // alike stay visible on dark / aerial backgrounds (founder's call). Shared by the sidebar and the map.
