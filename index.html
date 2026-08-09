@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 176</div>
+    <div id="buildBadge">BUILD 177</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6233,6 +6233,23 @@
   // never actually covered, despite the similar naming (a real gap, not a bug, identified
   // directly from a founder report where "Wildlife Sighting" the Site type was confused
   // with actual logged wildlife sighting Observations).
+  // Per-type MAP-DISPLAY period — how far back to draw that sighting type's PINS. Default 6 months.
+  // This ONLY hides pins on the map; it never touches analytics, lists, timelines, or the data itself.
+  var obsTypePeriod = {};  // key -> '1mo'|'3mo'|'6mo'|'1yr'|'all'
+  function obsPeriodStart(key){
+    var p = obsTypePeriod[key] || '6mo', now = Date.now();
+    if (p === 'all') return null;
+    if (p === '1mo') return now - 30*86400000;
+    if (p === '3mo') return now - 91*86400000;
+    if (p === '1yr') return now - 365*86400000;
+    return now - 182*86400000; // 6mo default
+  }
+  function obsPeriodOpts(key){
+    var cur = obsTypePeriod[key] || '6mo';
+    return [['1mo','1mo'],['3mo','3mo'],['6mo','6mo'],['1yr','1yr'],['all','All']].map(function(o){
+      return '<option value="'+o[0]+'"'+(cur===o[0]?' selected':'')+'>'+o[1]+'</option>';
+    }).join('');
+  }
   function renderObsTypeToggles(){
     document.getElementById('obsVisibilityTitle').textContent = activeModule === 'fishing' ? 'Catches' : 'Sightings';
     var container = document.getElementById('displayTrayObsTypes');
@@ -6244,10 +6261,17 @@
       row.className = 'toggle-row';
       row.innerHTML =
         '<div class="toggle-row-label"><span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;vertical-align:middle;margin-right:4px;">'+obsGlyphInline(key, 22)+'</span>' + t.label + '</div>' +
-        '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>';
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<select class="obs-period" title="How far back to show ' + escapeHtml(t.label) + ' pins on the MAP (data/analytics unaffected)" style="padding:3px 4px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.28);color:var(--text);font-size:11px;">' + obsPeriodOpts(key) + '</select>' +
+          '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>' +
+        '</div>';
       row.querySelector('.toggle-switch').addEventListener('click', function(){
         if (activeObsFilters.has(key)) activeObsFilters.delete(key); else activeObsFilters.add(key);
         renderObsTypeToggles();
+        renderObsMarkers();
+      });
+      row.querySelector('.obs-period').addEventListener('change', function(){
+        obsTypePeriod[key] = this.value;   // map-display only
         renderObsMarkers();
       });
       container.appendChild(row);
@@ -7078,6 +7102,8 @@
       if (!passesDateFilter(o.createdAt)) return;
       if (!typeIsInActiveModule(o.type, true)) return;
       if (!activeObsFilters.has(o.type)) return;
+      var _ps = obsPeriodStart(o.type);                       // per-type MAP period (does NOT affect analytics/lists)
+      if (_ps !== null && o.createdAt < _ps) return;
       var m = L.marker([o.lat,o.lng], {icon: obsMarkerIcon(o.type)}).addTo(map);
       if (IS_TOUCH){
         // No hover on touch — TAP shows the info card with an Edit button (which swaps to the edit form).
@@ -8972,12 +8998,16 @@
       }
       if (isCurrent) return;
       if (rangeStart !== null && dep.deployedAt < rangeStart) return;
+      var dateStr = new Date(dep.deployedAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
+      var pickup = dep.pickedUpAt ? ' → picked up ' + new Date(dep.pickedUpAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) : '';
+      var histSite = dep.siteId ? sites.filter(function(s){ return s.id === dep.siteId; })[0] : null;
+      var info = '<strong>📷 ' + escapeHtml(cam.name) + '</strong>' + (histSite ? ' · ' + escapeHtml(histSite.name) : '') + '<br>Deployed ' + dateStr + pickup;
       var marker = L.marker([dep.lat, dep.lng], {
-        icon: L.divIcon({className:'', html:'<div class="cam-history-dot"></div>', iconSize:[10,10], iconAnchor:[5,5]}),
+        icon: L.divIcon({className:'', html:'<div class="cam-history-dot"></div>', iconSize:[12,12], iconAnchor:[6,6]}),
         interactive: true
       }).addTo(map);
-      var dateStr = new Date(dep.deployedAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
-      marker.bindPopup('<strong>' + escapeHtml(cam.name) + '</strong><br>Deployed here ' + dateStr + (dep.pickedUpAt ? ' → picked up ' + new Date(dep.pickedUpAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) : ''));
+      marker.bindTooltip(info, { direction:'top', offset:[0,-6], opacity:1 });   // hover = the deployment info
+      marker.bindPopup(info);                                                     // click/tap = same info
       cameraHistoryMarkers.push(marker);
     });
   }
