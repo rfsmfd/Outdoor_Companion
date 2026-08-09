@@ -1745,6 +1745,7 @@
         <option value="Preset 5ft Contour Interval">5 ft</option>
         <option value="Preset 10ft Contour Interval">10 ft</option>
       </select>
+      <input type="range" id="contourOpacitySlider" min="10" max="100" value="45" title="Contour line transparency" style="display:none;width:70px;vertical-align:middle;margin:0 6px;accent-color:#E8823F;cursor:pointer;" />
       <button class="layer-btn" id="hydroToggleBtn" title="Streams &amp; drainage lines (USGS National Hydrography Dataset) over any layer">💧 Streams</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
@@ -1753,7 +1754,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 201</div>
+    <div id="buildBadge">BUILD 202</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8420,22 +8421,25 @@
   var contourOn = false;
   var contourStyle = 'Preset 2ft Contour Interval';
   try{ var _cs = localStorage.getItem('oc_contour_style'); if (_cs && _cs.indexOf('Contour') !== -1) contourStyle = _cs; }catch(e){}
+  var contourOpacity = 0.45;  // subtle by default — dense LiDAR contours at full white were drowning the aerial
+  try{ var _co = parseInt(localStorage.getItem('oc_contour_opacity'), 10); if (_co >= 10 && _co <= 100) contourOpacity = _co / 100; }catch(e){}
   // Contours ride in their OWN pane so we can recolor the LINES to suit the base: WHITE on the dark aerial,
   // BLACK on the light topo/street. brightness(0) forces every line to black (transparent stays clear); the
   // extra invert(1) flips black->white. Pane z is above the relief, below markers.
   map.createPane('contourPane'); map.getPane('contourPane').style.zIndex = 450; map.getPane('contourPane').style.pointerEvents = 'none';
-  var contourLayer = L.esri.imageMapLayer({ url: HILLSHADE_URL, opacity: 0.95, renderingRule: { rasterFunction: contourStyle }, pane: 'contourPane' });
+  var contourLayer = L.esri.imageMapLayer({ url: HILLSHADE_URL, opacity: contourOpacity, renderingRule: { rasterFunction: contourStyle }, pane: 'contourPane' });
   function updateContourColor(){ var p = map.getPane('contourPane'); if (p) p.style.filter = (currentBase === 'aerial') ? 'brightness(0) invert(1)' : 'brightness(0)'; }
   updateContourColor();
 
   var hillshadeSel = document.getElementById('hillshadeStyleSel');
   var hillshadeSlider = document.getElementById('hillshadeOpacitySlider');
   var contourSel = document.getElementById('contourIntervalSel');
+  var contourSlider = document.getElementById('contourOpacitySlider');
   function showHillshadeControls(on){
     if (hillshadeSel) hillshadeSel.style.display = on ? 'inline-block' : 'none';
     if (hillshadeSlider) hillshadeSlider.style.display = on ? 'inline-block' : 'none';
   }
-  function showContourControls(on){ if (contourSel) contourSel.style.display = on ? 'inline-block' : 'none'; }
+  function showContourControls(on){ if (contourSel) contourSel.style.display = on ? 'inline-block' : 'none'; if (contourSlider) contourSlider.style.display = on ? 'inline-block' : 'none'; }
   if (hillshadeSel){
     hillshadeSel.value = hillshadeStyle;
     hillshadeSel.addEventListener('change', function(){
@@ -8459,6 +8463,14 @@
       contourStyle = this.value;
       try{ localStorage.setItem('oc_contour_style', contourStyle); }catch(e){}
       contourLayer.setRenderingRule({ rasterFunction: contourStyle });
+    });
+  }
+  if (contourSlider){
+    contourSlider.value = Math.round(contourOpacity * 100);
+    contourSlider.addEventListener('input', function(){
+      contourOpacity = (parseInt(this.value, 10) || 45) / 100;
+      contourLayer.setOpacity(contourOpacity);
+      try{ localStorage.setItem('oc_contour_opacity', Math.round(contourOpacity * 100)); }catch(e){}
     });
   }
   document.getElementById('hillshadeToggleBtn').addEventListener('click', function(){
