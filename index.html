@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 180</div>
+    <div id="buildBadge">BUILD 181</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4629,14 +4629,16 @@
       back.addEventListener('click', function(e){ if (e.target === back) close(); });
       return;
     }
-    // Selection state, default ON for every pending photo (AI already thinks each is that buck).
+    // Selection state, default OFF — you actively PICK the ones that really are him. Start-unpicked is
+    // the safe default: the AI's medium-confidence groups are often mixed (does/small bucks land in a
+    // "Moose" pile), so nothing must link on a single accidental tap. You add the real ones in.
     var sel = {};
-    pending.forEach(function(p){ sel[p.id] = true; });
+    pending.forEach(function(p){ sel[p.id] = false; });
     // Group pending suggestions by suggested buck.
     var groups = {};
     pending.forEach(function(p){ var id = p.buckSuggestion.buckId; (groups[id] = groups[id] || []).push(p); });
     var html = '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🦌 Review buck suggestions</div>' +
-      '<div style="font-size:12px;color:#9db0a3;margin-bottom:14px;line-height:1.45;"><b>Tap a photo to pick which ones are really him</b> (green ✓ = yes, dimmed = no). Then link the ones you picked — the rest get set aside. Tap 🔍 to zoom in and check the rack. Free — no AI charge.</div>';
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:14px;line-height:1.45;">Everything starts <b>unpicked</b> so nothing links by accident. <b>Tap the photos that really ARE him</b> (they get a green ✓); leave the rest. Then hit Link — picked ones link to that buck, the rest are set aside. Tap 🔍 to zoom in and check the rack. Free — no AI charge.</div>';
     Object.keys(groups).forEach(function(id){
       var bp = buckProfiles.filter(function(b){ return b.id === id; })[0];
       var name = bp ? bp.name : '(buck)';
