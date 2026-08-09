@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 182</div>
+    <div id="buildBadge">BUILD 183</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5820,8 +5820,7 @@
     var btn = this;
     var list = galleryUntaggedInView();
     if (!list.length) return;
-    var willMatch = buckProfiles.length > 0;
-    if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nThis calls Claude once per photo (about half a cent each).' + (willMatch ? ' Any bucks are then matched to your named bucks automatically (another ~1-2¢ per buck photo).' : '') + ' You can keep using the app while it runs.')) return;
+    if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nThis calls Claude once per photo (about half a cent each) to read species, count, and antlers. You can keep using the app while it runs.\n\nMatching bucks to your named bucks is a SEPARATE step you run yourself (the amber “Step 3 · Match” button) — it won\'t happen here, so nothing extra gets spent.')) return;
     btn.disabled = true;
     var done = 0, failed = 0;
     // Tag several photos AT ONCE — each is still a full, independent AI analysis of that one image
@@ -5842,18 +5841,12 @@
     refreshTagAllButton();
     var tagMsg = 'Done — tagged ' + (done - failed) + ' photo' + ((done-failed)===1?'':'s') + (failed ? ', ' + failed + ' failed (try again)' : '') + '.';
     status.textContent = tagMsg;
-    // Auto-sort freshly-tagged bucks against your named bucks — no per-photo clicks. Only runs when
-    // you have buck profiles to match against (disclosed in the confirm above). High-confidence links
-    // itself; anything unsure opens the one-tap review. Skipped if you have no named bucks yet.
-    if (buckProfiles.length){
-      var freshBucks = list.filter(function(p){ return p.ai && p.ai.isBuck && !p.buckProfileId && !p.buckMatchedAt && !p.multiBuckHold && !p.notInterested; });
-      if (freshBucks.length){
-        var mr = await matchBucksInList(freshBucks, function(d, t){ status.textContent = tagMsg + ' Matching bucks ' + Math.min(d,t) + ' of ' + t + '…'; });
-        populateGalleryFilters(); refreshTagAllButton();
-        status.textContent = tagMsg + ' Bucks: ' + mr.linked + ' auto-linked' + (mr.suggested ? ', ' + mr.suggested + ' to review' : '') + (mr.noMatch ? ', ' + mr.noMatch + ' new/unknown' : '') + '.';
-        if (mr.suggested > 0) showBuckReviewQueue();
-      }
-    }
+    // Buck MATCHING is deliberately NOT run here anymore. Per the cost-model doc, recognition is
+    // on-demand — never automatic at ingest — so tagging stays the cheap ½¢/photo job and nobody gets
+    // a surprise matching bill bundled into it. Matching its own explicit, cost-confirmed Step 3 (the
+    // amber "🦌 Step 3 · Match" button), which you run when YOU choose. We just refresh so that button
+    // now reflects the freshly-tagged bucks waiting to be matched.
+    refreshBuckMatchButtons();
   });
 
   function showPrompt(message, defaultValue){
