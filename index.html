@@ -1646,6 +1646,7 @@
       <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
       <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
       <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
+      <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt Tonight</button>
       <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
     </div>
 
@@ -1735,7 +1736,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 189</div>
+    <div id="buildBadge">BUILD 190</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6713,6 +6714,11 @@
     var photosBtn = photoCount
       ? '<button class="btn-ghost" data-act="photos" data-id="'+s.id+'" style="width:100%;margin:9px 0 3px;background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;">📸 View ' + photoCount + ' photo' + (photoCount===1?'':'s') + ' here</button>'
       : '';
+    // "I hunt here" flag — this is how a spot enters the "Where to hunt tonight" ranking. Tree Stands are
+    // huntable inherently (no toggle); other sites (observation cams) start observation-only and toggle in.
+    var huntableBtn = (activeModule === 'hunting' && isMine && s.type !== 'stand')
+      ? '<button class="btn-ghost" data-act="huntable" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">' + (siteIsHuntable(s) ? '🏹 Hunt spot — tap to make observation-only' : '👁 Observation only — tap: 🏹 I hunt here') + '</button>'
+      : '';
     return '' +
       '<div class="pop">' +
         '<h3>'+escapeHtml(s.name)+'</h3>' +
@@ -6722,6 +6728,7 @@
         '<div class="coords">'+fmtCoord(s.lat)+', '+fmtCoord(s.lng)+'</div>' +
         photosBtn +
         standHuntabilityHtml(s) +
+        huntableBtn +
         actionRow +
       '</div>';
   }
@@ -6766,6 +6773,14 @@
     if (shareBtn) shareBtn.addEventListener('click', function(){
       var s = sites.filter(function(x){ return x.id === id; })[0];
       if (s) openSharePicker('site:' + id, s.name, s.__sharedGroups || []);
+    });
+    var huntableBtn = node.querySelector('[data-act="huntable"]');
+    if (huntableBtn) huntableBtn.addEventListener('click', async function(){
+      var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s) return;
+      s.huntable = !siteIsHuntable(s);
+      try { await saveSite(s); } catch (e) { console.error('Outdoor Companion: failed to save huntable flag', e); }
+      map.closePopup(); renderAll();
+      showToast(s.huntable ? 'Marked as a hunt spot 🏹' : 'Set to observation only 👁');
     });
   }
 
@@ -7382,6 +7397,7 @@
   // ---------- Buck Gallery ----------
   function updateBuckGalleryButtonVisibility(){
     document.getElementById('buckGalleryBtn').style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
   }
 
   // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
@@ -7613,6 +7629,96 @@
       win +
       '<div style="font-size:9.5px;opacity:.6;margin-top:4px;">' + r.base.located + ' deer photo' + (r.base.located === 1 ? '' : 's') + ' here' + (r.recent.located && !r.recentUsable ? ' · recent sample thin' : '') + '.</div>' +
     '</div>';
+  }
+
+  // ---------- "Where to hunt tonight" recommender (v1 — flagship #02, in progress) ----------
+  // Ranks YOUR spots for tonight from your own camera history + tonight's solunar. Key design (founder):
+  // most cameras are OBSERVATION points he doesn't hunt — so a spot only counts as a real recommendation
+  // when it's a Tree Stand or flagged "🏹 I hunt here"; observation cams inform the data but list
+  // separately. NOT complete until real stands are in + wind-smart approach lands.
+  function siteIsHuntable(s){ return !!(s && (s.huntable || s.type === 'stand')); }
+  function deerPhotosAtSite(s){ return (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return p.matchedSiteId === s.id && p.ai && (p.ai.isBuck || (p.ai.species && /deer/i.test(p.ai.species))); }); }
+  function todayWindowRange(bucketKey, s){
+    if (!s || typeof s.lat !== 'number') return null;
+    var t; try { t = SunCalc.getTimes(new Date(), s.lat, s.lng); } catch (e) { return null; }
+    if (!t.sunrise || isNaN(t.sunrise.getTime()) || !t.sunset || isNaN(t.sunset.getTime())) return null;
+    var sr = t.sunrise.getTime(), ss = t.sunset.getTime();
+    if (bucketKey === 'firstLight') return { a: sr - 1800000, z: sr + 3600000 };
+    if (bucketKey === 'lastLight') return { a: ss - 3600000, z: ss + 1800000 };
+    if (bucketKey === 'midday') return { a: sr + 3600000, z: ss - 3600000 };
+    return null;
+  }
+  function winsOverlap(a, z, per){ return per ? (a < per.end.getTime() && z > per.start.getTime()) : false; }
+  function fmtSolWin(w){ return w ? (hbClock(w.start.getTime()) + '–' + hbClock(w.end.getTime())) : '—'; }
+  function huntTonightSpots(){
+    var out = [];
+    (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
+      if (typeof s.lat !== 'number') return;
+      if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type)) return;
+      var r = huntabilityRead(deerPhotosAtSite(s), huntRecentDays);
+      if (!r.has) return;
+      var score = r.recentUsable ? r.recent.pct : r.base.pct;
+      if (r.state === 'heating') score += 25; else if (r.state === 'cooling') score -= 10;
+      if (r.daysSince != null){ score += (r.daysSince <= 3 ? 15 : r.daysSince <= 7 ? 8 : r.daysSince <= 14 ? 0 : -12); }
+      var rng = r.useBest ? todayWindowRange(r.useBest, s) : null, solunarHit = null;
+      if (rng){
+        var per = getSolunarPeriodsForDay(new Date(), s.lat, s.lng);
+        if (winsOverlap(rng.a, rng.z, per.major1) || winsOverlap(rng.a, rng.z, per.major2)){ score += 12; solunarHit = 'major'; }
+        else if (winsOverlap(rng.a, rng.z, per.minor1) || winsOverlap(rng.a, rng.z, per.minor2)){ score += 6; solunarHit = 'minor'; }
+      }
+      out.push({ site: s, read: r, score: Math.round(score), huntable: siteIsHuntable(s), solunarHit: solunarHit });
+    });
+    out.sort(function(a, b){ return b.score - a.score; });
+    return out;
+  }
+  function showHuntTodayPanel(){
+    var spots = huntTonightSpots(), now = new Date(), lat = null, lng = null;
+    if (spots.length){ lat = spots[0].site.lat; lng = spots[0].site.lng; }
+    else { try { var c = map.getCenter(); lat = c.lat; lng = c.lng; } catch (e) {} }
+    var per = (lat != null) ? getSolunarPeriodsForDay(now, lat, lng) : null;
+    var moon = getMoonPhase(now);
+    var hunt = spots.filter(function(x){ return x.huntable; }), obs = spots.filter(function(x){ return !x.huntable; });
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:520px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    function spotCard(x, rank){
+      var r = x.read, win = r.windowText ? (bucketLabel(r.useBest) + ' · ' + r.windowText) : '—';
+      var star = x.solunarHit ? (' <span style="color:#E8B04B;">⭐ ' + x.solunarHit + ' feed</span>') : '';
+      return '<div class="ht-spot" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+          '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' ' + (x.huntable ? '🏹' : '👁') + '</div>' +
+          '<div style="font-size:11px;font-weight:800;color:' + r.tone + ';">' + HB_VERDICT[r.state] + '</div>' +
+        '</div>' +
+        '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;">🌅 ' + win + star + '</div>' +
+        '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">Daylight ' + r.base.pct + '% all-time' + (r.recent.located ? (' · ' + r.recent.pct + '% recent') : '') + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '') + '</div>' +
+      '</div>';
+    }
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;"><div style="font-weight:800;font-size:16px;">🎯 Where to hunt tonight</div><button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + now.toDateString() + '</div>' +
+      '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:12px;font-size:11.5px;line-height:1.6;">' +
+        '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
+        (per ? ('<br>⭐ Feeding — major <b>' + fmtSolWin(per.major1) + '</b> & <b>' + fmtSolWin(per.major2) + '</b><br><span style="color:#9db0a3;">minor ' + fmtSolWin(per.minor1) + ' & ' + fmtSolWin(per.minor2) + '</span>') : '') +
+      '</div>';
+    if (!spots.length){
+      html += '<div style="font-size:12px;color:#9db0a3;">No spots with deer photos yet. Once your cameras log deer, they\'ll rank here for tonight.</div>';
+    } else {
+      if (hunt.length){ html += '<div style="font-weight:700;font-size:12px;margin-bottom:6px;">🏹 Your hunt spots</div>'; hunt.forEach(function(x, i){ html += spotCard(x, i + 1); }); }
+      else { html += '<div style="font-size:11.5px;color:#E8B04B;background:rgba(232,176,75,.1);border-radius:8px;padding:9px;margin-bottom:10px;line-height:1.5;">You haven\'t marked any hunt spots yet. Below is where deer are moving on your ground — tap a spot on the map → <b>🏹 I hunt here</b>, or drop a Tree Stand, to turn it into a real recommendation.</div>'; }
+      if (obs.length){ html += '<div style="font-weight:700;font-size:12px;margin:12px 0 6px;color:#9db0a3;">👁 Also active (observation cams)</div>'; obs.forEach(function(x){ html += spotCard(x, null); }); }
+    }
+    html += '<div style="font-size:9.5px;color:#6f8377;margin-top:10px;line-height:1.45;">v1 — ranks by your own daylight deer activity + recency + tonight\'s solunar. Wind-smart approach and true stand placement come as you add stands.</div>';
+    card.innerHTML = html;
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.ht-close').addEventListener('click', close);
+    Array.prototype.forEach.call(card.querySelectorAll('.ht-spot'), function(el){
+      el.addEventListener('click', function(){ var la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng')); close(); try { map.setView([la, ln], 17); } catch (e) {} });
+    });
+    if (lat != null && typeof fetchCurrentWeather === 'function'){
+      fetchCurrentWeather(lat, lng).then(function(w){ var el = document.getElementById('ht-wind'); if (el && w) el.textContent = (w.windDirDisplay || w.windDir) + ' ' + w.windMph + ' mph'; }).catch(function(){ var el = document.getElementById('ht-wind'); if (el) el.textContent = '—'; });
+    }
   }
 
   // ---------- Huntability Ship 3b: front-screen "on their feet" alert ----------
@@ -7886,6 +7992,7 @@
     document.getElementById('cancelEditBuckProfileBtn').style.display = 'none';
   }
 
+  document.getElementById('huntTodayBtn').addEventListener('click', showHuntTodayPanel);
   document.getElementById('buckGalleryBtn').addEventListener('click', function(){
     resetBuckProfileForm();
     renderBuckProfilesList();
