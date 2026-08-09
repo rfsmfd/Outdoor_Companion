@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 174</div>
+    <div id="buildBadge">BUILD 175</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7041,22 +7041,22 @@
     });
   }
 
-  // Read-only info shown on HOVER over a sighting marker (click still opens the full edit form).
-  function obsInfoTooltip(o){
+  // Read-only sighting info — shown on HOVER (desktop) and as a TAP card (touch, with an Edit button).
+  function obsInfoBody(o){
     var t = getActiveObsTypes()[o.type] || getFallbackTypeEntry(true);
     var site = o.siteId ? sites.filter(function(s){ return s.id === o.siteId; })[0] : null;
     var buck = o.buckProfileId ? buckProfiles.filter(function(b){ return b.id === o.buckProfileId; })[0] : null;
     var d = new Date(o.createdAt);
     var when = d.toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) + ' · ' + d.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
     var html = '';
-    if (o.photoThumb) html += '<img src="'+o.photoThumb+'" alt="" style="width:100%;max-width:150px;height:90px;object-fit:cover;border-radius:4px;display:block;margin-bottom:5px;">';
+    if (o.photoThumb) html += '<img src="'+o.photoThumb+'" alt="" style="width:100%;max-width:160px;height:96px;object-fit:cover;border-radius:4px;display:block;margin-bottom:5px;">';
     html += '<div style="font-weight:700;">'+escapeHtml(t.label)+(buck ? ' — 🦌 '+escapeHtml(buck.name) : '')+'</div>';
     html += '<div style="opacity:.85;">'+escapeHtml(when)+(site ? ' · '+escapeHtml(site.name) : '')+'</div>';
     if (o.notes) html += '<div style="opacity:.9;font-style:italic;margin-top:2px;">'+escapeHtml(o.notes)+'</div>';
     if (o.weatherStatus === 'ok' && o.weather) html += '<div style="opacity:.7;font-size:11px;margin-top:3px;">'+escapeHtml(formatWeatherLine(o.weather))+'</div>';
-    html += '<div style="opacity:.55;font-size:10px;margin-top:4px;">click to edit</div>';
     return html;
   }
+  var IS_TOUCH = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
   function renderObsMarkers(){
     Object.keys(obsMarkers).forEach(function(id){ map.removeLayer(obsMarkers[id]); });
     obsMarkers = {};
@@ -7065,9 +7065,22 @@
       if (!typeIsInActiveModule(o.type, true)) return;
       if (!activeObsFilters.has(o.type)) return;
       var m = L.marker([o.lat,o.lng], {icon: obsMarkerIcon(o.type)}).addTo(map);
-      m.bindTooltip(obsInfoTooltip(o), { direction:'top', offset:[0,-20], opacity:1, className:'obs-info-tip' });   // hover = info
-      m.bindPopup(obsPopupHtml(o));                                                                                 // click = edit
-      m.on('popupopen', function(e){ bindObsPopupActions(e.popup, o.id); });
+      if (IS_TOUCH){
+        // No hover on touch — TAP shows the info card with an Edit button (which swaps to the edit form).
+        m.bindPopup('<div style="max-width:190px;">'+obsInfoBody(o)+'<button data-act="obs-edit" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">✏️ Edit details</button></div>');
+        m.on('popupopen', function(e){
+          var node = e.popup.getElement();
+          var eb = node && node.querySelector('[data-act="obs-edit"]');
+          if (eb) eb.addEventListener('click', function(){
+            e.popup.setContent(obsPopupHtml(o));
+            setTimeout(function(){ bindObsPopupActions(e.popup, o.id); }, 0);
+          });
+        });
+      } else {
+        m.bindTooltip('<div style="max-width:180px;">'+obsInfoBody(o)+'<div style="opacity:.55;font-size:10px;margin-top:4px;">click to edit</div></div>', { direction:'top', offset:[0,-20], opacity:1, className:'obs-info-tip' });  // hover = info
+        m.bindPopup(obsPopupHtml(o));                                                                                                                                                              // click = edit
+        m.on('popupopen', function(e){ bindObsPopupActions(e.popup, o.id); });
+      }
       obsMarkers[o.id] = m;
     });
   }
