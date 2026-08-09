@@ -1733,11 +1733,15 @@
       <button class="layer-btn" id="roadsToggleBtn" title="Toggle road names &amp; labels on top of any layer" style="margin-left:6px;border-left:2px solid rgba(255,255,255,0.25);">🛣 Roads</button>
       <button class="layer-btn" id="hillshadeToggleBtn" title="Hillshade — real LiDAR terrain relief (USGS 3DEP) over any layer">🏔 Hillshade</button>
       <select id="hillshadeStyleSel" title="How to render the terrain" style="display:none;font-size:12px;padding:0 8px;background:#14201A;color:#e8f0ea;border:none;border-left:1px solid rgba(255,255,255,0.15);cursor:pointer;outline:none;">
-        <option value="Hillshade Multidirectional">Relief</option>
         <option value="Hillshade Gray-Stretch">Relief+ (exaggerated)</option>
+        <option value="Hillshade Multidirectional">Relief</option>
         <option value="Hillshade Elevation Tinted">Elevation tint</option>
         <option value="Aspect Map">Slope aspect</option>
+        <option value="Preset 2ft Contour Interval">Contours · 2 ft (LiDAR)</option>
+        <option value="Preset 5ft Contour Interval">Contours · 5 ft</option>
+        <option value="Preset 10ft Contour Interval">Contours · 10 ft</option>
       </select>
+      <input type="range" id="hillshadeOpacitySlider" min="15" max="100" value="60" title="Terrain layer transparency" style="display:none;width:78px;vertical-align:middle;margin:0 8px;accent-color:#E8823F;cursor:pointer;" />
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
@@ -1745,7 +1749,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 197</div>
+    <div id="buildBadge">BUILD 198</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8402,26 +8406,40 @@
   // global tile hillshade just fogged flat land; this fine, stretchable source shows the real micro-relief.
   // Rendered via esri-leaflet imageMapLayer (dynamic exportImage). No AI, no cost. Preference persists.
   var hillshadeOn = false;
-  var hillshadeStyle = 'Hillshade Multidirectional';
+  var hillshadeStyle = 'Hillshade Gray-Stretch';   // Relief+ default — the mode the founder found most useful
   try{ var _hs = localStorage.getItem('oc_hillshade_style'); if (_hs) hillshadeStyle = _hs; }catch(e){}
+  var hillshadeOpacity = 0.6;
+  try{ var _ho = parseInt(localStorage.getItem('oc_hillshade_opacity'), 10); if (_ho >= 15 && _ho <= 100) hillshadeOpacity = _ho / 100; }catch(e){}
   var hillshadeLayer = L.esri.imageMapLayer({
     url: 'https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer',
-    opacity: 0.6, renderingRule: { rasterFunction: hillshadeStyle }, attribution: 'Terrain: USGS 3DEP'
+    opacity: hillshadeOpacity, renderingRule: { rasterFunction: hillshadeStyle }, attribution: 'Terrain: USGS 3DEP'
   });
   var hillshadeSel = document.getElementById('hillshadeStyleSel');
+  var hillshadeSlider = document.getElementById('hillshadeOpacitySlider');
+  function showHillshadeControls(on){
+    if (hillshadeSel) hillshadeSel.style.display = on ? 'inline-block' : 'none';
+    if (hillshadeSlider) hillshadeSlider.style.display = on ? 'inline-block' : 'none';
+  }
   if (hillshadeSel){
     hillshadeSel.value = hillshadeStyle;
     hillshadeSel.addEventListener('change', function(){
       hillshadeStyle = this.value;
       try{ localStorage.setItem('oc_hillshade_style', hillshadeStyle); }catch(e){}
       hillshadeLayer.setRenderingRule({ rasterFunction: hillshadeStyle });
-      hillshadeLayer.setOpacity(hillshadeStyle === 'Hillshade Elevation Tinted' ? 0.5 : 0.6);
+    });
+  }
+  if (hillshadeSlider){
+    hillshadeSlider.value = Math.round(hillshadeOpacity * 100);
+    hillshadeSlider.addEventListener('input', function(){
+      hillshadeOpacity = (parseInt(this.value, 10) || 60) / 100;
+      hillshadeLayer.setOpacity(hillshadeOpacity);
+      try{ localStorage.setItem('oc_hillshade_opacity', Math.round(hillshadeOpacity * 100)); }catch(e){}
     });
   }
   document.getElementById('hillshadeToggleBtn').addEventListener('click', function(){
     hillshadeOn = !hillshadeOn;
     this.classList.toggle('active', hillshadeOn);
-    if (hillshadeSel) hillshadeSel.style.display = hillshadeOn ? 'inline-block' : 'none';
+    showHillshadeControls(hillshadeOn);
     if (hillshadeOn){ hillshadeLayer.addTo(map); raiseOverlaysAndMarkers(); } else { map.removeLayer(hillshadeLayer); }
     try{ localStorage.setItem('oc_hillshade_on', hillshadeOn ? '1' : '0'); }catch(e){}
   });
@@ -8429,7 +8447,7 @@
     if (localStorage.getItem('oc_hillshade_on') === '1'){
       hillshadeOn = true; hillshadeLayer.addTo(map);
       document.getElementById('hillshadeToggleBtn').classList.add('active');
-      if (hillshadeSel) hillshadeSel.style.display = 'inline-block';
+      showHillshadeControls(true);
       raiseOverlaysAndMarkers();
     }
   }catch(e){}
