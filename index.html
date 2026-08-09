@@ -1736,7 +1736,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 192</div>
+    <div id="buildBadge">BUILD 193</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7385,6 +7385,10 @@
       // NOTE: count markers deliberately PERSIST across tab switches — they're a map overlay
       // the hunter wants to keep looking at (cleared only by a new query or the Clear button).
       if (typeof queryHomeRangeLayers !== 'undefined' && queryHomeRangeLayers.length){ queryHomeRangeLayers.forEach(function(l){ map.removeLayer(l); }); queryHomeRangeLayers = []; }
+      // BUT the count-map's side effect of HIDING camera-location pins must NOT leak out of Analytics —
+      // it was flipping the shared Camera Locations filter off, so places like "Cox Gate" silently
+      // vanished from the normal map and stayed gone until a reboot. Leaving Analytics always restores them.
+      if (activeTab !== 'analytics' && typeof restoreCamerasAfterCountMarkers === 'function') restoreCamerasAfterCountMarkers();
       renderActiveList();
     });
   });
