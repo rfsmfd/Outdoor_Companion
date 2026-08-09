@@ -1731,6 +1731,7 @@
       <button class="layer-btn" data-layer="usgstopo" title="USGS Topo — official U.S. government topographic data">USGS</button>
       <button class="layer-btn" data-layer="opentopo" title="OpenTopoMap — worldwide contour/trail topo">Topo</button>
       <button class="layer-btn" id="roadsToggleBtn" title="Toggle road names &amp; labels on top of any layer" style="margin-left:6px;border-left:2px solid rgba(255,255,255,0.25);">🛣 Roads</button>
+      <button class="layer-btn" id="hillshadeToggleBtn" title="Hillshade — drape terrain relief (ridges, draws, saddles, benches) over any layer">🏔 Hillshade</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
@@ -1738,7 +1739,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 194</div>
+    <div id="buildBadge">BUILD 195</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8384,6 +8385,32 @@
       roadsOn = true; roadsOverlay.addTo(map);
       document.getElementById('roadsToggleBtn').classList.add('active');
       raiseOverlaysAndMarkers();
+    }
+  }catch(e){}
+
+  // 🏔 Hillshade — Stage 1 of the Terrain Scout. Drapes a real elevation-derived hillshade (Esri World
+  // Hillshade, from USGS 3DEP data) over ANY base with a MULTIPLY blend, so ridges, draws, benches and
+  // saddles read as shadow/relief on the aerial. Pure data — no AI, no cost. Lives in its OWN pane at a
+  // z-index above the base tiles but below markers, so it always layers correctly without any re-add on a
+  // base switch, and site pins/names stay clear on top of it. Preference persists across sessions.
+  map.createPane('hillshadePane');
+  map.getPane('hillshadePane').style.zIndex = 250;
+  map.getPane('hillshadePane').style.mixBlendMode = 'multiply';
+  map.getPane('hillshadePane').style.pointerEvents = 'none';
+  var hillshadeLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', {
+    pane: 'hillshadePane', opacity: 0.55, maxZoom: 20, maxNativeZoom: 16, attribution: 'Hillshade: Esri &amp; USGS'
+  });
+  var hillshadeOn = false;
+  document.getElementById('hillshadeToggleBtn').addEventListener('click', function(){
+    hillshadeOn = !hillshadeOn;
+    this.classList.toggle('active', hillshadeOn);
+    if (hillshadeOn){ hillshadeLayer.addTo(map); } else { map.removeLayer(hillshadeLayer); }
+    try{ localStorage.setItem('oc_hillshade_on', hillshadeOn ? '1' : '0'); }catch(e){}
+  });
+  try{
+    if (localStorage.getItem('oc_hillshade_on') === '1'){
+      hillshadeOn = true; hillshadeLayer.addTo(map);
+      document.getElementById('hillshadeToggleBtn').classList.add('active');
     }
   }catch(e){}
 
