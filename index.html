@@ -1736,7 +1736,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 190</div>
+    <div id="buildBadge">BUILD 191</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7655,8 +7655,14 @@
     (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
       if (typeof s.lat !== 'number') return;
       if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type)) return;
+      var huntable = siteIsHuntable(s);
       var r = huntabilityRead(deerPhotosAtSite(s), huntRecentDays);
-      if (!r.has) return;
+      if (!r.has){
+        // A stand / flagged hunt spot with no camera data yet STILL belongs in the list — so you see it's
+        // registered and get nudged to hang a camera. Observation cams with no data are the ones we skip.
+        if (huntable) out.push({ site: s, read: null, score: -1, huntable: true, solunarHit: null, hasData: false });
+        return;
+      }
       var score = r.recentUsable ? r.recent.pct : r.base.pct;
       if (r.state === 'heating') score += 25; else if (r.state === 'cooling') score -= 10;
       if (r.daysSince != null){ score += (r.daysSince <= 3 ? 15 : r.daysSince <= 7 ? 8 : r.daysSince <= 14 ? 0 : -12); }
@@ -7666,9 +7672,9 @@
         if (winsOverlap(rng.a, rng.z, per.major1) || winsOverlap(rng.a, rng.z, per.major2)){ score += 12; solunarHit = 'major'; }
         else if (winsOverlap(rng.a, rng.z, per.minor1) || winsOverlap(rng.a, rng.z, per.minor2)){ score += 6; solunarHit = 'minor'; }
       }
-      out.push({ site: s, read: r, score: Math.round(score), huntable: siteIsHuntable(s), solunarHit: solunarHit });
+      out.push({ site: s, read: r, score: Math.round(score), huntable: huntable, solunarHit: solunarHit, hasData: true });
     });
-    out.sort(function(a, b){ return b.score - a.score; });
+    out.sort(function(a, b){ var as = a.hasData ? a.score : -1000, bs = b.hasData ? b.score : -1000; return bs - as; });
     return out;
   }
   function showHuntTodayPanel(){
@@ -7684,6 +7690,15 @@
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:520px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
     function close(){ if (back.parentNode) document.body.removeChild(back); }
     function spotCard(x, rank){
+      if (!x.hasData || !x.read){
+        return '<div class="ht-spot" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+            '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' 🏹</div>' +
+            '<div style="font-size:11px;color:#9db0a3;">no data yet</div>' +
+          '</div>' +
+          '<div style="font-size:11px;color:#9db0a3;margin-top:3px;">No camera data at this stand yet — hang a camera here to learn when deer move past it.</div>' +
+        '</div>';
+      }
       var r = x.read, win = r.windowText ? (bucketLabel(r.useBest) + ' · ' + r.windowText) : '—';
       var star = x.solunarHit ? (' <span style="color:#E8B04B;">⭐ ' + x.solunarHit + ' feed</span>') : '';
       return '<div class="ht-spot" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
