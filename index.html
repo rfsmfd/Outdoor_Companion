@@ -1739,7 +1739,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 195</div>
+    <div id="buildBadge">BUILD 196</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8371,6 +8371,7 @@
   ]);
   var roadsOn = false;
   function raiseOverlaysAndMarkers(){
+    if (typeof hillshadeLayer !== 'undefined' && hillshadeOn){ map.removeLayer(hillshadeLayer); hillshadeLayer.addTo(map); } // relief above base, below roads
     if (roadsOn){ map.removeLayer(roadsOverlay); roadsOverlay.addTo(map); } // keep roads above the (re)added base
     Object.keys(markers).forEach(function(id){ if (markers[id]) markers[id].bringToFront(); });
   }
@@ -8388,29 +8389,26 @@
     }
   }catch(e){}
 
-  // 🏔 Hillshade — Stage 1 of the Terrain Scout. Drapes a real elevation-derived hillshade (Esri World
-  // Hillshade, from USGS 3DEP data) over ANY base with a MULTIPLY blend, so ridges, draws, benches and
-  // saddles read as shadow/relief on the aerial. Pure data — no AI, no cost. Lives in its OWN pane at a
-  // z-index above the base tiles but below markers, so it always layers correctly without any re-add on a
-  // base switch, and site pins/names stay clear on top of it. Preference persists across sessions.
-  map.createPane('hillshadePane');
-  map.getPane('hillshadePane').style.zIndex = 250;
-  map.getPane('hillshadePane').style.mixBlendMode = 'multiply';
-  map.getPane('hillshadePane').style.pointerEvents = 'none';
-  var hillshadeLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', {
-    pane: 'hillshadePane', opacity: 0.55, maxZoom: 20, maxNativeZoom: 16, attribution: 'Hillshade: Esri &amp; USGS'
-  });
+  // 🏔 Hillshade — Stage 1 of the Terrain Scout. A real elevation-derived hillshade (Esri World Hillshade,
+  // from USGS 3DEP) laid over ANY base so ridges, draws, benches and saddles read as relief. Built EXACTLY
+  // like the Roads overlay above (a plain tile overlay, re-raised above the base on a layer switch) — that
+  // pattern is proven to render; the earlier custom blend-pane version didn't show. Pure data, no AI, no
+  // cost. Partial opacity so the aerial still shows through. Preference persists.
   var hillshadeOn = false;
+  var hillshadeLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Elevation/World_Hillshade/MapServer/tile/{z}/{y}/{x}', {
+    opacity: 0.55, maxZoom: 22, maxNativeZoom: 16, attribution: 'Hillshade: Esri, USGS'
+  });
   document.getElementById('hillshadeToggleBtn').addEventListener('click', function(){
     hillshadeOn = !hillshadeOn;
     this.classList.toggle('active', hillshadeOn);
-    if (hillshadeOn){ hillshadeLayer.addTo(map); } else { map.removeLayer(hillshadeLayer); }
+    if (hillshadeOn){ hillshadeLayer.addTo(map); raiseOverlaysAndMarkers(); } else { map.removeLayer(hillshadeLayer); }
     try{ localStorage.setItem('oc_hillshade_on', hillshadeOn ? '1' : '0'); }catch(e){}
   });
   try{
     if (localStorage.getItem('oc_hillshade_on') === '1'){
       hillshadeOn = true; hillshadeLayer.addTo(map);
       document.getElementById('hillshadeToggleBtn').classList.add('active');
+      raiseOverlaysAndMarkers();
     }
   }catch(e){}
 
