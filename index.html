@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 187</div>
+    <div id="buildBadge">BUILD 188</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4904,7 +4904,7 @@
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:96vw;width:96vw;max-height:92vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
     back.appendChild(card); document.body.appendChild(back);
-    function close(){ if (back.parentNode) document.body.removeChild(back); refreshTagAllButton(); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); refreshTagAllButton(); try { refreshHuntAlerts(true); } catch (e) {} }  // after a tagging session, surface any buck that just went daylight
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     function allGroups(){ var g = board.slice(); if (loose.members.length) g.push(loose); return g; }
     function allContainers(){ return board.concat([loose, held, noInt]); }  // everything selectable-from, incl. parked/dumped
@@ -7592,6 +7592,80 @@
     '</div>';
   }
 
+  // ---------- Huntability Ship 3b: front-screen "on their feet" alert ----------
+  // Brings the killable-now read TO you instead of making you dig into each buck. On app open and after a
+  // tagging session on the board, any buck whose recent movement has shifted into daylight (state
+  // 'heating') surfaces as a banner on the main screen; tap → straight to his card. Dismissible; a 🔔
+  // re-opens it. IN-APP ONLY for now (real push/text waits on cellular-cam auto-ingest, so it can be timely).
+  var hbAlertDismissed = false;
+  function heatingBucks(){
+    if (typeof buckProfiles === 'undefined' || !buckProfiles.length) return [];
+    var out = [];
+    buckProfiles.forEach(function(profile){
+      var photos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return photoLinkedToBuck(p, profile.id); });
+      var read = huntabilityRead(photos, huntRecentDays);
+      if (read.has && read.state === 'heating') out.push({ profile: profile, read: read });
+    });
+    out.sort(function(a, b){ return b.read.recent.pct - a.read.recent.pct; });
+    return out;
+  }
+  function ensureHuntAlertEls(){
+    if (document.getElementById('huntAlertBanner')) return;
+    var b = document.createElement('div');
+    b.id = 'huntAlertBanner';
+    // Above modals (tagging happens inside the Photo Gallery modal) so the alert is never hidden behind it.
+    b.style.cssText = 'position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:100050;width:min(460px,94vw);background:#20302a;border:1px solid #E8823F;border-radius:12px;box-shadow:0 10px 34px rgba(0,0,0,.55);color:#e8f0ea;font-family:inherit;display:none;overflow:hidden;';
+    document.body.appendChild(b);
+    var bell = document.createElement('button');
+    bell.id = 'huntAlertBell';
+    bell.title = 'Bucks on their feet';
+    bell.style.cssText = 'position:fixed;bottom:84px;right:14px;z-index:100049;width:44px;height:44px;border-radius:50%;border:1px solid #E8823F;background:#20302a;color:#E8823F;font-size:19px;cursor:pointer;display:none;box-shadow:0 4px 14px rgba(0,0,0,.45);';
+    bell.innerHTML = '🔔<span id="huntAlertBellBadge" style="position:absolute;top:-4px;right:-4px;background:#E8823F;color:#241a0c;font-size:10px;font-weight:800;min-width:16px;height:16px;line-height:16px;border-radius:8px;padding:0 3px;">0</span>';
+    document.body.appendChild(bell);
+    bell.addEventListener('click', function(){ hbAlertDismissed = false; renderHuntAlertBanner(); });
+  }
+  function renderHuntAlertBanner(){
+    ensureHuntAlertEls();
+    var banner = document.getElementById('huntAlertBanner');
+    var bell = document.getElementById('huntAlertBell');
+    var hot = heatingBucks();
+    if (!hot.length){ banner.style.display = 'none'; bell.style.display = 'none'; return; }
+    bell.style.display = 'block';
+    document.getElementById('huntAlertBellBadge').textContent = hot.length;
+    if (hbAlertDismissed){ banner.style.display = 'none'; return; }
+    banner.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#E8823F;color:#241a0c;">' +
+        '<div style="font-weight:800;font-size:13px;">🔥 ' + hot.length + ' buck' + (hot.length > 1 ? 's' : '') + ' on their feet</div>' +
+        '<button id="huntAlertClose" title="Dismiss" style="background:transparent;border:none;color:#241a0c;font-size:20px;cursor:pointer;line-height:1;padding:0 2px;">×</button>' +
+      '</div>' +
+      hot.map(function(h){
+        var win = h.read.windowText ? (' · best ' + h.read.windowText) : '';
+        return '<div class="hunt-alert-row" data-buck="' + escapeHtml(h.profile.id) + '" style="padding:10px 12px;border-top:1px solid #33443a;cursor:pointer;display:flex;justify-content:space-between;gap:8px;align-items:center;">' +
+          '<div><div style="font-weight:700;font-size:13px;">🦌 ' + escapeHtml(h.profile.name) + '</div><div style="font-size:11px;color:#9db0a3;">daylight activity up' + win + '</div></div>' +
+          '<span style="font-size:11px;color:#E8823F;white-space:nowrap;">view →</span>' +
+        '</div>';
+      }).join('');
+    banner.style.display = 'block';
+    document.getElementById('huntAlertClose').addEventListener('click', function(){ hbAlertDismissed = true; banner.style.display = 'none'; });
+    Array.prototype.forEach.call(banner.querySelectorAll('.hunt-alert-row'), function(rowEl){
+      rowEl.addEventListener('click', function(){ openBuckProfileById(rowEl.getAttribute('data-buck')); });
+    });
+  }
+  function refreshHuntAlerts(autoShow){ if (autoShow) hbAlertDismissed = false; renderHuntAlertBanner(); }
+  function openBuckProfileById(id){
+    var banner = document.getElementById('huntAlertBanner'); if (banner) banner.style.display = 'none';
+    hbAlertDismissed = true;
+    resetBuckProfileForm();
+    renderBuckProfilesList();
+    closeAllModals();
+    document.getElementById('buckGalleryModalBackdrop').classList.add('show');
+    setTimeout(function(){
+      var list = document.getElementById('buckProfilesList');
+      var rowEl = list ? list.querySelector('[data-buck-id="' + id + '"]') : null;
+      if (rowEl){ rowEl.click(); if (rowEl.scrollIntoView) rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    }, 60);
+  }
+
   function renderBuckProfilesList(){
     var listEl = document.getElementById('buckProfilesList');
     if (buckProfiles.length === 0){
@@ -7612,6 +7686,7 @@
       if (linkedPhotos[0] && (linkedPhotos[0].timestamp||0) >= coverTime){ coverThumb = linkedPhotos[0].thumb || linkedPhotos[0].downloadURL; }
       var row = document.createElement('div');
       row.className = 'history-row';
+      row.setAttribute('data-buck-id', profile.id);
       row.style.cursor = 'pointer';
       row.innerHTML =
         (coverThumb ? '<img src="'+coverThumb+'" class="journal-photo-thumb buck-list-thumb" style="width:80px;height:80px;object-fit:cover;border-radius:6px;flex-shrink:0;cursor:pointer;" />'
@@ -7776,6 +7851,7 @@
 
       listEl.appendChild(row);
     });
+    refreshHuntAlerts(false); // keep the 🔔 count current whenever the roster is (re)built
   }
 
   function resetBuckProfileForm(){
@@ -9359,6 +9435,8 @@
     // its Query Builder would have rendered with an empty Data dropdown and never
     // refreshed on its own. Catches that directly rather than leaving it to chance.
     if (activeTab === 'analytics') renderAnalytics();
+    // On open: greet with any buck whose recent movement has shifted into daylight (Huntability 3b).
+    try { refreshHuntAlerts(true); } catch (e) {}
   }
 
   // ================= Cloud sync (Firebase) — Phase 1: login + per-user sync =================
