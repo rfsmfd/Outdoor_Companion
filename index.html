@@ -1736,7 +1736,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 191</div>
+    <div id="buildBadge">BUILD 192</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7650,6 +7650,37 @@
   }
   function winsOverlap(a, z, per){ return per ? (a < per.end.getTime() && z > per.start.getTime()) : false; }
   function fmtSolWin(w){ return w ? (hbClock(w.start.getTime()) + '–' + hbClock(w.end.getTime())) : '—'; }
+  function scoreSpotRead(r, s){
+    var score = r.recentUsable ? r.recent.pct : r.base.pct;
+    if (r.state === 'heating') score += 25; else if (r.state === 'cooling') score -= 10;
+    if (r.daysSince != null){ score += (r.daysSince <= 3 ? 15 : r.daysSince <= 7 ? 8 : r.daysSince <= 14 ? 0 : -12); }
+    var rng = r.useBest ? todayWindowRange(r.useBest, s) : null, solunarHit = null;
+    if (rng){
+      var per = getSolunarPeriodsForDay(new Date(), s.lat, s.lng);
+      if (winsOverlap(rng.a, rng.z, per.major1) || winsOverlap(rng.a, rng.z, per.major2)){ score += 12; solunarHit = 'major'; }
+      else if (winsOverlap(rng.a, rng.z, per.minor1) || winsOverlap(rng.a, rng.z, per.minor2)){ score += 6; solunarHit = 'minor'; }
+    }
+    return { score: Math.round(score), solunarHit: solunarHit };
+  }
+  // A camera-less hunt spot (a stand) borrows deer activity from cameras within SHOOTING RANGE — the deer
+  // those cams caught are deer you could kill from that stand. Founder's call: a stand next to Cox Gate
+  // (which has bucks) should rank at the top even with no camera of its own.
+  var SHOOT_RANGE_M = 183; // ~200 yds effective range in open country (tunable later for bow vs rifle)
+  function ydsLabel(m){ return Math.round(m * 1.09361) + ' yds'; }
+  function borrowedDeerForSpot(s){
+    var photos = [], sources = [];
+    (typeof sites !== 'undefined' ? sites : []).forEach(function(o){
+      if (o.id === s.id || typeof o.lat !== 'number') return;
+      var d = distMeters(s.lat, s.lng, o.lat, o.lng);
+      if (d > SHOOT_RANGE_M) return;
+      var ph = deerPhotosAtSite(o);
+      if (!ph.length) return;
+      photos = photos.concat(ph);
+      sources.push({ name: o.name, dist: d, count: ph.length });
+    });
+    sources.sort(function(a, b){ return a.dist - b.dist; });
+    return { photos: photos, sources: sources };
+  }
   function huntTonightSpots(){
     var out = [];
     (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
@@ -7657,22 +7688,22 @@
       if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type)) return;
       var huntable = siteIsHuntable(s);
       var r = huntabilityRead(deerPhotosAtSite(s), huntRecentDays);
-      if (!r.has){
-        // A stand / flagged hunt spot with no camera data yet STILL belongs in the list — so you see it's
-        // registered and get nudged to hang a camera. Observation cams with no data are the ones we skip.
-        if (huntable) out.push({ site: s, read: null, score: -1, huntable: true, solunarHit: null, hasData: false });
+      if (r.has){
+        var sc = scoreSpotRead(r, s);
+        out.push({ site: s, read: r, score: sc.score, huntable: huntable, solunarHit: sc.solunarHit, hasData: true, borrow: null });
         return;
       }
-      var score = r.recentUsable ? r.recent.pct : r.base.pct;
-      if (r.state === 'heating') score += 25; else if (r.state === 'cooling') score -= 10;
-      if (r.daysSince != null){ score += (r.daysSince <= 3 ? 15 : r.daysSince <= 7 ? 8 : r.daysSince <= 14 ? 0 : -12); }
-      var rng = r.useBest ? todayWindowRange(r.useBest, s) : null, solunarHit = null;
-      if (rng){
-        var per = getSolunarPeriodsForDay(new Date(), s.lat, s.lng);
-        if (winsOverlap(rng.a, rng.z, per.major1) || winsOverlap(rng.a, rng.z, per.major2)){ score += 12; solunarHit = 'major'; }
-        else if (winsOverlap(rng.a, rng.z, per.minor1) || winsOverlap(rng.a, rng.z, per.minor2)){ score += 6; solunarHit = 'minor'; }
+      if (!huntable) return; // observation cam with no data → skip
+      // No camera of its own — borrow deer activity from cams within shooting range.
+      var b = borrowedDeerForSpot(s);
+      var br = huntabilityRead(b.photos, huntRecentDays);
+      if (br.has){
+        var sc2 = scoreSpotRead(br, s);
+        out.push({ site: s, read: br, score: sc2.score, huntable: true, solunarHit: sc2.solunarHit, hasData: true, borrow: b.sources });
+        return;
       }
-      out.push({ site: s, read: r, score: Math.round(score), huntable: huntable, solunarHit: solunarHit, hasData: true });
+      // truly nothing nearby either
+      out.push({ site: s, read: null, score: -1, huntable: true, solunarHit: null, hasData: false, borrow: null });
     });
     out.sort(function(a, b){ var as = a.hasData ? a.score : -1000, bs = b.hasData ? b.score : -1000; return bs - as; });
     return out;
@@ -7701,6 +7732,7 @@
       }
       var r = x.read, win = r.windowText ? (bucketLabel(r.useBest) + ' · ' + r.windowText) : '—';
       var star = x.solunarHit ? (' <span style="color:#E8B04B;">⭐ ' + x.solunarHit + ' feed</span>') : '';
+      var borrowLine = (x.borrow && x.borrow.length) ? ('<div style="font-size:10px;color:#E8B04B;margin-top:2px;">📷 in range of <b>' + escapeHtml(x.borrow[0].name) + '</b> (' + ydsLabel(x.borrow[0].dist) + ')' + (x.borrow.length > 1 ? (' +' + (x.borrow.length - 1) + ' more cam' + (x.borrow.length - 1 === 1 ? '' : 's')) : '') + ' — no camera of its own</div>') : '';
       return '<div class="ht-spot" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
           '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' ' + (x.huntable ? '🏹' : '👁') + '</div>' +
@@ -7708,6 +7740,7 @@
         '</div>' +
         '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;">🌅 ' + win + star + '</div>' +
         '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">Daylight ' + r.base.pct + '% all-time' + (r.recent.located ? (' · ' + r.recent.pct + '% recent') : '') + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '') + '</div>' +
+        borrowLine +
       '</div>';
     }
     var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;"><div style="font-weight:800;font-size:16px;">🎯 Where to hunt tonight</div><button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
