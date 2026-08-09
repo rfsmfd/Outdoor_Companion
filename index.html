@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 184</div>
+    <div id="buildBadge">BUILD 185</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4909,6 +4909,30 @@
     function allGroups(){ var g = board.slice(); if (loose.members.length) g.push(loose); return g; }
     function allContainers(){ return board.concat([loose, held, noInt]); }  // everything selectable-from, incl. parked/dumped
     function findMember(pid){ var r = null; allContainers().forEach(function(g){ g.members.forEach(function(m){ if (m.p.id === pid) r = m; }); }); return r; }
+    // ⚡ Burst detection — a camera fires a run of frames of ONE deer in a burst, so tiles whose adjacent
+    // timestamps are within BURST_GAP (within a container, time-ordered) are likely the same buck. We
+    // outline each such run so you can SEE the bursts before tapping. Adjacent bursts alternate color so
+    // two back-to-back runs don't blur into one. Recomputed every render into burstStyle {photoId:color}.
+    var BURST_GAP = 5 * 60000; // ≤5 min between adjacent frames = still the same visit
+    var BURST_COLORS = ['#E8823F', '#5FB0C9']; // orange / teal, alternating per consecutive burst
+    var burstStyle = {};
+    function computeBurstStyle(){
+      burstStyle = {};
+      allContainers().forEach(function(g){
+        var mem = g.members.filter(function(m){ return m.p.timestamp; }).sort(function(a, b){ return (a.p.timestamp||0) - (b.p.timestamp||0); });
+        var i = 0, burstIdx = 0;
+        while (i < mem.length){
+          var j = i;
+          while (j + 1 < mem.length && (mem[j+1].p.timestamp - mem[j].p.timestamp) <= BURST_GAP) j++;
+          if (j > i){ // a run of 2+ = a burst worth marking
+            var color = BURST_COLORS[burstIdx % BURST_COLORS.length];
+            for (var k = i; k <= j; k++) burstStyle[mem[k].p.id] = color;
+            burstIdx++;
+          }
+          i = j + 1;
+        }
+      });
+    }
     // Enlarge one photo to verify which deer it is — zoom/pan image on top, the AI's tagging notes +
     // a FREE best-guess buck below it (reading the antlers helps you place him), and a paid "Which
     // buck? (AI)" escalation for the tough ones. Scroll zooms; drag pans; ✕ / Esc / click-away closes.
@@ -5015,7 +5039,8 @@
       var on = !!selected[m.p.id];
       var lastV = (m.p.id === lastViewedId);
       var stamp = tileStamp(m.p.timestamp);
-      var outline = on ? '3px solid #6BBF59' : (lastV ? '3px solid #E8B04B' : '1px solid #2a3830');
+      var burstC = burstStyle[m.p.id];   // colored outline if this frame is part of a burst run
+      var outline = on ? '3px solid #6BBF59' : (lastV ? '3px solid #E8B04B' : (burstC ? '2px solid ' + burstC : '1px solid #2a3830'));
       // The AI's free medium-confidence guess, shown as a soft hint RIGHT HERE where you decide — so the
       // suggestion helps in context instead of trapping you in a separate all-or-Moose Review screen.
       var sug = m.p.buckSuggestion, sugName = '';
@@ -5054,6 +5079,7 @@
     }
     function render(){
       var scroll = card.scrollTop;
+      computeBurstStyle();   // refresh burst outlines before drawing tiles
       var n = selCount();
       var moveOpts = board.map(function(g, i){ return '<option value="' + g.id + '">→ Group ' + (i+1) + ' (' + escapeHtml(clusterDescriptor(g.members).slice(0, 28)) + ')</option>'; }).join('');
       // Selection bar STICKS TO THE BOTTOM so the named-buck list is always in reach — no scrolling
@@ -5117,7 +5143,7 @@
         '</div>' : '';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
-        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. <b style="color:#ffd77a;">⚡</b> on a photo grabs its whole burst (one visit = one buck) in a tap. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. Photos ringed in <b style="color:#E8823F;">orange</b>/<b style="color:#5FB0C9;">teal</b> are a <b>burst</b> — one visit, so probably (not always) the same buck; the two colors just separate back-to-back bursts. Tap <b style="color:#ffd77a;">⚡</b> on any of them to grab the whole run at once. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
         bucksStrip() + controls + body + heldSection + noIntSection +
         '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
         (heldBack > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + heldBack + ' smaller/younger buck photo' + (heldBack===1?'':'s') + ' held back by the bar — still recorded as buck activity, just not sorted for individual ID.</div>' : '') +
@@ -5343,7 +5369,7 @@
       // camera fires many shots of one buck in a burst, and a single visit is (almost always) one buck.
       // Scoped to the photo's own container and to a contiguous time-run (≤ BURST_GAP between adjacent
       // frames) so it grabs that visit without swallowing a later, different buck in the same cluster.
-      var BURST_GAP = 5 * 60000; // 5 min between adjacent frames = still the same visit
+      // BURST_GAP is shared with computeBurstStyle so the outline and the tap select the exact same run.
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-burst'), function(b){
         b.addEventListener('click', function(e){
           e.stopPropagation();
