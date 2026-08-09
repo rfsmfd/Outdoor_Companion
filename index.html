@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 181</div>
+    <div id="buildBadge">BUILD 182</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4579,16 +4579,17 @@
     var fresh = galleryBuckPhotosToMatch().length;
     if (fresh > 0){
       mBtn.style.display = 'block'; mBtn.disabled = false;
-      mBtn.textContent = '🦌 Step 4 · Match ' + fresh + ' leftover' + (fresh===1?'':'s') + ' · ~$ · last step';
+      mBtn.textContent = '🦌 Step 3 · Match ' + fresh + ' leftover' + (fresh===1?'':'s') + ' · ~$ · last step';
     } else {
       var stamped = galleryStampedUnlinkedBucks().length;
       mBtn.style.display = stamped > 0 ? 'block' : 'none';
       mBtn.disabled = false;
-      mBtn.textContent = '🦌 Step 4 · Re-check ' + stamped + ' unmatched · ~$ · last step';
+      mBtn.textContent = '🦌 Step 3 · Re-check ' + stamped + ' unmatched · ~$ · last step';
     }
-    var q = pendingBuckSuggestions().length;
-    rBtn.style.display = q === 0 ? 'none' : 'block';
-    rBtn.textContent = '🦌 Step 3 · Review ' + q + ' suggestion' + (q===1?'':'s') + ' · free';
+    // Review step RETIRED (founder decision): it only replayed old guesses and forced an all-or-Moose
+    // choice — no new thinking. Those medium-confidence guesses now surface as an "🤖 maybe <buck>" hint
+    // on the Step 2 board tiles, where you route each to the RIGHT buck. Button stays hidden.
+    rBtn.style.display = 'none';
   }
   document.getElementById('galleryBuckMatchBtn').addEventListener('click', async function(){
     if (!buckProfiles.length){ alert('Name at least one buck first (open a clear photo of him → 🦌 Link to buck → ＋ New buck). Then this can match others against him.'); return; }
@@ -4604,8 +4605,7 @@
     });
     populateGalleryFilters(); refreshTagAllButton();
     status.textContent = 'Done — ' + r.linked + ' auto-linked, ' + r.suggested + ' to review, ' + r.noMatch + ' no match' + (r.failed ? ', ' + r.failed + ' failed' : '') + '.';
-    if (r.suggested > 0){ showBuckReviewQueue(); }
-    else if (r.linked > 0){ showToast(r.linked + ' photo' + (r.linked===1?'':'s') + ' auto-linked'); }
+    if (r.linked > 0 || r.suggested > 0){ showToast(r.linked + ' auto-linked' + (r.suggested ? (' · ' + r.suggested + ' got an “🤖 maybe” hint — confirm on the board (Step 2)') : '')); }
     else { showToast('No confident matches yet — name a few more bucks, then re-run to catch these.'); }
   });
   document.getElementById('galleryBuckReviewBtn').addEventListener('click', function(){ showBuckReviewQueue(); });
@@ -5016,9 +5016,15 @@
       var lastV = (m.p.id === lastViewedId);
       var stamp = tileStamp(m.p.timestamp);
       var outline = on ? '3px solid #6BBF59' : (lastV ? '3px solid #E8B04B' : '1px solid #2a3830');
+      // The AI's free medium-confidence guess, shown as a soft hint RIGHT HERE where you decide — so the
+      // suggestion helps in context instead of trapping you in a separate all-or-Moose Review screen.
+      var sug = m.p.buckSuggestion, sugName = '';
+      if (sug){ var sbp = buckProfiles.filter(function(b){ return b.id === sug.buckId; })[0]; sugName = sbp ? sbp.name : ''; }
+      var hint = (sug && sugName) ? '<div title="The AI’s free guess — tap the right buck to confirm, or just ignore it" style="position:absolute;left:4px;top:34px;max-width:calc(100% - 8px);background:rgba(201,131,46,.92);color:#241a0c;border-radius:6px;padding:1px 6px;font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:2;pointer-events:none;">🤖 maybe ' + escapeHtml(sugName) + '</div>' : '';
       return '<div class="bcl-tile" data-pid="' + escapeHtml(m.p.id) + '" style="position:relative;width:100%;aspect-ratio:1;border-radius:7px;overflow:hidden;cursor:pointer;background:#000;outline:' + outline + ';outline-offset:-1px;">' +
         '<img src="' + src + '" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;' + (on ? 'opacity:.72;' : '') + '">' +
         '<div class="bcl-zoom" data-pid="' + escapeHtml(m.p.id) + '" title="Enlarge to verify" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.55);color:#fff;border-radius:6px;width:26px;height:26px;line-height:26px;text-align:center;font-size:13px;cursor:zoom-in;z-index:2;">🔍</div>' +
+        hint +
         (on ? '<div style="position:absolute;top:4px;right:4px;background:#6BBF59;color:#10240f;border-radius:50%;width:24px;height:24px;line-height:24px;text-align:center;font-size:15px;font-weight:800;">✓</div>'
              : (lastV ? '<div style="position:absolute;top:4px;right:4px;background:#E8B04B;color:#241d18;border-radius:6px;padding:0 7px;height:22px;line-height:22px;text-align:center;font-size:11px;font-weight:700;">👁 last</div>' : '')) +
         (stamp ? '<div style="position:absolute;left:0;right:0;bottom:0;padding:12px 5px 3px;background:linear-gradient(rgba(0,0,0,0),rgba(0,0,0,.74));color:#fff;font:600 11px ui-monospace,Menlo,monospace;text-align:center;font-variant-numeric:tabular-nums;letter-spacing:.02em;pointer-events:none;">' + escapeHtml(stamp) + '</div>' : '') +
