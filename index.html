@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 186</div>
+    <div id="buildBadge">BUILD 187</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7486,73 +7486,109 @@
     }
     return null;
   }
-  // Shooting-light window [open,close] in ms for the photo's day+place; cached per (localDay, site) so a
-  // buck with hundreds of frames only triggers a handful of SunCalc calls.
-  function shootingWindow(ts, lat, lng, siteId){
+  // Recent-window preference (days) — the "killable NOW" horizon. 14 default; 7/14/30 toggle on the card.
+  var huntRecentDays = (function(){ try { var v = parseInt(localStorage.getItem('oc_hunt_recent_days'), 10); if (v === 7 || v === 14 || v === 30) return v; } catch (e) {} return 14; })();
+  // Sun times (sunrise/sunset ms) for a photo's day+place; cached per (localDay, site) so a buck with
+  // hundreds of frames only triggers a handful of SunCalc calls.
+  function sunTimesFor(ts, lat, lng, siteId){
     var d = new Date(ts);
     var key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate() + '|' + (siteId || (lat.toFixed(3) + ',' + lng.toFixed(3)));
     if (_sunWinCache.hasOwnProperty(key)) return _sunWinCache[key];
-    var w = null;
+    var r = null;
     try {
       var t = SunCalc.getTimes(d, lat, lng);
       if (t.sunrise && t.sunset && !isNaN(t.sunrise.getTime()) && !isNaN(t.sunset.getTime())){
-        w = { open: t.sunrise.getTime() - 1800000, close: t.sunset.getTime() + 1800000 };
+        r = { sr: t.sunrise.getTime(), ss: t.sunset.getTime() };
       }
     } catch (e) {}
-    _sunWinCache[key] = w;
-    return w;
+    _sunWinCache[key] = r;
+    return r;
   }
-  function huntabilityStats(photos){
-    var byHour = [], h; for (h = 0; h < 24; h++) byHour.push({ day: 0, night: 0 });
-    var day = 0, night = 0, located = 0;
+  // Which part of the light cycle a moment falls in — SEASON-PROOF (defined against that day's real sun
+  // times, not a fixed clock), so "last light" means last light whether that's 8pm in July or 5pm in
+  // November. Shooting light = 30 min before sunrise to 30 after sunset; dawn/dusk edges = its first/last hour.
+  function lightBucket(ts, sr, ss){
+    if (ts < sr - 1800000 || ts > ss + 1800000) return 'night';
+    if (ts <= sr + 3600000) return 'firstLight';
+    if (ts >= ss - 3600000) return 'lastLight';
+    return 'midday';
+  }
+  function huntStats(photos){
+    var b = { firstLight: 0, midday: 0, lastLight: 0, night: 0 };
+    var located = 0, day = 0, night = 0, lastTs = 0, siteCount = {};
     (photos || []).forEach(function(p){
       if (!p || !p.timestamp) return;
+      if (p.timestamp > lastTs) lastTs = p.timestamp;
       var ll = buckPhotoLatLng(p); if (!ll) return;
-      var w = shootingWindow(p.timestamp, ll.lat, ll.lng, p.matchedSiteId); if (!w) return;
+      var st = sunTimesFor(p.timestamp, ll.lat, ll.lng, p.matchedSiteId); if (!st) return;
       located++;
-      var isDay = p.timestamp >= w.open && p.timestamp <= w.close;
-      var hr = new Date(p.timestamp).getHours();
-      if (isDay){ day++; byHour[hr].day++; } else { night++; byHour[hr].night++; }
+      var bk = lightBucket(p.timestamp, st.sr, st.ss);
+      b[bk]++;
+      if (bk === 'night') night++; else day++;
+      if (p.matchedSiteId) siteCount[p.matchedSiteId] = (siteCount[p.matchedSiteId] || 0) + 1;
     });
-    return { located: located, day: day, night: night, pct: located ? Math.round(day / located * 100) : 0, byHour: byHour };
+    var homeSite = null, hc = 0, sk; for (sk in siteCount){ if (siteCount[sk] > hc){ hc = siteCount[sk]; homeSite = sk; } }
+    return { located: located, day: day, night: night, pct: located ? Math.round(day / located * 100) : 0, buckets: b, lastTs: lastTs, homeSite: homeSite };
   }
-  function hbHourLabel(h){ var hh = h % 12; if (hh === 0) hh = 12; return hh + (h < 12 ? 'a' : 'p'); }
-  function hbHourRange(h){ var h2 = (h + 1) % 24, hh = h % 12; if (hh === 0) hh = 12; var hh2 = h2 % 12; if (hh2 === 0) hh2 = 12; return hh + '–' + hh2 + ' ' + (h < 12 ? 'AM' : 'PM'); }
-  function huntabilityCardHtml(hb){
-    if (!hb.located) return '';
-    var thin = hb.located < 12;
-    var peakHr = -1, peakN = 0, maxTot = 1, i;
-    for (i = 0; i < 24; i++){ if (hb.byHour[i].day > peakN){ peakN = hb.byHour[i].day; peakHr = i; } var tot = hb.byHour[i].day + hb.byHour[i].night; if (tot > maxTot) maxTot = tot; }
-    var lab, tone;
-    if (hb.pct >= 40){ lab = 'Very huntable'; tone = '#6BBF59'; }
-    else if (hb.pct >= 25){ lab = 'Huntable'; tone = '#9ED17A'; }
-    else if (hb.pct >= 12){ lab = 'Mostly nocturnal'; tone = '#E8B04B'; }
-    else { lab = 'Nearly all night'; tone = '#D98A5B'; }
-    var bars = '';
-    for (i = 0; i < 24; i++){
-      var dpt = hb.byHour[i].day, npt = hb.byHour[i].night, tt = dpt + npt;
-      var colH = Math.round((tt / maxTot) * 30);
-      var dH = tt ? Math.round(colH * (dpt / tt)) : 0, nH = colH - dH;
-      bars += '<div title="' + hbHourLabel(i) + ': ' + dpt + ' day / ' + npt + ' night" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:32px;">' +
-        (nH ? '<div style="height:' + nH + 'px;background:#415146;"></div>' : '') +
-        (dH ? '<div style="height:' + dH + 'px;background:#E8B04B;"></div>' : '') +
-      '</div>';
-    }
+  function bestDaylightBucket(b){ var order = ['firstLight','midday','lastLight'], best = null, bn = 0; order.forEach(function(k){ if (b[k] > bn){ bn = b[k]; best = k; } }); return best; }
+  function bucketLabel(k){ return k === 'firstLight' ? 'first light' : k === 'lastLight' ? 'last light' : k === 'midday' ? 'midday' : 'after dark'; }
+  function hbClock(ms){ var d = new Date(ms), h = d.getHours(), m = d.getMinutes(), ap = h < 12 ? 'AM' : 'PM', hh = h % 12; if (hh === 0) hh = 12; return hh + ':' + (m < 10 ? '0' + m : m) + ' ' + ap; }
+  // Translate a season-proof bucket into TONIGHT's real clock window at the buck's home camera, using
+  // today's sun times — so "last light" reads as tonight's actual 7:45–8:20 PM and slides with the season.
+  function todayWindowText(bucketKey, siteId){
+    var s = (siteId && typeof sites !== 'undefined') ? sites.filter(function(x){ return x.id === siteId; })[0] : null;
+    if (!s || typeof s.lat !== 'number') return '';
+    var t; try { t = SunCalc.getTimes(new Date(), s.lat, s.lng); } catch (e) { return ''; }
+    if (!t.sunrise || isNaN(t.sunrise.getTime()) || !t.sunset || isNaN(t.sunset.getTime())) return '';
+    var sr = t.sunrise.getTime(), ss = t.sunset.getTime(), a, z;
+    if (bucketKey === 'firstLight'){ a = sr - 1800000; z = sr + 3600000; }
+    else if (bucketKey === 'lastLight'){ a = ss - 3600000; z = ss + 1800000; }
+    else if (bucketKey === 'midday'){ a = sr + 3600000; z = ss - 3600000; }
+    else return '';
+    return hbClock(a) + '–' + hbClock(z);
+  }
+  // Verdict comparing RECENT (last N days = killability now) vs BASELINE (all-time = his character).
+  // Recent drives it, because rut/food/weather can flip a night ghost into a daylight target — and THAT
+  // is your window. Returns the fields the card AND the home-screen alert (3b) both read.
+  function huntabilityRead(photos, recentDays){
+    recentDays = recentDays || huntRecentDays;
+    var base = huntStats(photos);
+    if (!base.located) return { has: false };
+    var cutoff = Date.now() - recentDays * 86400000;
+    var recent = huntStats((photos || []).filter(function(p){ return p.timestamp && p.timestamp >= cutoff; }));
+    var daysSince = base.lastTs ? Math.floor((Date.now() - base.lastTs) / 86400000) : null;
+    var recentUsable = recent.located >= 4;
+    var state, tone, msg;
+    if (!recent.located){ state = 'quiet'; tone = '#9db0a3'; msg = 'No photos in the last ' + recentDays + ' days' + (daysSince != null ? (' · last seen ' + daysSince + 'd ago') : '') + '.'; }
+    else if (recentUsable && (recent.pct - base.pct) >= 12 && recent.pct >= 25){ state = 'heating'; tone = '#E8823F'; msg = 'Daylight movement is up — ' + base.pct + '% all-time → ' + recent.pct + '% the last ' + recentDays + ' days. Go sit on him.'; }
+    else if (recentUsable && recent.pct <= base.pct - 12){ state = 'cooling'; tone = '#5FB0C9'; msg = 'Sliding nocturnal — ' + base.pct + '% all-time → ' + recent.pct + '% lately.'; }
+    else { state = 'steady'; tone = '#9ED17A'; msg = 'Holding his usual pattern (~' + base.pct + '% daylight).'; }
+    var recBest = bestDaylightBucket(recent.buckets), baseBest = bestDaylightBucket(base.buckets);
+    var useBest = (recentUsable && recBest) ? recBest : baseBest;
+    var homeSite = recent.homeSite || base.homeSite;
+    return { has: true, base: base, recent: recent, recentDays: recentDays, recentUsable: recentUsable, daysSince: daysSince,
+      state: state, tone: tone, msg: msg, recBest: recBest, baseBest: baseBest, useBest: useBest, homeSite: homeSite,
+      windowText: useBest ? todayWindowText(useBest, homeSite) : '' };
+  }
+  var HB_VERDICT = { heating: '🔥 Heating up', cooling: '❄ Cooling off', steady: 'Steady', quiet: '💤 Gone quiet' };
+  function huntabilityCardHtml(photos, recentDays){
+    var r = huntabilityRead(photos, recentDays);
+    if (!r.has) return '';
+    var shiftNote = (r.recentUsable && r.recBest && r.baseBest && r.recBest !== r.baseBest) ? (' <span style="color:#E8823F;">Now favoring ' + bucketLabel(r.recBest) + '</span> (was ' + bucketLabel(r.baseBest) + ').') : '';
+    var src = r.recentUsable ? r.recent.buckets : r.base.buckets;
+    var srcTot = (src.firstLight + src.midday + src.lastLight + src.night) || 1;
+    function bar(k, label, color){ var v = src[k], h = Math.round((v / srcTot) * 34); return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;"><div style="width:100%;display:flex;flex-direction:column;justify-content:flex-end;height:36px;">' + (h ? '<div style="height:' + h + 'px;background:' + color + ';border-radius:2px 2px 0 0;"></div>' : '') + '</div><div style="font-size:8.5px;color:#9db0a3;">' + label + '</div><div style="font-size:9px;color:#c7d4cc;font-weight:700;">' + v + '</div></div>'; }
+    var bars = '<div style="display:flex;gap:5px;align-items:flex-end;margin:8px 0 2px;">' + bar('firstLight','Dawn','#E8B04B') + bar('midday','Mid','#E8B04B') + bar('lastLight','Dusk','#E8B04B') + bar('night','Night','#415146') + '</div>';
+    var toggle = '<div style="display:flex;gap:5px;margin:8px 0 2px;align-items:center;"><span style="font-size:10px;color:#6f8377;">Recent:</span>' + [7,14,30].map(function(d){ return '<button class="hb-win" data-days="' + d + '" style="font-size:10px;padding:2px 9px;border-radius:12px;cursor:pointer;border:1px solid ' + (d === r.recentDays ? '#6BBF59' : '#3c4d42') + ';background:' + (d === r.recentDays ? '#2E4636' : 'transparent') + ';color:' + (d === r.recentDays ? '#dff0e4' : '#9db0a3') + ';">' + d + 'd</button>'; }).join('') + '</div>';
     return '<div style="border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:10px;background:#1b2822;">' +
-      '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:2px;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
         '<div style="font-weight:700;font-size:13px;">🎯 Huntability</div>' +
-        '<div style="font-size:11px;color:' + tone + ';font-weight:700;">' + lab + '</div>' +
+        '<div style="font-size:11.5px;font-weight:800;color:' + r.tone + ';">' + HB_VERDICT[r.state] + '</div>' +
       '</div>' +
-      '<div style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:26px;font-weight:800;color:' + tone + ';line-height:1;">' + hb.pct + '%</span><span style="font-size:11.5px;color:#9db0a3;">of his movement is in shooting light</span></div>' +
-      '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0 4px;">' +
-        '<div style="width:' + hb.pct + '%;background:#E8B04B;"></div><div style="flex:1;background:#415146;"></div>' +
-      '</div>' +
-      '<div style="font-size:10px;color:#9db0a3;margin-bottom:8px;">' + hb.day + ' daylight · ' + hb.night + ' night</div>' +
-      '<div style="font-size:10.5px;color:#9db0a3;margin-bottom:3px;">When he moves (by hour)</div>' +
-      '<div style="display:flex;align-items:flex-end;gap:1px;">' + bars + '</div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:9px;color:#6f8377;margin-top:2px;"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>' +
-      (peakHr >= 0 ? '<div style="font-size:11.5px;color:#dff0e4;margin-top:8px;">🌅 Best daylight window: <b>' + hbHourRange(peakHr) + '</b></div>' : '') +
-      '<div style="font-size:10px;color:#6f8377;margin-top:6px;">From ' + hb.located + ' located trail-cam photo' + (hb.located === 1 ? '' : 's') + ' (cameras run 24/7 — an unbiased sample).' + (thin ? ' <span style="color:#E8B04B;">⚠ Thin sample — treat as a rough hint.</span>' : '') + '</div>' +
+      '<div style="font-size:11.5px;color:#cfe0d6;line-height:1.5;margin-bottom:6px;">' + r.msg + shiftNote + '</div>' +
+      (r.windowText ? '<div style="font-size:12.5px;color:#dff0e4;margin-bottom:2px;">🌅 Best window tonight: <b>' + bucketLabel(r.useBest) + ' · ' + r.windowText + '</b></div>' : '') +
+      bars + toggle +
+      '<div style="font-size:9.5px;color:#6f8377;margin-top:6px;line-height:1.45;">All-time ' + r.base.pct + '% daylight (' + r.base.located + ' cam photo' + (r.base.located === 1 ? '' : 's') + '). Recent: ' + r.recent.located + ' in ' + r.recentDays + 'd' + (r.daysSince != null ? (' · last seen ' + r.daysSince + 'd ago') : '') + '.' + (r.recent.located && !r.recentUsable ? ' <span style="color:#E8B04B;">⚠ thin — read as a trend, not a number.</span>' : '') + '</div>' +
     '</div>';
   }
 
@@ -7569,7 +7605,7 @@
       var linkedPhotos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return photoLinkedToBuck(p, profile.id); })
         .sort(function(a,b){ return (b.timestamp||0) - (a.timestamp||0); });
       var totalLinked = linkedObs.length + linkedPhotos.length;
-      var hunt = huntabilityStats(linkedPhotos);
+      var hunt = huntStats(linkedPhotos);
       var mostRecentPhoto = linkedObs.filter(function(o){ return o.photoThumb; })[0];
       var coverThumb = mostRecentPhoto ? mostRecentPhoto.photoThumb : null;
       var coverTime = mostRecentPhoto ? (mostRecentPhoto.createdAt||0) : -1;
@@ -7597,7 +7633,7 @@
         linkedPhotos.forEach(function(p){ items.push({ t:(p.timestamp||0), html: renderBuckPhotoEntry(p) }); });
         linkedObs.forEach(function(o){ items.push({ t:(o.createdAt||0), html: renderBuckGalleryEntry(o) }); });
         items.sort(function(a,b){ return b.t - a.t; });
-        galleryWrap.innerHTML = huntabilityCardHtml(hunt) + items.map(function(i){ return i.html; }).join('');
+        galleryWrap.innerHTML = '<div class="hb-wrap">' + huntabilityCardHtml(linkedPhotos, huntRecentDays) + '</div>' + items.map(function(i){ return i.html; }).join('');
       }
       var actionsRow = document.createElement('div');
       actionsRow.style.cssText = 'margin-top:8px;';
@@ -7611,6 +7647,23 @@
         '</div>';
       galleryWrap.appendChild(actionsRow);
       row.querySelector('.info').appendChild(galleryWrap);
+      // Recent-window toggle (7/14/30) on the Huntability card — re-renders just that card in place so
+      // it never collapses the buck you're viewing. huntRecentDays persists as your default.
+      (function(){
+        function wireHb(){
+          var w = galleryWrap.querySelector('.hb-wrap'); if (!w) return;
+          Array.prototype.forEach.call(w.querySelectorAll('.hb-win'), function(btn){
+            btn.addEventListener('click', function(e){
+              e.stopPropagation();
+              huntRecentDays = parseInt(btn.getAttribute('data-days'), 10) || 14;
+              try { localStorage.setItem('oc_hunt_recent_days', huntRecentDays); } catch (err) {}
+              w.innerHTML = huntabilityCardHtml(linkedPhotos, huntRecentDays);
+              wireHb();
+            });
+          });
+        }
+        wireHb();
+      })();
 
       row.addEventListener('click', function(){
         var opening = galleryWrap.style.display === 'none';
