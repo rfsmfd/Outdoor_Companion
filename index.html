@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 183</div>
+    <div id="buildBadge">BUILD 184</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5024,6 +5024,7 @@
       return '<div class="bcl-tile" data-pid="' + escapeHtml(m.p.id) + '" style="position:relative;width:100%;aspect-ratio:1;border-radius:7px;overflow:hidden;cursor:pointer;background:#000;outline:' + outline + ';outline-offset:-1px;">' +
         '<img src="' + src + '" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;display:block;' + (on ? 'opacity:.72;' : '') + '">' +
         '<div class="bcl-zoom" data-pid="' + escapeHtml(m.p.id) + '" title="Enlarge to verify" style="position:absolute;top:4px;left:4px;background:rgba(0,0,0,.55);color:#fff;border-radius:6px;width:26px;height:26px;line-height:26px;text-align:center;font-size:13px;cursor:zoom-in;z-index:2;">🔍</div>' +
+        '<div class="bcl-burst" data-pid="' + escapeHtml(m.p.id) + '" title="Select this whole burst (same visit — one buck)" style="position:absolute;top:4px;left:34px;background:rgba(0,0,0,.55);color:#ffd77a;border-radius:6px;width:26px;height:26px;line-height:26px;text-align:center;font-size:13px;cursor:pointer;z-index:2;">⚡</div>' +
         hint +
         (on ? '<div style="position:absolute;top:4px;right:4px;background:#6BBF59;color:#10240f;border-radius:50%;width:24px;height:24px;line-height:24px;text-align:center;font-size:15px;font-weight:800;">✓</div>'
              : (lastV ? '<div style="position:absolute;top:4px;right:4px;background:#E8B04B;color:#241d18;border-radius:6px;padding:0 7px;height:22px;line-height:22px;text-align:center;font-size:11px;font-weight:700;">👁 last</div>' : '')) +
@@ -5116,7 +5117,7 @@
         '</div>' : '';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
-        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. <b style="color:#ffd77a;">⚡</b> on a photo grabs its whole burst (one visit = one buck) in a tap. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
         bucksStrip() + controls + body + heldSection + noIntSection +
         '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
         (heldBack > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + heldBack + ' smaller/younger buck photo' + (heldBack===1?'':'s') + ' held back by the bar — still recorded as buck activity, just not sorted for individual ID.</div>' : '') +
@@ -5337,6 +5338,29 @@
       });
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-zoom'), function(z){
         z.addEventListener('click', function(e){ e.stopPropagation(); var m = findMember(z.getAttribute('data-pid')); if (m) enlargePhoto(m.p); });
+      });
+      // ⚡ Burst-select: one tap grabs the whole run of frames from the SAME visit as this photo — a
+      // camera fires many shots of one buck in a burst, and a single visit is (almost always) one buck.
+      // Scoped to the photo's own container and to a contiguous time-run (≤ BURST_GAP between adjacent
+      // frames) so it grabs that visit without swallowing a later, different buck in the same cluster.
+      var BURST_GAP = 5 * 60000; // 5 min between adjacent frames = still the same visit
+      Array.prototype.forEach.call(card.querySelectorAll('.bcl-burst'), function(b){
+        b.addEventListener('click', function(e){
+          e.stopPropagation();
+          var pid = b.getAttribute('data-pid');
+          var cont = null;
+          allContainers().forEach(function(g){ if (g.members.some(function(m){ return m.p.id === pid; })) cont = g; });
+          if (!cont){ selected[pid] = true; render(); return; }
+          var mem = cont.members.filter(function(m){ return m.p.timestamp; }).sort(function(x, y){ return (x.p.timestamp||0) - (y.p.timestamp||0); });
+          var idx = -1; for (var i = 0; i < mem.length; i++){ if (mem[i].p.id === pid){ idx = i; break; } }
+          if (idx < 0){ selected[pid] = true; render(); return; }
+          var run = [mem[idx]];
+          for (var j = idx - 1; j >= 0; j--){ if ((mem[j+1].p.timestamp - mem[j].p.timestamp) <= BURST_GAP) run.push(mem[j]); else break; }
+          for (var k = idx + 1; k < mem.length; k++){ if ((mem[k].p.timestamp - mem[k-1].p.timestamp) <= BURST_GAP) run.push(mem[k]); else break; }
+          run.forEach(function(m){ selected[m.p.id] = true; });
+          render();
+          if (run.length > 1) showToast('Selected a burst of ' + run.length + ' frames — tag them to a buck');
+        });
       });
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-selall'), function(b){
         b.addEventListener('click', function(){
