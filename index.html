@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 178</div>
+    <div id="buildBadge">BUILD 179</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10257,7 +10257,21 @@
       var nx = panel.querySelector('.bmv-next'); if (nx) nx.addEventListener('click', function(){ stop(); if (idx<list.length-1){ idx++; draw(); } });
       var sc = panel.querySelector('.bmv-scrub'); if (sc) sc.addEventListener('input', function(){ stop(); idx = parseInt(this.value,10)||0; draw(); });
       var pl = panel.querySelector('.bmv-play'); if (pl) pl.addEventListener('click', togglePlay);
-      var im = panel.querySelector('.bmv-img'); if (im) im.addEventListener('click', function(){ var e = list[idx]; if (!e) return; var s = e.p ? (e.p.downloadURL || e.p.thumb) : (e.o && e.o.photoThumb); if (s) showPhotoLightbox(s); });
+      var im = panel.querySelector('.bmv-img'); if (im) im.addEventListener('click', function(){
+        // Build the full ordered list of frame photos so the lightbox ‹ › arrows
+        // walk the whole timeline (in the same date order as the scrubber), starting
+        // on whichever frame is showing. Frames with no photo are skipped, and the
+        // start index is remapped onto the filtered list.
+        function frameSrc(e){ return e.p ? (e.p.downloadURL || e.p.thumb) : (e.o && e.o.photoThumb); }
+        var srcs = [], startAt = 0;
+        for (var k = 0; k < list.length; k++){
+          var s = frameSrc(list[k]);
+          if (!s) continue;
+          if (k <= idx) startAt = srcs.length;
+          srcs.push(s);
+        }
+        if (srcs.length) showPhotoLightbox(srcs, startAt);
+      });
       var fr = panel.querySelector('.bmv-from'), to = panel.querySelector('.bmv-to');
       function applyRange(){
         fromStr = fr.value; toStr = to.value;
