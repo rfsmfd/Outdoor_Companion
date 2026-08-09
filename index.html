@@ -1642,6 +1642,8 @@
       <button class="btn-primary" id="addSiteBtn">+ Add Site</button>
       <button class="btn-primary" id="gpsSiteBtn" style="background:#3B9EFF;color:#0A1A2E;">📍 My Location</button>
       <button class="btn-ghost" id="exportBtn">Export</button>
+      <button class="btn-ghost" id="importWaypointsBtn" title="Import stands/markers from HuntStand, onX, Google Earth, ArcGIS or a GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import</button>
+      <input type="file" id="waypointFileInput" accept=".kml,.kmz,.gpx,.geojson,.json,.csv,.txt" style="display:none;" />
       <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
       <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
       <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
@@ -1736,7 +1738,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 193</div>
+    <div id="buildBadge">BUILD 194</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6783,6 +6785,162 @@
       showToast(s.huntable ? 'Marked as a hunt spot 🏹' : 'Set to observation only 👁');
     });
   }
+
+  // ---------- Waypoint import (bring stands/markers in from other apps) ----------
+  // HuntStand / onX / Google Earth / ArcGIS / GPS units all EXPORT a file; we read the common ones and
+  // turn each pin into a site. No live connection to those services — a file, not a sync. Parsing is all
+  // built-in (browser DOMParser for KML/GPX XML, JSON.parse for GeoJSON, a small CSV reader) plus the
+  // already-loaded JSZip for the zipped KMZ. Normalizes everything to {name, lat, lng}.
+  function readFileText(file){ return new Promise(function(res, rej){ var fr = new FileReader(); fr.onload = function(){ res(fr.result); }; fr.onerror = function(){ rej(fr.error); }; fr.readAsText(file); }); }
+  function parseWaypointsFromKml(text){
+    var wp = [];
+    try {
+      var doc = new DOMParser().parseFromString(text, 'text/xml');
+      var pms = doc.getElementsByTagName('Placemark');
+      for (var i = 0; i < pms.length; i++){
+        var pt = pms[i].getElementsByTagName('Point')[0]; if (!pt) continue; // skip lines/polygons
+        var coordEl = pt.getElementsByTagName('coordinates')[0]; if (!coordEl) continue;
+        var parts = coordEl.textContent.trim().split(/[,\s]+/);
+        var lng = parseFloat(parts[0]), lat = parseFloat(parts[1]);
+        var nameEl = pms[i].getElementsByTagName('name')[0];
+        var name = nameEl ? nameEl.textContent.trim() : ('Waypoint ' + (i + 1));
+        if (isFinite(lat) && isFinite(lng)) wp.push({ name: name, lat: lat, lng: lng });
+      }
+    } catch (e) {}
+    return wp;
+  }
+  function parseWaypointsFromGpx(text){
+    var wp = [];
+    try {
+      var doc = new DOMParser().parseFromString(text, 'text/xml');
+      var wpts = doc.getElementsByTagName('wpt');
+      for (var i = 0; i < wpts.length; i++){
+        var lat = parseFloat(wpts[i].getAttribute('lat')), lng = parseFloat(wpts[i].getAttribute('lon'));
+        var nameEl = wpts[i].getElementsByTagName('name')[0];
+        var name = nameEl ? nameEl.textContent.trim() : ('Waypoint ' + (i + 1));
+        if (isFinite(lat) && isFinite(lng)) wp.push({ name: name, lat: lat, lng: lng });
+      }
+    } catch (e) {}
+    return wp;
+  }
+  function parseWaypointsFromGeoJson(text){
+    var wp = [];
+    try {
+      var gj = JSON.parse(text);
+      var feats = gj.type === 'FeatureCollection' ? (gj.features || []) : (gj.type === 'Feature' ? [gj] : []);
+      feats.forEach(function(f, i){
+        if (!f || !f.geometry) return;
+        var g = f.geometry, coord = null;
+        if (g.type === 'Point') coord = g.coordinates;
+        else if (g.type === 'MultiPoint' && g.coordinates && g.coordinates.length) coord = g.coordinates[0];
+        else return; // skip lines/polygons
+        var lng = parseFloat(coord[0]), lat = parseFloat(coord[1]);
+        var props = f.properties || {};
+        var name = props.name || props.Name || props.title || props.label || ('Waypoint ' + (i + 1));
+        if (isFinite(lat) && isFinite(lng)) wp.push({ name: String(name).trim(), lat: lat, lng: lng });
+      });
+    } catch (e) {}
+    return wp;
+  }
+  function parseWaypointsFromCsv(text){
+    var wp = [], lines = text.split(/\r?\n/).filter(function(l){ return l.trim(); });
+    if (!lines.length) return wp;
+    function splitCsv(line){
+      var out = [], cur = '', q = false;
+      for (var i = 0; i < line.length; i++){ var c = line[i];
+        if (q){ if (c === '"'){ if (line[i+1] === '"'){ cur += '"'; i++; } else q = false; } else cur += c; }
+        else { if (c === '"') q = true; else if (c === ',') { out.push(cur); cur = ''; } else cur += c; }
+      }
+      out.push(cur); return out;
+    }
+    var header = splitCsv(lines[0]).map(function(h){ return h.trim().toLowerCase(); });
+    function findCol(cands){ for (var i = 0; i < header.length; i++){ if (cands.indexOf(header[i]) !== -1) return i; } return -1; }
+    var latI = findCol(['lat','latitude','y']), lngI = findCol(['lng','lon','long','longitude','x']);
+    var nameI = findCol(['name','title','label','waypoint','marker']);
+    if (latI < 0 || lngI < 0) return wp; // no coordinate columns → can't import
+    for (var r = 1; r < lines.length; r++){
+      var cols = splitCsv(lines[r]);
+      var lat = parseFloat(cols[latI]), lng = parseFloat(cols[lngI]);
+      var name = (nameI >= 0 && cols[nameI]) ? cols[nameI].trim() : ('Waypoint ' + r);
+      if (isFinite(lat) && isFinite(lng)) wp.push({ name: name, lat: lat, lng: lng });
+    }
+    return wp;
+  }
+  async function handleWaypointFile(file){
+    var lower = file.name.toLowerCase(), wps = [];
+    try {
+      if (/\.kmz$/.test(lower)){
+        if (typeof JSZip === 'undefined'){ showToast('KMZ needs a connection to unzip — export as KML/GPX to import offline.'); return; }
+        var zip = await JSZip.loadAsync(file);
+        var kmlName = Object.keys(zip.files).filter(function(n){ return /\.kml$/i.test(n); })[0];
+        if (kmlName) wps = parseWaypointsFromKml(await zip.files[kmlName].async('string'));
+      } else {
+        var text = await readFileText(file);
+        if (/\.kml$/.test(lower)) wps = parseWaypointsFromKml(text);
+        else if (/\.gpx$/.test(lower)) wps = parseWaypointsFromGpx(text);
+        else if (/\.(geojson|json)$/.test(lower)) wps = parseWaypointsFromGeoJson(text);
+        else if (/\.(csv|txt)$/.test(lower)) wps = parseWaypointsFromCsv(text);
+        else { // unknown extension — sniff the content
+          if (/^\s*</.test(text)){ wps = parseWaypointsFromKml(text); if (!wps.length) wps = parseWaypointsFromGpx(text); }
+          else if (/^\s*[\[{]/.test(text)) wps = parseWaypointsFromGeoJson(text);
+          else wps = parseWaypointsFromCsv(text);
+        }
+      }
+    } catch (e) { showToast('Could not read that file.'); return; }
+    if (!wps.length){ showToast('No map pins found. Supported: KML, KMZ, GPX, GeoJSON, CSV (with lat/long).'); return; }
+    showWaypointImportDialog(wps);
+  }
+  function showWaypointImportDialog(wps){
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.62);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:520px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    var types = getActiveTypes();
+    var typeOpts = Object.keys(types).map(function(k){ return '<option value="' + k + '"' + (k === 'stand' ? ' selected' : '') + '>' + escapeHtml(types[k].label) + '</option>'; }).join('');
+    var propOpts = '<option value="">Unassigned</option>' + (typeof properties !== 'undefined' ? properties : []).map(function(p){ return '<option value="' + escapeHtml(p.id) + '"' + (p.id === activePropertyId ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>'; }).join('');
+    var rows = wps.map(function(w, i){
+      return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #33443a;font-size:12px;cursor:pointer;">' +
+        '<input type="checkbox" class="wp-check" data-i="' + i + '" checked>' +
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(w.name) + '</span>' +
+        '<span style="flex:0 0 auto;color:#6f8377;font-size:10px;">' + w.lat.toFixed(4) + ', ' + w.lng.toFixed(4) + '</span>' +
+      '</label>';
+    }).join('');
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:800;font-size:16px;">📥 Import ' + wps.length + ' waypoint' + (wps.length === 1 ? '' : 's') + '</div><button class="wp-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:11.5px;color:#9db0a3;margin-bottom:10px;">Pins found in your file. Pick what type they are (and optionally a property), then import. Uncheck any you don\'t want.</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
+        '<label style="flex:1;min-width:150px;font-size:11px;color:#9db0a3;">Import all as<br><select class="wp-type" style="width:100%;padding:7px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-top:3px;">' + typeOpts + '</select></label>' +
+        '<label style="flex:1;min-width:150px;font-size:11px;color:#9db0a3;">Property<br><select class="wp-prop" style="width:100%;padding:7px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-top:3px;">' + propOpts + '</select></label>' +
+      '</div>' +
+      '<div style="max-height:220px;overflow:auto;border:1px solid #3c4d42;border-radius:8px;padding:2px 10px;margin-bottom:12px;">' + rows + '</div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button class="wp-import" style="flex:1;padding:10px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;font-weight:700;cursor:pointer;">✓ Import selected</button>' +
+        '<button class="wp-cancel" style="flex:0 0 auto;padding:10px 16px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.wp-close').addEventListener('click', close);
+    card.querySelector('.wp-cancel').addEventListener('click', close);
+    card.querySelector('.wp-import').addEventListener('click', async function(){
+      var type = card.querySelector('.wp-type').value, propId = card.querySelector('.wp-prop').value || null;
+      var chosen = [];
+      Array.prototype.forEach.call(card.querySelectorAll('.wp-check'), function(c){ if (c.checked) chosen.push(wps[parseInt(c.getAttribute('data-i'), 10)]); });
+      if (!chosen.length){ showToast('Nothing selected to import.'); return; }
+      this.disabled = true; this.textContent = 'Importing…';
+      var made = 0;
+      for (var i = 0; i < chosen.length; i++){
+        var w = chosen[i];
+        var site = { id: uid(), name: w.name || ('Waypoint ' + (i + 1)), type: type, notes: 'Imported', lat: w.lat, lng: w.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: propId };
+        sites.push(site);
+        try { await saveSite(site); made++; } catch (e) { console.error('Outdoor Companion: import save failed', e); }
+      }
+      renderAll(); close();
+      showToast('Imported ' + made + ' ' + (made === 1 ? 'site' : 'sites') + ' 🎯');
+    });
+  }
+  document.getElementById('importWaypointsBtn').addEventListener('click', function(){ document.getElementById('waypointFileInput').click(); });
+  document.getElementById('waypointFileInput').addEventListener('change', function(){ var f = this.files && this.files[0]; if (f) handleWaypointFile(f); this.value = ''; });
 
   function renderList(){
     if (activeTab !== 'sites') return;
