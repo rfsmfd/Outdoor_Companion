@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 185</div>
+    <div id="buildBadge">BUILD 186</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7470,6 +7470,92 @@
     html += '</div></div>';
     return html;
   }
+  // ---------- Huntability (Ship 1): daylight-movement % per buck ----------
+  // The one number that decides whether you can kill a buck: how much of his movement lands in LEGAL
+  // SHOOTING LIGHT (~30 min before sunrise to 30 after sunset). Computed from TRAIL-CAM photos ONLY —
+  // cameras sample 24/7 without bias; hunter sightings are logged when YOU'RE there (daylight) and would
+  // inflate the %. Pure math on data we already store (timestamp + site location + SunCalc) — no AI, no
+  // cost. Reads the same linked-photo pool as the gallery/timeline, so shared detections fold in later.
+  var _sunWinCache = {};
+  function buckPhotoLatLng(p){
+    if (!p) return null;
+    if (typeof p.lat === 'number' && typeof p.lng === 'number') return { lat: p.lat, lng: p.lng };
+    if (p.matchedSiteId && typeof sites !== 'undefined'){
+      var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0];
+      if (s && typeof s.lat === 'number' && typeof s.lng === 'number') return { lat: s.lat, lng: s.lng };
+    }
+    return null;
+  }
+  // Shooting-light window [open,close] in ms for the photo's day+place; cached per (localDay, site) so a
+  // buck with hundreds of frames only triggers a handful of SunCalc calls.
+  function shootingWindow(ts, lat, lng, siteId){
+    var d = new Date(ts);
+    var key = d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate() + '|' + (siteId || (lat.toFixed(3) + ',' + lng.toFixed(3)));
+    if (_sunWinCache.hasOwnProperty(key)) return _sunWinCache[key];
+    var w = null;
+    try {
+      var t = SunCalc.getTimes(d, lat, lng);
+      if (t.sunrise && t.sunset && !isNaN(t.sunrise.getTime()) && !isNaN(t.sunset.getTime())){
+        w = { open: t.sunrise.getTime() - 1800000, close: t.sunset.getTime() + 1800000 };
+      }
+    } catch (e) {}
+    _sunWinCache[key] = w;
+    return w;
+  }
+  function huntabilityStats(photos){
+    var byHour = [], h; for (h = 0; h < 24; h++) byHour.push({ day: 0, night: 0 });
+    var day = 0, night = 0, located = 0;
+    (photos || []).forEach(function(p){
+      if (!p || !p.timestamp) return;
+      var ll = buckPhotoLatLng(p); if (!ll) return;
+      var w = shootingWindow(p.timestamp, ll.lat, ll.lng, p.matchedSiteId); if (!w) return;
+      located++;
+      var isDay = p.timestamp >= w.open && p.timestamp <= w.close;
+      var hr = new Date(p.timestamp).getHours();
+      if (isDay){ day++; byHour[hr].day++; } else { night++; byHour[hr].night++; }
+    });
+    return { located: located, day: day, night: night, pct: located ? Math.round(day / located * 100) : 0, byHour: byHour };
+  }
+  function hbHourLabel(h){ var hh = h % 12; if (hh === 0) hh = 12; return hh + (h < 12 ? 'a' : 'p'); }
+  function hbHourRange(h){ var h2 = (h + 1) % 24, hh = h % 12; if (hh === 0) hh = 12; var hh2 = h2 % 12; if (hh2 === 0) hh2 = 12; return hh + '–' + hh2 + ' ' + (h < 12 ? 'AM' : 'PM'); }
+  function huntabilityCardHtml(hb){
+    if (!hb.located) return '';
+    var thin = hb.located < 12;
+    var peakHr = -1, peakN = 0, maxTot = 1, i;
+    for (i = 0; i < 24; i++){ if (hb.byHour[i].day > peakN){ peakN = hb.byHour[i].day; peakHr = i; } var tot = hb.byHour[i].day + hb.byHour[i].night; if (tot > maxTot) maxTot = tot; }
+    var lab, tone;
+    if (hb.pct >= 40){ lab = 'Very huntable'; tone = '#6BBF59'; }
+    else if (hb.pct >= 25){ lab = 'Huntable'; tone = '#9ED17A'; }
+    else if (hb.pct >= 12){ lab = 'Mostly nocturnal'; tone = '#E8B04B'; }
+    else { lab = 'Nearly all night'; tone = '#D98A5B'; }
+    var bars = '';
+    for (i = 0; i < 24; i++){
+      var dpt = hb.byHour[i].day, npt = hb.byHour[i].night, tt = dpt + npt;
+      var colH = Math.round((tt / maxTot) * 30);
+      var dH = tt ? Math.round(colH * (dpt / tt)) : 0, nH = colH - dH;
+      bars += '<div title="' + hbHourLabel(i) + ': ' + dpt + ' day / ' + npt + ' night" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:32px;">' +
+        (nH ? '<div style="height:' + nH + 'px;background:#415146;"></div>' : '') +
+        (dH ? '<div style="height:' + dH + 'px;background:#E8B04B;"></div>' : '') +
+      '</div>';
+    }
+    return '<div style="border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:10px;background:#1b2822;">' +
+      '<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:2px;">' +
+        '<div style="font-weight:700;font-size:13px;">🎯 Huntability</div>' +
+        '<div style="font-size:11px;color:' + tone + ';font-weight:700;">' + lab + '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:baseline;gap:8px;"><span style="font-size:26px;font-weight:800;color:' + tone + ';line-height:1;">' + hb.pct + '%</span><span style="font-size:11.5px;color:#9db0a3;">of his movement is in shooting light</span></div>' +
+      '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;margin:8px 0 4px;">' +
+        '<div style="width:' + hb.pct + '%;background:#E8B04B;"></div><div style="flex:1;background:#415146;"></div>' +
+      '</div>' +
+      '<div style="font-size:10px;color:#9db0a3;margin-bottom:8px;">' + hb.day + ' daylight · ' + hb.night + ' night</div>' +
+      '<div style="font-size:10.5px;color:#9db0a3;margin-bottom:3px;">When he moves (by hour)</div>' +
+      '<div style="display:flex;align-items:flex-end;gap:1px;">' + bars + '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:9px;color:#6f8377;margin-top:2px;"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>' +
+      (peakHr >= 0 ? '<div style="font-size:11.5px;color:#dff0e4;margin-top:8px;">🌅 Best daylight window: <b>' + hbHourRange(peakHr) + '</b></div>' : '') +
+      '<div style="font-size:10px;color:#6f8377;margin-top:6px;">From ' + hb.located + ' located trail-cam photo' + (hb.located === 1 ? '' : 's') + ' (cameras run 24/7 — an unbiased sample).' + (thin ? ' <span style="color:#E8B04B;">⚠ Thin sample — treat as a rough hint.</span>' : '') + '</div>' +
+    '</div>';
+  }
+
   function renderBuckProfilesList(){
     var listEl = document.getElementById('buckProfilesList');
     if (buckProfiles.length === 0){
@@ -7483,6 +7569,7 @@
       var linkedPhotos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return photoLinkedToBuck(p, profile.id); })
         .sort(function(a,b){ return (b.timestamp||0) - (a.timestamp||0); });
       var totalLinked = linkedObs.length + linkedPhotos.length;
+      var hunt = huntabilityStats(linkedPhotos);
       var mostRecentPhoto = linkedObs.filter(function(o){ return o.photoThumb; })[0];
       var coverThumb = mostRecentPhoto ? mostRecentPhoto.photoThumb : null;
       var coverTime = mostRecentPhoto ? (mostRecentPhoto.createdAt||0) : -1;
@@ -7495,7 +7582,7 @@
                           : '<div style="width:80px;height:80px;border-radius:6px;flex-shrink:0;background:var(--panel-alt);display:flex;align-items:center;justify-content:center;font-size:30px;">🦌</div>') +
         '<div class="info">' +
           '<div class="dt" style="display:flex;align-items:center;justify-content:space-between;">' +
-            '<span>' + escapeHtml(profile.name) + '</span>' +
+            '<span>' + escapeHtml(profile.name) + (hunt.located >= 8 ? ' <span title="Daylight-movement %% — how huntable he is" style="font-size:10px;font-weight:700;color:#E8B04B;background:rgba(232,176,75,.15);border-radius:10px;padding:1px 7px;margin-left:5px;white-space:nowrap;">🎯 ' + hunt.pct + '% day</span>' : '') + '</span>' +
             '<span class="detail-chevron" style="color:var(--accent);font-size:14px;">▸</span>' +
           '</div>' +
           '<div class="co">' + linkedObs.length + ' ' + (linkedObs.length === 1 ? 'sighting' : 'sightings') + (linkedPhotos.length ? ' · ' + linkedPhotos.length + ' photo' + (linkedPhotos.length === 1 ? '' : 's') : '') + '</div>' +
@@ -7510,7 +7597,7 @@
         linkedPhotos.forEach(function(p){ items.push({ t:(p.timestamp||0), html: renderBuckPhotoEntry(p) }); });
         linkedObs.forEach(function(o){ items.push({ t:(o.createdAt||0), html: renderBuckGalleryEntry(o) }); });
         items.sort(function(a,b){ return b.t - a.t; });
-        galleryWrap.innerHTML = items.map(function(i){ return i.html; }).join('');
+        galleryWrap.innerHTML = huntabilityCardHtml(hunt) + items.map(function(i){ return i.html; }).join('');
       }
       var actionsRow = document.createElement('div');
       actionsRow.style.cssText = 'margin-top:8px;';
