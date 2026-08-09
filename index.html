@@ -1732,16 +1732,19 @@
       <button class="layer-btn" data-layer="opentopo" title="OpenTopoMap — worldwide contour/trail topo">Topo</button>
       <button class="layer-btn" id="roadsToggleBtn" title="Toggle road names &amp; labels on top of any layer" style="margin-left:6px;border-left:2px solid rgba(255,255,255,0.25);">🛣 Roads</button>
       <button class="layer-btn" id="hillshadeToggleBtn" title="Hillshade — real LiDAR terrain relief (USGS 3DEP) over any layer">🏔 Hillshade</button>
-      <select id="hillshadeStyleSel" title="How to render the terrain" style="display:none;font-size:12px;padding:0 8px;background:#14201A;color:#e8f0ea;border:none;border-left:1px solid rgba(255,255,255,0.15);cursor:pointer;outline:none;">
+      <select id="hillshadeStyleSel" title="How to render the terrain relief" style="display:none;font-size:12px;padding:0 8px;background:#14201A;color:#e8f0ea;border:none;border-left:1px solid rgba(255,255,255,0.15);cursor:pointer;outline:none;">
         <option value="Hillshade Gray-Stretch">Relief+ (exaggerated)</option>
         <option value="Hillshade Multidirectional">Relief</option>
         <option value="Hillshade Elevation Tinted">Elevation tint</option>
         <option value="Aspect Map">Slope aspect</option>
-        <option value="Preset 2ft Contour Interval">Contours · 2 ft (LiDAR)</option>
-        <option value="Preset 5ft Contour Interval">Contours · 5 ft</option>
-        <option value="Preset 10ft Contour Interval">Contours · 10 ft</option>
       </select>
-      <input type="range" id="hillshadeOpacitySlider" min="15" max="100" value="60" title="Terrain layer transparency" style="display:none;width:78px;vertical-align:middle;margin:0 8px;accent-color:#E8823F;cursor:pointer;" />
+      <input type="range" id="hillshadeOpacitySlider" min="15" max="100" value="60" title="Relief transparency" style="display:none;width:70px;vertical-align:middle;margin:0 6px;accent-color:#E8823F;cursor:pointer;" />
+      <button class="layer-btn" id="contoursToggleBtn" title="LiDAR contour lines — overlay on top of the relief (or any layer); independent on/off">〰 Contours</button>
+      <select id="contourIntervalSel" title="Contour interval" style="display:none;font-size:12px;padding:0 8px;background:#14201A;color:#e8f0ea;border:none;border-left:1px solid rgba(255,255,255,0.15);cursor:pointer;outline:none;">
+        <option value="Preset 2ft Contour Interval">2 ft (LiDAR)</option>
+        <option value="Preset 5ft Contour Interval">5 ft</option>
+        <option value="Preset 10ft Contour Interval">10 ft</option>
+      </select>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
@@ -1749,7 +1752,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 198</div>
+    <div id="buildBadge">BUILD 199</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8381,8 +8384,9 @@
   ]);
   var roadsOn = false;
   function raiseOverlaysAndMarkers(){
-    if (typeof hillshadeLayer !== 'undefined' && hillshadeOn){ map.removeLayer(hillshadeLayer); hillshadeLayer.addTo(map); } // relief above base, below roads
-    if (roadsOn){ map.removeLayer(roadsOverlay); roadsOverlay.addTo(map); } // keep roads above the (re)added base
+    if (typeof hillshadeLayer !== 'undefined' && hillshadeOn){ map.removeLayer(hillshadeLayer); hillshadeLayer.addTo(map); } // relief above base
+    if (typeof contourLayer !== 'undefined' && contourOn){ map.removeLayer(contourLayer); contourLayer.addTo(map); } // contour LINES above relief
+    if (roadsOn){ map.removeLayer(roadsOverlay); roadsOverlay.addTo(map); } // roads above terrain
     Object.keys(markers).forEach(function(id){ if (markers[id]) markers[id].bringToFront(); });
   }
   document.getElementById('roadsToggleBtn').addEventListener('click', function(){
@@ -8399,33 +8403,38 @@
     }
   }catch(e){}
 
-  // 🏔 Hillshade — Stage 1 of the Terrain Scout. Uses the USGS 3DEP BARE-EARTH elevation service at its
-  // NATIVE resolution (down to 1 m LiDAR where available — great in VA), rendered dynamically so we can
-  // pick the mode that reveals YOUR ground: relief, exaggerated relief, or an elevation TINT that colors
-  // low ground vs high (the winner on flat coastal plain — subtle drains/bottoms become color). The coarse
-  // global tile hillshade just fogged flat land; this fine, stretchable source shows the real micro-relief.
-  // Rendered via esri-leaflet imageMapLayer (dynamic exportImage). No AI, no cost. Preference persists.
+  // 🏔 Hillshade (relief) + 〰 Contours — Stage 1 of the Terrain Scout. TWO INDEPENDENT LiDAR layers from the
+  // USGS 3DEP bare-earth service (native res, down to 1 m in VA), each with its own on/off — so you can run
+  // contour LINES on top of the exaggerated relief and cut either off. Relief modes (relief / exaggerated /
+  // elevation tint / slope) show the shape; the contour render is transparent-line-only (verified), so it
+  // sits cleanly over the relief over the aerial. Via esri-leaflet imageMapLayer. No AI, no cost. Persists.
+  var HILLSHADE_URL = 'https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer';
   var hillshadeOn = false;
   var hillshadeStyle = 'Hillshade Gray-Stretch';   // Relief+ default — the mode the founder found most useful
-  try{ var _hs = localStorage.getItem('oc_hillshade_style'); if (_hs) hillshadeStyle = _hs; }catch(e){}
+  try{ var _hs = localStorage.getItem('oc_hillshade_style'); if (_hs && _hs.indexOf('Contour') === -1) hillshadeStyle = _hs; }catch(e){}
   var hillshadeOpacity = 0.6;
   try{ var _ho = parseInt(localStorage.getItem('oc_hillshade_opacity'), 10); if (_ho >= 15 && _ho <= 100) hillshadeOpacity = _ho / 100; }catch(e){}
-  var hillshadeLayer = L.esri.imageMapLayer({
-    url: 'https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer',
-    opacity: hillshadeOpacity, renderingRule: { rasterFunction: hillshadeStyle }, attribution: 'Terrain: USGS 3DEP'
-  });
+  var hillshadeLayer = L.esri.imageMapLayer({ url: HILLSHADE_URL, opacity: hillshadeOpacity, renderingRule: { rasterFunction: hillshadeStyle }, attribution: 'Terrain: USGS 3DEP' });
+  var contourOn = false;
+  var contourStyle = 'Preset 2ft Contour Interval';
+  try{ var _cs = localStorage.getItem('oc_contour_style'); if (_cs && _cs.indexOf('Contour') !== -1) contourStyle = _cs; }catch(e){}
+  var contourLayer = L.esri.imageMapLayer({ url: HILLSHADE_URL, opacity: 0.9, renderingRule: { rasterFunction: contourStyle } });
+
   var hillshadeSel = document.getElementById('hillshadeStyleSel');
   var hillshadeSlider = document.getElementById('hillshadeOpacitySlider');
+  var contourSel = document.getElementById('contourIntervalSel');
   function showHillshadeControls(on){
     if (hillshadeSel) hillshadeSel.style.display = on ? 'inline-block' : 'none';
     if (hillshadeSlider) hillshadeSlider.style.display = on ? 'inline-block' : 'none';
   }
+  function showContourControls(on){ if (contourSel) contourSel.style.display = on ? 'inline-block' : 'none'; }
   if (hillshadeSel){
     hillshadeSel.value = hillshadeStyle;
     hillshadeSel.addEventListener('change', function(){
       hillshadeStyle = this.value;
       try{ localStorage.setItem('oc_hillshade_style', hillshadeStyle); }catch(e){}
       hillshadeLayer.setRenderingRule({ rasterFunction: hillshadeStyle });
+      if (contourOn){ map.removeLayer(contourLayer); contourLayer.addTo(map); } // keep contours on top after the relief refetch
     });
   }
   if (hillshadeSlider){
@@ -8436,6 +8445,14 @@
       try{ localStorage.setItem('oc_hillshade_opacity', Math.round(hillshadeOpacity * 100)); }catch(e){}
     });
   }
+  if (contourSel){
+    contourSel.value = contourStyle;
+    contourSel.addEventListener('change', function(){
+      contourStyle = this.value;
+      try{ localStorage.setItem('oc_contour_style', contourStyle); }catch(e){}
+      contourLayer.setRenderingRule({ rasterFunction: contourStyle });
+    });
+  }
   document.getElementById('hillshadeToggleBtn').addEventListener('click', function(){
     hillshadeOn = !hillshadeOn;
     this.classList.toggle('active', hillshadeOn);
@@ -8443,13 +8460,17 @@
     if (hillshadeOn){ hillshadeLayer.addTo(map); raiseOverlaysAndMarkers(); } else { map.removeLayer(hillshadeLayer); }
     try{ localStorage.setItem('oc_hillshade_on', hillshadeOn ? '1' : '0'); }catch(e){}
   });
+  document.getElementById('contoursToggleBtn').addEventListener('click', function(){
+    contourOn = !contourOn;
+    this.classList.toggle('active', contourOn);
+    showContourControls(contourOn);
+    if (contourOn){ contourLayer.addTo(map); raiseOverlaysAndMarkers(); } else { map.removeLayer(contourLayer); }
+    try{ localStorage.setItem('oc_contour_on', contourOn ? '1' : '0'); }catch(e){}
+  });
   try{
-    if (localStorage.getItem('oc_hillshade_on') === '1'){
-      hillshadeOn = true; hillshadeLayer.addTo(map);
-      document.getElementById('hillshadeToggleBtn').classList.add('active');
-      showHillshadeControls(true);
-      raiseOverlaysAndMarkers();
-    }
+    if (localStorage.getItem('oc_hillshade_on') === '1'){ hillshadeOn = true; hillshadeLayer.addTo(map); document.getElementById('hillshadeToggleBtn').classList.add('active'); showHillshadeControls(true); }
+    if (localStorage.getItem('oc_contour_on') === '1'){ contourOn = true; contourLayer.addTo(map); document.getElementById('contoursToggleBtn').classList.add('active'); showContourControls(true); }
+    if (hillshadeOn || contourOn) raiseOverlaysAndMarkers();
   }catch(e){}
 
   document.querySelectorAll('.layer-btn[data-layer]').forEach(function(btn){
