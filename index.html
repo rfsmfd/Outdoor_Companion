@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 177</div>
+    <div id="buildBadge">BUILD 178</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3690,8 +3690,24 @@
   // Expands a catch/sighting photo to a larger, clearer view. Note: the stored photo is
   // already a compressed ~500px copy (no separate full-resolution original is kept), so
   // this shows the same image larger, not additional detail beyond what's stored.
-  function showPhotoLightbox(src){
-    document.getElementById('photoLightboxImg').src = src;
+  // Shared photo-viewer zoom/pan state + optional src-list paging — used by BOTH showPhotoLightbox and
+  // the gallery lightbox (showGalleryPhoto), so every enlarged photo everywhere can zoom AND page.
+  var _lbScale = 1, _lbTx = 0, _lbTy = 0, _lbDrag = false, _lbSx = 0, _lbSy = 0, _lbMoved = false;
+  var _lbSrcList = null, _lbSrcIdx = 0;
+  function lbApplyZoom(){ var img = document.getElementById('photoLightboxImg'); img.style.transformOrigin = 'center center'; img.style.transform = 'translate('+_lbTx+'px,'+_lbTy+'px) scale('+_lbScale+')'; img.style.cursor = _lbScale > 1 ? 'grab' : 'zoom-out'; }
+  function lbResetZoom(){ _lbScale = 1; _lbTx = 0; _lbTy = 0; _lbMoved = false; lbApplyZoom(); }
+  function updateSrcNav(){
+    var prev = document.getElementById('photoLightboxPrev'), next = document.getElementById('photoLightboxNext'), counter = document.getElementById('photoLightboxCounter');
+    var multi = _lbSrcList && _lbSrcList.length > 1;
+    prev.style.display = next.style.display = counter.style.display = multi ? 'block' : 'none';
+    if (multi){ prev.style.visibility = _lbSrcIdx > 0 ? 'visible' : 'hidden'; next.style.visibility = _lbSrcIdx < _lbSrcList.length - 1 ? 'visible' : 'hidden'; counter.textContent = (_lbSrcIdx + 1) + ' of ' + _lbSrcList.length; }
+  }
+  // Accepts a single src string OR an array of srcs (+ start index). An array enables ‹ › paging.
+  function showPhotoLightbox(srcOrList, startIdx){
+    var list = Array.isArray(srcOrList) ? srcOrList.filter(Boolean) : [srcOrList];
+    if (!list.length) return;
+    _lbSrcList = list; _lbSrcIdx = Math.max(0, Math.min(list.length - 1, startIdx || 0));
+    document.getElementById('photoLightboxImg').src = list[_lbSrcIdx];
     // Plain image view (catches/sightings): no gallery caption or delete button.
     galleryLightboxDoc = null;
     document.getElementById('photoLightboxCaption').style.display = 'none';
@@ -3699,11 +3715,10 @@
     document.getElementById('photoLightboxAiBtn').style.display = 'none';
     document.getElementById('photoLightboxCorrect').style.display = 'none';
     document.getElementById('photoLightboxBuck').style.display = 'none';
-    galleryLightboxList = []; galleryLightboxIndex = -1; updateLightboxNav(); // no paging for single-image view
+    galleryLightboxList = []; galleryLightboxIndex = -1;
+    updateSrcNav(); lbResetZoom();
     // Deliberately does NOT call closeAllModals() — the lightbox should layer on top of
-    // whatever's already open (e.g. the Journal), not replace it, so that closing the
-    // lightbox correctly reveals what was open underneath rather than dumping back to
-    // the map.
+    // whatever's already open (e.g. the Journal), not replace it.
     document.getElementById('photoLightboxBackdrop').classList.add('show');
   }
   document.getElementById('photoLightboxClose').addEventListener('click', function(){
@@ -3715,8 +3730,18 @@
   // Extra escape hatches so nobody ever gets stuck on an enlarged photo: tap the photo
   // itself, or press Escape. (The X can sit under the fixed sign-out bar on some screens.)
   document.getElementById('photoLightboxImg').addEventListener('click', function(){
+    if (_lbScale > 1 || _lbMoved) return;   // zoomed / just panned — don't close on the image
     document.getElementById('photoLightboxBackdrop').classList.remove('show');
   });
+  (function(){   // scroll to zoom, drag to pan, double-click toggles — on the shared lightbox image
+    var back = document.getElementById('photoLightboxBackdrop');
+    var img = document.getElementById('photoLightboxImg');
+    back.addEventListener('wheel', function(e){ if (!back.classList.contains('show')) return; e.preventDefault(); _lbScale *= (e.deltaY < 0 ? 1.15 : 1/1.15); _lbScale = Math.max(1, Math.min(10, _lbScale)); if (_lbScale === 1){ _lbTx = 0; _lbTy = 0; } lbApplyZoom(); }, { passive:false });
+    img.addEventListener('mousedown', function(e){ if (_lbScale <= 1) return; _lbDrag = true; _lbMoved = false; _lbSx = e.clientX - _lbTx; _lbSy = e.clientY - _lbTy; e.preventDefault(); });
+    document.addEventListener('mousemove', function(e){ if (!_lbDrag) return; _lbTx = e.clientX - _lbSx; _lbTy = e.clientY - _lbSy; _lbMoved = true; lbApplyZoom(); });
+    document.addEventListener('mouseup', function(){ if (_lbDrag){ _lbDrag = false; setTimeout(function(){ _lbMoved = false; }, 60); } });
+    img.addEventListener('dblclick', function(e){ e.stopPropagation(); if (_lbScale > 1){ lbResetZoom(); } else { _lbScale = 2.5; lbApplyZoom(); } });
+  })();
   document.getElementById('photoLightboxPrev').addEventListener('click', function(e){ e.stopPropagation(); lightboxNav(-1); });
   document.getElementById('photoLightboxNext').addEventListener('click', function(e){ e.stopPropagation(); lightboxNav(1); });
   document.addEventListener('keydown', function(e){
@@ -4049,15 +4074,23 @@
     }
   }
   function lightboxNav(delta){
+    if (_lbSrcList){   // src-list mode (showPhotoLightbox given an array)
+      var si = _lbSrcIdx + delta;
+      if (si < 0 || si >= _lbSrcList.length) return;
+      _lbSrcIdx = si; document.getElementById('photoLightboxImg').src = _lbSrcList[si]; lbResetZoom(); updateSrcNav();
+      return;
+    }
     var ni = galleryLightboxIndex + delta;
     if (ni < 0 || ni >= galleryLightboxList.length) return;
     showGalleryPhoto(galleryLightboxList[ni], galleryLightboxList);
   }
   function showGalleryPhoto(doc, navList){
     galleryLightboxDoc = doc;
+    _lbSrcList = null;   // doc mode, not src-list mode
     if (Array.isArray(navList) && navList.length){ galleryLightboxList = navList; galleryLightboxIndex = navList.indexOf(doc); }
     else { galleryLightboxList = [doc]; galleryLightboxIndex = 0; }
     updateLightboxNav();
+    lbResetZoom();
     document.getElementById('photoLightboxImg').src = doc.downloadURL || doc.thumb || '';
     var cam = cameras.filter(function(c){ return c.id === doc.cameraId; })[0];
     var dateStr = doc.timestamp ? new Date(doc.timestamp).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'}) : 'Unknown date';
@@ -7249,9 +7282,13 @@
       galleryEl.innerHTML = '';
       linkedObs.forEach(function(x){ galleryEl.innerHTML += renderBuckGalleryEntry(x); });
     }
-    galleryEl.querySelectorAll('.journal-photo-thumb').forEach(function(img){
-      img.addEventListener('click', function(){ showPhotoLightbox(img.getAttribute('src')); });
-    });
+    (function(){
+      var thumbs = Array.prototype.slice.call(galleryEl.querySelectorAll('.journal-photo-thumb'));
+      var srcs = thumbs.map(function(t){ return t.getAttribute('src'); });
+      thumbs.forEach(function(img, i){
+        img.addEventListener('click', function(){ showPhotoLightbox(srcs, i); });
+      });
+    })();
     galleryEl.querySelectorAll('.view-on-map-link').forEach(function(btn){
       btn.addEventListener('click', function(){
         document.getElementById('buckCompareModalBackdrop').classList.remove('show');
@@ -7385,21 +7422,29 @@
           flyToObservation(btn.getAttribute('data-obs-id'));
         });
       });
-      galleryWrap.querySelectorAll('.journal-photo-thumb').forEach(function(img){
-        img.addEventListener('click', function(e){
-          e.stopPropagation();
-          showPhotoLightbox(img.getAttribute('src'));
+      (function(){
+        var jt = Array.prototype.slice.call(galleryWrap.querySelectorAll('.journal-photo-thumb'));
+        var jsrcs = jt.map(function(t){ return t.getAttribute('src'); });
+        jt.forEach(function(img, i){
+          img.addEventListener('click', function(e){ e.stopPropagation(); showPhotoLightbox(jsrcs, i); });
         });
-      });
-      galleryWrap.querySelectorAll('.buck-photo-thumb').forEach(function(img){
-        img.addEventListener('click', function(e){
-          e.stopPropagation();
+      })();
+      (function(){
+        var bt = Array.prototype.slice.call(galleryWrap.querySelectorAll('.buck-photo-thumb'));
+        // Docs (paged via showGalleryPhoto) where available; fall back to raw src for any missing doc.
+        var docs = bt.map(function(img){
           var pid = img.getAttribute('data-photo-id');
-          var pdoc = importedPhotos.filter(function(x){ return x.id === pid; })[0];
-          if (pdoc) showGalleryPhoto(pdoc);
-          else showPhotoLightbox(img.getAttribute('data-full') || img.getAttribute('src'));
+          return importedPhotos.filter(function(x){ return x.id === pid; })[0] || null;
         });
-      });
+        var allDocs = docs.filter(Boolean);
+        bt.forEach(function(img, i){
+          img.addEventListener('click', function(e){
+            e.stopPropagation();
+            if (docs[i]) showGalleryPhoto(docs[i], allDocs);
+            else showPhotoLightbox(img.getAttribute('data-full') || img.getAttribute('src'));
+          });
+        });
+      })();
       actionsRow.querySelector('[data-act="buck-map"]').addEventListener('click', function(e){
         e.stopPropagation();
         showBuckOnMap(profile);
@@ -8154,12 +8199,13 @@
         });
         // Any photo thumbnail (the row-level preview, or one inside the expanded detail)
         // opens the lightbox instead of toggling the row's expand/collapse.
-        row.querySelectorAll('.journal-photo-thumb').forEach(function(img){
-          img.addEventListener('click', function(e){
-            e.stopPropagation();
-            showPhotoLightbox(img.getAttribute('src'));
+        (function(){
+          var jt = Array.prototype.slice.call(row.querySelectorAll('.journal-photo-thumb'));
+          var jsrcs = jt.map(function(t){ return t.getAttribute('src'); });
+          jt.forEach(function(img, i){
+            img.addEventListener('click', function(e){ e.stopPropagation(); showPhotoLightbox(jsrcs, i); });
           });
-        });
+        })();
         row.querySelectorAll('.view-on-map-link').forEach(function(btn){
           btn.addEventListener('click', function(e){
             e.stopPropagation();
