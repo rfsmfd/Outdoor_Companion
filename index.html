@@ -1735,7 +1735,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 179</div>
+    <div id="buildBadge">BUILD 180</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2082,16 +2082,21 @@
       </div>
       <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 6px 0;"></div>
       <div id="galleryAiRow" style="margin:0 0 10px 0;">
+        <!-- The buck workflow reads top-to-bottom as a cheap-to-expensive funnel: tag (done) →
+             group by eye (free) → review the AI's free guesses → and only LAST, pay to match the
+             hard leftovers. The DOM order here IS the funnel; don't reshuffle without reason. -->
         <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
-        <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
-        <button type="button" class="btn-ghost" id="galleryBuckMatchBtn" style="width:100%;margin-top:6px;display:none;">🦌 Match buck photos to known bucks</button>
-        <button type="button" class="btn-ghost" id="galleryBuckReviewBtn" style="width:100%;margin-top:6px;display:none;">🦌 Review buck suggestions</button>
         <button type="button" class="btn-ghost" id="galleryBuckClusterBtn" style="width:100%;margin-top:6px;display:none;">🧩 Group look-alike bucks (free, no AI)</button>
+        <button type="button" class="btn-ghost" id="galleryBuckReviewBtn" style="width:100%;margin-top:6px;display:none;">🦌 Review buck suggestions</button>
+        <button type="button" class="btn-ghost" id="galleryBuckMatchBtn" style="width:100%;margin-top:6px;display:none;border-color:#C9832E;color:#E7B45A;">🦌 Match buck photos to known bucks</button>
+        <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
         <button type="button" class="btn-ghost" id="galleryCleanupBtn" style="width:100%;margin-top:6px;display:none;">🧹 Clean up empty frames</button>
         <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
         <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
         <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
-        <button type="button" class="btn-ghost" id="galleryDiagnoseBtn" style="width:100%;margin-top:6px;">🔍 Diagnose locations (read-only)</button>
+        <div style="border-top:1px solid var(--border,#33443a);margin:12px 0 0;padding-top:8px;">
+          <button type="button" class="btn-ghost" id="galleryDiagnoseBtn" style="width:100%;font-size:11.5px;opacity:.8;">🔍 Diagnose locations (read-only)</button>
+        </div>
       </div>
       <div id="galleryGrid"></div>
       <div id="galleryEmpty" style="display:none;font-size:12.5px;color:var(--text-dim);text-align:center;padding:22px 10px;"></div>
@@ -4574,16 +4579,16 @@
     var fresh = galleryBuckPhotosToMatch().length;
     if (fresh > 0){
       mBtn.style.display = 'block'; mBtn.disabled = false;
-      mBtn.textContent = '🦌 Match ' + fresh + ' buck photo' + (fresh===1?'':'s') + ' to known bucks';
+      mBtn.textContent = '🦌 Step 4 · Match ' + fresh + ' leftover' + (fresh===1?'':'s') + ' · ~$ · last step';
     } else {
       var stamped = galleryStampedUnlinkedBucks().length;
       mBtn.style.display = stamped > 0 ? 'block' : 'none';
       mBtn.disabled = false;
-      mBtn.textContent = '🦌 Re-check ' + stamped + ' unmatched buck photo' + (stamped===1?'':'s');
+      mBtn.textContent = '🦌 Step 4 · Re-check ' + stamped + ' unmatched · ~$ · last step';
     }
     var q = pendingBuckSuggestions().length;
     rBtn.style.display = q === 0 ? 'none' : 'block';
-    rBtn.textContent = '🦌 Review ' + q + ' buck suggestion' + (q===1?'':'s');
+    rBtn.textContent = '🦌 Step 3 · Review ' + q + ' suggestion' + (q===1?'':'s') + ' · free';
   }
   document.getElementById('galleryBuckMatchBtn').addEventListener('click', async function(){
     if (!buckProfiles.length){ alert('Name at least one buck first (open a clear photo of him → 🦌 Link to buck → ＋ New buck). Then this can match others against him.'); return; }
@@ -4604,15 +4609,18 @@
     else { showToast('No confident matches yet — name a few more bucks, then re-run to catch these.'); }
   });
   document.getElementById('galleryBuckReviewBtn').addEventListener('click', function(){ showBuckReviewQueue(); });
-  // One-tap review of MEDIUM-confidence suggestions, grouped by the buck the AI thinks each is.
-  // Confirm-all links a whole group; Skip clears the group's suggestions (buckMatchedAt stays, so
-  // they won't re-suggest) leaving them unlinked for manual handling.
+  // PER-PHOTO review of MEDIUM-confidence suggestions, grouped by the buck the AI guessed. Every thumb
+  // is tap-to-pick (default ON — the AI already thinks it's him); you DESELECT the impostors, then one
+  // button links the picked ones to that buck and sets the rest aside. This replaces the old
+  // all-or-nothing "Yes, all / Not him", which was useless on a MIXED group (e.g. 79 "all Moose" where
+  // only some really are). No AI cost — this only confirms guesses already made. 🔍 opens the shared
+  // zoom/paging lightbox so you can check a rack before deciding.
   function showBuckReviewQueue(){
     var pending = pendingBuckSuggestions();
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
     var card = document.createElement('div');
-    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:640px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:680px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
     function close(){ if (back.parentNode) document.body.removeChild(back); refreshTagAllButton(); }
     if (!pending.length){
       card.innerHTML = '<div style="font-weight:700;font-size:15px;margin-bottom:8px;">🦌 Buck review</div><div style="font-size:12.5px;color:#9db0a3;margin-bottom:12px;">Nothing to review — every suggestion has been handled.</div><button class="brv-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Close</button>';
@@ -4621,38 +4629,75 @@
       back.addEventListener('click', function(e){ if (e.target === back) close(); });
       return;
     }
+    // Selection state, default ON for every pending photo (AI already thinks each is that buck).
+    var sel = {};
+    pending.forEach(function(p){ sel[p.id] = true; });
     // Group pending suggestions by suggested buck.
     var groups = {};
     pending.forEach(function(p){ var id = p.buckSuggestion.buckId; (groups[id] = groups[id] || []).push(p); });
     var html = '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🦌 Review buck suggestions</div>' +
-      '<div style="font-size:12px;color:#9db0a3;margin-bottom:14px;line-height:1.45;">The AI is fairly sure of these but wants your OK. Confirm a whole group at once, or skip it. High-confidence matches were already linked automatically.</div>';
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:14px;line-height:1.45;"><b>Tap a photo to pick which ones are really him</b> (green ✓ = yes, dimmed = no). Then link the ones you picked — the rest get set aside. Tap 🔍 to zoom in and check the rack. Free — no AI charge.</div>';
     Object.keys(groups).forEach(function(id){
       var bp = buckProfiles.filter(function(b){ return b.id === id; })[0];
       var name = bp ? bp.name : '(buck)';
       var photos = groups[id];
       var reason = photos[0].buckSuggestion.reason || '';
       html += '<div class="brv-group" data-buck="' + escapeHtml(id) + '" style="border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:12px;background:#1E2B23;">' +
-        '<div style="font-weight:700;margin-bottom:2px;">🦌 ' + escapeHtml(name) + ' <span style="font-size:11px;color:#E8B04B;font-weight:600;">· ' + photos.length + ' photo' + (photos.length===1?'':'s') + '</span></div>' +
-        (reason ? '<div style="font-size:11px;color:#9db0a3;margin-bottom:8px;line-height:1.4;">' + escapeHtml(reason) + '</div>' : '') +
-        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">' +
-        photos.map(function(p){ var src = p.thumb || p.downloadURL || ''; return '<img src="' + src + '" alt="" loading="lazy" style="width:76px;height:76px;object-fit:cover;border-radius:6px;background:#000;">'; }).join('') +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:2px;">' +
+          '<div style="font-weight:700;">🦌 ' + escapeHtml(name) + ' <span style="font-size:11px;color:#E8B04B;font-weight:600;">· ' + photos.length + ' guess' + (photos.length===1?'':'es') + '</span></div>' +
+          '<button class="brv-toggleall" data-buck="' + escapeHtml(id) + '" style="font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid #3c4d42;background:transparent;color:#9db0a3;cursor:pointer;">Select none</button>' +
         '</div>' +
-        '<div style="display:flex;gap:8px;">' +
-        '<button class="brv-confirm" data-buck="' + escapeHtml(id) + '" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">✓ Yes, all ' + name.replace(/"/g,'') + '</button>' +
-        '<button class="brv-skip" data-buck="' + escapeHtml(id) + '" style="flex:0 0 auto;padding:9px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Not him</button>' +
-        '</div></div>';
+        (reason ? '<div style="font-size:11px;color:#9db0a3;margin-bottom:8px;line-height:1.4;">' + escapeHtml(reason) + '</div>' : '') +
+        '<div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:10px;">' +
+        photos.map(function(p, i){
+          var src = p.thumb || p.downloadURL || '';
+          return '<div class="brv-thumb" data-id="' + escapeHtml(p.id) + '" data-buck="' + escapeHtml(id) + '" data-idx="' + i + '" style="position:relative;width:86px;height:86px;border-radius:8px;overflow:hidden;cursor:pointer;box-shadow:0 0 0 2px #6BBF59;">' +
+            '<img src="' + src + '" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;background:#000;display:block;">' +
+            '<span class="brv-tick" style="position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#6BBF59;color:#10281a;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;">✓</span>' +
+            '<button class="brv-zoom" data-buck="' + escapeHtml(id) + '" data-idx="' + i + '" title="Zoom in" style="position:absolute;bottom:3px;right:3px;width:20px;height:20px;border-radius:50%;border:none;background:rgba(0,0,0,.6);color:#fff;font-size:11px;line-height:1;cursor:pointer;padding:0;">🔍</button>' +
+          '</div>';
+        }).join('') +
+        '</div>' +
+        '<button class="brv-link" data-buck="' + escapeHtml(id) + '" style="width:100%;padding:9px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">✓ Link</button>' +
+        '</div>';
     });
     html += '<button class="brv-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
-      '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">Tip: if a group has one that isn\'t him, hit “Not him,” then link the odd ones out from their photo. Skipped photos stay unlinked and won\'t be suggested again.</div>';
+      '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">Picked photos link to that buck. The ones you leave unpicked are set aside — unlinked, and won\'t be suggested again — but nothing is deleted; you can still find them on the board or link them from a photo\'s own 🦌 button.</div>';
     card.innerHTML = html;
     back.appendChild(card); document.body.appendChild(back);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('.brv-close').addEventListener('click', close);
-    async function resolveGroup(buckId, link){
-      var photos = pendingBuckSuggestions().filter(function(p){ return p.buckSuggestion.buckId === buckId; });
+
+    function groupPhotoSrcs(buckId){
+      return (groups[buckId] || []).map(function(p){ return p.downloadURL || p.thumb || ''; }).filter(Boolean);
+    }
+    function applyThumb(el){
+      var on = sel[el.getAttribute('data-id')];
+      el.style.boxShadow = on ? '0 0 0 2px #6BBF59' : '0 0 0 1px #3c4d42';
+      var tick = el.querySelector('.brv-tick'); if (tick) tick.style.display = on ? 'flex' : 'none';
+      var img = el.querySelector('img'); if (img) img.style.opacity = on ? '1' : '.4';
+    }
+    function updateGroup(buckId){
+      var photos = groups[buckId] || [];
+      var n = photos.filter(function(p){ return sel[p.id]; }).length;
+      var m = photos.length - n;
+      var bp = buckProfiles.filter(function(b){ return b.id === buckId; })[0];
+      var nm = (bp ? bp.name : 'buck').replace(/"/g,'');
+      var linkBtn = card.querySelector('.brv-link[data-buck="' + buckId + '"]');
+      if (linkBtn){
+        linkBtn.textContent = n > 0 ? ('✓ Link ' + n + ' to ' + nm + (m > 0 ? (' · set aside ' + m) : '')) : ('Set aside all ' + m + ' — none are ' + nm);
+        linkBtn.style.borderColor = n > 0 ? '#6BBF59' : '#3c4d42';
+        linkBtn.style.background = n > 0 ? '#2E4636' : 'transparent';
+      }
+      var tgl = card.querySelector('.brv-toggleall[data-buck="' + buckId + '"]');
+      if (tgl) tgl.textContent = (n === photos.length && photos.length) ? 'Select none' : 'Select all';
+    }
+    async function resolveGroup(buckId){
+      var photos = pendingBuckSuggestions().filter(function(p){ return p.buckSuggestion && p.buckSuggestion.buckId === buckId; });
+      var linked = 0, skipped = 0;
       for (var i = 0; i < photos.length; i++){
         var p = photos[i];
-        if (link){ p.buckProfileId = buckId; }
+        if (sel[p.id]){ p.buckProfileId = buckId; linked++; } else { skipped++; }
         p.buckSuggestion = null;
         if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} }
       }
@@ -4660,15 +4705,41 @@
       if (grpEl && grpEl.parentNode) grpEl.parentNode.removeChild(grpEl);
       renderGallery(); populateGalleryFilters();
       var bp = buckProfiles.filter(function(b){ return b.id === buckId; })[0];
-      showToast(link ? ('Linked ' + photos.length + ' to ' + (bp ? bp.name : 'buck')) : ('Skipped ' + photos.length));
+      showToast('Linked ' + linked + ' to ' + (bp ? bp.name : 'buck') + (skipped ? (' · set aside ' + skipped) : ''));
       if (!pendingBuckSuggestions().length) close();
     }
-    Array.prototype.forEach.call(card.querySelectorAll('.brv-confirm'), function(b){
-      b.addEventListener('click', function(){ resolveGroup(b.getAttribute('data-buck'), true); });
+
+    Array.prototype.forEach.call(card.querySelectorAll('.brv-thumb'), function(el){
+      applyThumb(el);
+      el.addEventListener('click', function(){
+        var pid = el.getAttribute('data-id');
+        sel[pid] = !sel[pid];
+        applyThumb(el);
+        updateGroup(el.getAttribute('data-buck'));
+      });
     });
-    Array.prototype.forEach.call(card.querySelectorAll('.brv-skip'), function(b){
-      b.addEventListener('click', function(){ resolveGroup(b.getAttribute('data-buck'), false); });
+    Array.prototype.forEach.call(card.querySelectorAll('.brv-zoom'), function(z){
+      z.addEventListener('click', function(e){
+        e.stopPropagation();
+        var buckId = z.getAttribute('data-buck'), idx = parseInt(z.getAttribute('data-idx'), 10) || 0;
+        var srcs = groupPhotoSrcs(buckId);
+        if (srcs.length) showPhotoLightbox(srcs, idx);
+      });
     });
+    Array.prototype.forEach.call(card.querySelectorAll('.brv-toggleall'), function(t){
+      t.addEventListener('click', function(){
+        var buckId = t.getAttribute('data-buck');
+        var photos = groups[buckId] || [];
+        var allOn = photos.length && photos.every(function(p){ return sel[p.id]; });
+        photos.forEach(function(p){ sel[p.id] = !allOn; });
+        Array.prototype.forEach.call(card.querySelectorAll('.brv-thumb[data-buck="' + buckId + '"]'), applyThumb);
+        updateGroup(buckId);
+      });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll('.brv-link'), function(b){
+      b.addEventListener('click', function(){ resolveGroup(b.getAttribute('data-buck')); });
+    });
+    Object.keys(groups).forEach(updateGroup);
   }
 
   // ---------- Phase 2.5 Stage 3c: FREE look-alike clustering (group unknown bucks, no AI) ----------
@@ -4788,7 +4859,7 @@
     if (!btn) return;
     var n = cloudPhotosAvailable() ? galleryUnlinkedBucksInView().filter(isIdentifiableBuck).length : 0;
     btn.style.display = n >= 2 ? 'block' : 'none';
-    btn.textContent = '🧩 Group identifiable bucks (' + n + ', free)';
+    btn.textContent = '🧩 Step 2 · Group identifiable bucks (' + n + ') · free';
   }
   document.getElementById('galleryBuckClusterBtn').addEventListener('click', function(){ showBuckClusterReview(); });
   // Interactive sorting board: free trait-clusters are the STARTING point; you then multi-select photos
@@ -5359,7 +5430,7 @@
     row.style.display = 'block';
     var n = galleryUntaggedInView().length;
     btn.disabled = (n === 0);
-    btn.textContent = n === 0 ? '🧠 Everything in view is tagged' : ('🧠 Tag all untagged with AI (' + n + ')');
+    btn.textContent = n === 0 ? '✅ Step 1 · Everything in view is tagged' : ('🧠 Step 1 · Tag all untagged with AI (' + n + ')');
     refreshCleanupButton();
     refreshBuckMatchButtons();
     refreshBuckClusterButton();
