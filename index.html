@@ -481,6 +481,11 @@
   .site-meta{min-width:0;}
   .site-meta .nm{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .site-meta .ty{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px;}
+  /* Tap a site row to ring its pin on the map (so you can find it even under an overlapping pin) and reveal
+     a delete button for that exact stand — one deliberate removal at a time, no bulk delete. */
+  .site-row.selected{background:rgba(255,106,19,0.16);border-color:#FF6A13;}
+  .site-del-btn{margin-left:auto;flex-shrink:0;background:#3a211c;border:1px solid #7a3a30;color:#ffb0a2;border-radius:6px;padding:4px 9px;font-size:13px;cursor:pointer;font-family:inherit;}
+  .site-del-btn:hover{background:#4a2a22;}
 
   #gps-readout{
     border-top:1px solid var(--line);
@@ -1766,7 +1771,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 210</div>
+    <div id="buildBadge">BUILD 211</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7037,6 +7042,19 @@
   document.getElementById('importWaypointsBtn').addEventListener('click', function(){ document.getElementById('waypointFileInput').click(); });
   document.getElementById('waypointFileInput').addEventListener('change', function(){ var f = this.files && this.files[0]; if (f) handleWaypointFile(f); this.value = ''; });
 
+  // ---- Site-list single-select: tap a stand to ring its pin on the map (find it even under an overlapping
+  // pin), then delete that exact one. One deliberate removal at a time — never a bulk/batch delete. ----
+  var activeSiteId = null;
+  var _siteSelHalo = null;
+  function siteSelHaloLayer(){ if (!_siteSelHalo) _siteSelHalo = L.layerGroup().addTo(map); return _siteSelHalo; }
+  function highlightSiteOnMap(id){
+    var g = siteSelHaloLayer(); g.clearLayers();
+    var s = id ? sites.filter(function(x){ return x.id === id; })[0] : null;
+    if (s && typeof s.lat === 'number'){
+      L.circleMarker([s.lat, s.lng], { radius:16, color:'#FF6A13', weight:3, opacity:0.95, fill:false, interactive:false }).addTo(g);
+    }
+  }
+
   function renderList(){
     if (activeTab !== 'sites') return;
     var list = document.getElementById('site-list');
@@ -7050,18 +7068,38 @@
       }
       return;
     }
+    // Drop the highlight if the active stand is no longer in the filtered list (filter/property changed).
+    if (activeSiteId && !filtered.some(function(s){ return s.id === activeSiteId; })){ activeSiteId = null; highlightSiteOnMap(null); }
     list.innerHTML = '';
     filtered.slice().sort(function(a,b){ return b.createdAt - a.createdAt; }).forEach(function(s){
       var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
       var row = document.createElement('div');
-      row.className = 'site-row';
+      var isActive = activeSiteId === s.id;
+      row.className = 'site-row' + (isActive ? ' selected' : '');
       row.innerHTML =
         '<div class="site-badge" style="background:'+t.color+'">'+t.abbrev+'</div>' +
-        '<div class="site-meta"><div class="nm">'+escapeHtml(s.name)+'</div><div class="ty">'+t.label+'</div></div>';
+        '<div class="site-meta"><div class="nm">'+escapeHtml(s.name)+'</div><div class="ty">'+t.label+'</div></div>' +
+        (isActive ? '<button class="site-del-btn" title="Delete this stand">🗑</button>' : '');
+      // Tap the row → mark it active, ring its pin on the map, and fly there. The ring makes the exact stand
+      // obvious even when it sits under another pin; the delete button then removes THAT record by identity.
       row.addEventListener('click', function(){
+        activeSiteId = s.id;
+        highlightSiteOnMap(s.id);
         map.flyTo([s.lat, s.lng], Math.max(map.getZoom(), 15));
         if (markers[s.id]) markers[s.id].openPopup();
-        if (window.innerWidth <= 820) closeSidebar();
+        renderList();
+      });
+      var db = row.querySelector('.site-del-btn');
+      if (db) db.addEventListener('click', async function(ev){
+        ev.stopPropagation();
+        var linked = observations.filter(function(o){ return o && o.siteId === s.id; }).length;
+        var msg = 'Delete "' + s.name + '" permanently? This cannot be undone.';
+        if (linked) msg += ' ' + linked + ' logged sighting' + (linked === 1 ? '' : 's') + ' will be kept but unlinked from it.';
+        var ok = await showConfirm(msg);
+        if (!ok) return;
+        activeSiteId = null; highlightSiteOnMap(null);
+        try { await removeSite(s.id); } catch (e) { console.error('Outdoor Companion: site delete failed', e); }
+        showToast('Deleted "' + s.name + '".');
       });
       list.appendChild(row);
     });
