@@ -1662,7 +1662,7 @@
       <button class="btn-primary" id="addSiteBtn">+ Add Site</button>
       <button class="btn-primary" id="gpsSiteBtn" style="background:#3B9EFF;color:#0A1A2E;">📍 My Location</button>
       <button class="btn-ghost" id="exportBtn">Export</button>
-      <button class="btn-ghost" id="importWaypointsBtn" title="Import stands/markers from HuntStand, onX, Google Earth, ArcGIS or a GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import</button>
+      <button class="btn-ghost" id="importWaypointsBtn" title="Import stands, markers & trails from onX, HuntStand, Google Earth, Garmin or ArcGIS — or any GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import from other apps</button>
       <input type="file" id="waypointFileInput" accept=".kml,.kmz,.gpx,.geojson,.json,.csv,.txt" style="display:none;" />
       <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
       <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
@@ -1774,7 +1774,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 214</div>
+    <div id="buildBadge">BUILD 215</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7045,7 +7045,7 @@
     }).join('');
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:800;font-size:16px;">📥 Import ' + wps.length + ' waypoint' + (wps.length === 1 ? '' : 's') + '</div><button class="wp-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
-      '<div style="font-size:11.5px;color:#9db0a3;margin-bottom:10px;">Pins found in your file. Pick what type they are (and optionally a property), then import. Uncheck any you don\'t want.</div>' +
+      '<div style="font-size:11.5px;color:#9db0a3;margin-bottom:10px;">Pins found in your file. Pick what type they are (and optionally a property), then import. Uncheck any you don\'t want.<br><span style="color:#6f8377;">Works with exports from onX, HuntStand, Google Earth, Garmin &amp; ArcGIS — KML, KMZ, GPX, GeoJSON, CSV.</span></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
         '<label style="flex:1;min-width:150px;font-size:11px;color:#9db0a3;">Import all as<br><select class="wp-type" style="width:100%;padding:7px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-top:3px;">' + typeOpts + '</select></label>' +
         '<label style="flex:1;min-width:150px;font-size:11px;color:#9db0a3;">Property<br><select class="wp-prop" style="width:100%;padding:7px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-top:3px;">' + propOpts + '</select></label>' +
@@ -7147,7 +7147,7 @@
     }).join('');
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:800;font-size:16px;">🥾 Import ' + trls.length + ' trail' + (trls.length === 1 ? '' : 's') + '</div><button class="tr-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
-      '<div style="font-size:11.5px;color:#9db0a3;margin-bottom:10px;">Drawn lines found in your file. Pick what kind of trail they are, then import — each keeps its own shape and color. Uncheck any you don\'t want.</div>' +
+      '<div style="font-size:11.5px;color:#9db0a3;margin-bottom:10px;">Drawn lines found in your file. Pick what kind of trail they are, then import — each keeps its own shape and color. Uncheck any you don\'t want.<br><span style="color:#6f8377;">Works with exports from onX, HuntStand, Google Earth, Garmin &amp; ArcGIS — GeoJSON, KML, KMZ, GPX.</span></div>' +
       '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
         '<label style="flex:1;min-width:150px;font-size:11px;color:#9db0a3;">Import all as<br><select class="tr-type" style="width:100%;padding:7px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-top:3px;">' + typeOpts + '</select></label>' +
       '</div>' +
@@ -7231,7 +7231,7 @@
       if (sites.length > 0){
         list.innerHTML = '<div class="empty">No sites match the current filter.<br>Try <strong>All Time</strong> in the date filter, or check your Site Types selection.</div>';
       } else {
-        list.innerHTML = '<div class="empty">No observation sites yet.<br>Tap “+ Add Site” and place your first pin on the map.</div>';
+        list.innerHTML = '<div class="empty">No observation sites yet.<br>Tap “+ Add Site” and place your first pin on the map — or tap <strong>📥 Import from other apps</strong> to bring your stands &amp; trails over from onX, HuntStand, Google Earth, Garmin or ArcGIS (KML, GPX, GeoJSON, CSV).</div>';
       }
       return;
     }
