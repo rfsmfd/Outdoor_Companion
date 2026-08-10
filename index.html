@@ -1761,7 +1761,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 206</div>
+    <div id="buildBadge">BUILD 207</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6959,11 +6959,19 @@
     card.querySelector('.wp-close').addEventListener('click', close);
     card.querySelector('.wp-cancel').addEventListener('click', close);
     card.querySelector('.wp-import').addEventListener('click', async function(){
+      var btn = this;
       var type = card.querySelector('.wp-type').value, propId = card.querySelector('.wp-prop').value || null;
       var chosen = [];
       Array.prototype.forEach.call(card.querySelectorAll('.wp-check'), function(c){ if (c.checked) chosen.push(wps[parseInt(c.getAttribute('data-i'), 10)]); });
       if (!chosen.length){ showToast('Nothing selected to import.'); return; }
-      this.disabled = true; this.textContent = 'Importing…';
+      // Guard the easy mistake: the Property dropdown defaults to "Unassigned" whenever you're viewing all
+      // properties, so clicking Import without touching it silently orphans the whole batch (attached to no
+      // farm). Warn and let them back out to pick a property, rather than importing unattached by accident.
+      if (!propId){
+        var goUnassigned = await showConfirm('No property is selected, so these ' + chosen.length + ' stand' + (chosen.length === 1 ? '' : 's') + ' will import as "Unassigned" and won\'t be attached to any farm. Click OK to import them unassigned anyway, or Cancel to go back and pick a property first.');
+        if (!goUnassigned) return;
+      }
+      btn.disabled = true; btn.textContent = 'Importing…';
       var made = 0, updated = 0;
       for (var i = 0; i < chosen.length; i++){
         var w = chosen[i];
