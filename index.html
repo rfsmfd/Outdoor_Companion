@@ -1754,7 +1754,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 202</div>
+    <div id="buildBadge">BUILD 203</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6873,6 +6873,8 @@
     function findCol(cands){ for (var i = 0; i < header.length; i++){ if (cands.indexOf(header[i]) !== -1) return i; } return -1; }
     var latI = findCol(['lat','latitude','y']), lngI = findCol(['lng','lon','long','longitude','x']);
     var nameI = findCol(['name','title','label','waypoint','marker']);
+    // Fall back to ANY header containing name/title/label (e.g. HuntStand's "Stand Name", onX's "Waypoint Name").
+    if (nameI < 0){ for (var _n = 0; _n < header.length; _n++){ if (/name|title|label/.test(header[_n])){ nameI = _n; break; } } }
     if (latI < 0 || lngI < 0) return wp; // no coordinate columns → can't import
     for (var r = 1; r < lines.length; r++){
       var cols = splitCsv(lines[r]);
