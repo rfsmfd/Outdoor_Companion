@@ -743,6 +743,13 @@
   .place-dot{ width:13px;height:13px;border-radius:50%;background:#FF6A13;border:2px solid rgba(20,26,20,0.85);box-shadow:0 1px 4px rgba(0,0,0,0.5); }
   .place-label{ margin-top:2px;font-size:10px;font-weight:600;color:#fff;background:rgba(18,28,22,0.82);padding:1px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.5);max-width:130px;overflow:hidden;text-overflow:ellipsis; }
 
+  /* Stand/site name labels: shown only when zoomed in to a readable level (body.oc-zlabels,
+     toggled on map zoomend). Wrap is wide + click-through so only the badge itself is tappable. */
+  .site-badge-pin{ display:flex; flex-direction:column; align-items:center; width:150px; pointer-events:none; }
+  .site-badge-pin .site-marker{ pointer-events:auto; }
+  .site-name-label{ display:none; margin-top:2px;font-size:10px;font-weight:600;color:#fff;background:rgba(18,28,22,0.82);padding:1px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.5);max-width:140px;overflow:hidden;text-overflow:ellipsis;pointer-events:none; }
+  body.oc-zlabels .site-name-label{ display:block; }
+
   .me-marker{
     width:18px;height:18px;border-radius:50%;
     background:#3B9EFF;
@@ -1754,7 +1761,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 205</div>
+    <div id="buildBadge">BUILD 206</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2743,7 +2750,16 @@
 
   // If the user zooms back out while parcels are active, turn them off automatically
   // rather than let the same slow/stalled-query problem recur silently.
+  // Stand/site name labels appear only once you're zoomed in enough to read them
+  // (otherwise a whole property's labels pile on top of each other). Body class drives the CSS.
+  var LABEL_MIN_ZOOM = 15.5;
+  function updateZoomLabels(){
+    document.body.classList.toggle('oc-zlabels', map.getZoom() >= LABEL_MIN_ZOOM);
+  }
+  updateZoomLabels();
+
   map.on('zoomend', function(){
+    updateZoomLabels();
     if (parcelLayerActive && map.getZoom() < PARCEL_MIN_ZOOM){
       map.removeLayer(getParcelLayer());
       parcelLayerActive = false;
@@ -3539,11 +3555,13 @@
         iconSize: [120, 34], iconAnchor: [60, 7], popupAnchor: [0, -6] // anchor = the dot
       });
     }
+    var siteNm = (siteName || '').trim();
     return L.divIcon({
       className: '',
-      html: '<div class="site-marker" style="--mc:'+t.color+'">'+t.abbrev+'</div>',
-      iconSize: [28,28],
-      iconAnchor: [14,14],
+      html: '<div class="site-badge-pin"><div class="site-marker" style="--mc:'+t.color+'">'+t.abbrev+'</div>' +
+            (siteNm ? '<div class="site-name-label">'+escapeHtml(siteNm)+'</div>' : '') + '</div>',
+      iconSize: [150,46],
+      iconAnchor: [75,14],
       popupAnchor: [0,-16]
     });
   }
