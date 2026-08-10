@@ -921,6 +921,11 @@
     justify-content:center;
   }
   .oc-modal-backdrop.show{display:flex;}
+  /* The generic confirm/alert must sit ABOVE the dynamically-built high-z dialogs (waypoint importer, photo
+     lightbox, etc. all live at z-index ~100002–100007). At the base .oc-modal-backdrop z-index (3000) a confirm
+     fired from inside one of those dialogs rendered BEHIND it — its buttons unclickable, the await never
+     resolved, and the app looked locked up. Keep it top-most so a confirm is always reachable. */
+  #genericConfirmModalBackdrop{ z-index:100060; }
   .oc-modal{
     background:var(--panel);
     border:1px solid var(--line);
@@ -1761,7 +1766,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 209</div>
+    <div id="buildBadge">BUILD 210</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
