@@ -1774,7 +1774,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 213</div>
+    <div id="buildBadge">BUILD 214</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6924,29 +6924,108 @@
     }
     return wp;
   }
+
+  // ---- Trail (line) parsers. The point parsers above deliberately skip lines; these pull the drawn
+  // trails/paths out of the same files — GeoJSON LineString/MultiLineString, KML LineString, GPX tracks &
+  // routes — so they come in as the app's own Trails. Each returns {name, points:[{lat,lng}], color, srcType,
+  // srcId}; srcId (e.g. a HuntStand feature id) lets a re-import update in place instead of duplicating. ----
+  function parseTrailsFromGeoJson(text){
+    var out = [];
+    try {
+      var gj = JSON.parse(text);
+      var feats = gj.type === 'FeatureCollection' ? (gj.features || []) : (gj.type === 'Feature' ? [gj] : []);
+      feats.forEach(function(f, i){
+        if (!f || !f.geometry) return;
+        var g = f.geometry, props = f.properties || {};
+        var linesArr = [];
+        if (g.type === 'LineString') linesArr = [g.coordinates];
+        else if (g.type === 'MultiLineString') linesArr = g.coordinates || [];
+        else return; // points/polygons are handled by the waypoint parser, not here
+        linesArr.forEach(function(coords, li){
+          var pts = [];
+          (coords || []).forEach(function(c){ var lng = parseFloat(c[0]), lat = parseFloat(c[1]); if (isFinite(lat) && isFinite(lng)) pts.push({lat: lat, lng: lng}); });
+          if (pts.length < 2) return;
+          var base = props.name || props.Name || props.title || props.label || ('Trail ' + (i + 1));
+          out.push({
+            name: String(base).trim() + (linesArr.length > 1 ? (' (' + (li + 1) + ')') : ''),
+            points: pts,
+            color: props.color || props.stroke || null,
+            srcType: props.type || null,
+            srcId: (props.huntstand_id != null ? String(props.huntstand_id) : (props.id != null ? String(props.id) : null))
+          });
+        });
+      });
+    } catch (e) {}
+    return out;
+  }
+  function parseTrailsFromKml(text){
+    var out = [];
+    try {
+      var doc = new DOMParser().parseFromString(text, 'text/xml');
+      var pms = doc.getElementsByTagName('Placemark');
+      for (var i = 0; i < pms.length; i++){
+        var ls = pms[i].getElementsByTagName('LineString')[0]; if (!ls) continue;
+        var coordEl = ls.getElementsByTagName('coordinates')[0]; if (!coordEl) continue;
+        var pts = [];
+        coordEl.textContent.trim().split(/\s+/).forEach(function(tok){
+          var p = tok.split(','); var lng = parseFloat(p[0]), lat = parseFloat(p[1]);
+          if (isFinite(lat) && isFinite(lng)) pts.push({lat: lat, lng: lng});
+        });
+        if (pts.length < 2) continue;
+        var nameEl = pms[i].getElementsByTagName('name')[0];
+        out.push({ name: nameEl ? nameEl.textContent.trim() : ('Trail ' + (i + 1)), points: pts, color: null, srcType: null, srcId: null });
+      }
+    } catch (e) {}
+    return out;
+  }
+  function parseTrailsFromGpx(text){
+    var out = [];
+    try {
+      var doc = new DOMParser().parseFromString(text, 'text/xml');
+      ['trk', 'rte'].forEach(function(tag){
+        var segs = doc.getElementsByTagName(tag);
+        for (var i = 0; i < segs.length; i++){
+          var raw = segs[i].getElementsByTagName(tag === 'trk' ? 'trkpt' : 'rtept');
+          var pts = [];
+          for (var j = 0; j < raw.length; j++){
+            var lat = parseFloat(raw[j].getAttribute('lat')), lng = parseFloat(raw[j].getAttribute('lon'));
+            if (isFinite(lat) && isFinite(lng)) pts.push({lat: lat, lng: lng});
+          }
+          if (pts.length < 2) continue;
+          var nameEl = segs[i].getElementsByTagName('name')[0];
+          out.push({ name: nameEl ? nameEl.textContent.trim() : ((tag === 'trk' ? 'Track ' : 'Route ') + (i + 1)), points: pts, color: null, srcType: null, srcId: null });
+        }
+      });
+    } catch (e) {}
+    return out;
+  }
+
   async function handleWaypointFile(file){
-    var lower = file.name.toLowerCase(), wps = [];
+    var lower = file.name.toLowerCase(), wps = [], trls = [];
     try {
       if (/\.kmz$/.test(lower)){
         if (typeof JSZip === 'undefined'){ showToast('KMZ needs a connection to unzip — export as KML/GPX to import offline.'); return; }
         var zip = await JSZip.loadAsync(file);
         var kmlName = Object.keys(zip.files).filter(function(n){ return /\.kml$/i.test(n); })[0];
-        if (kmlName) wps = parseWaypointsFromKml(await zip.files[kmlName].async('string'));
+        if (kmlName){ var kmlText = await zip.files[kmlName].async('string'); wps = parseWaypointsFromKml(kmlText); trls = parseTrailsFromKml(kmlText); }
       } else {
         var text = await readFileText(file);
-        if (/\.kml$/.test(lower)) wps = parseWaypointsFromKml(text);
-        else if (/\.gpx$/.test(lower)) wps = parseWaypointsFromGpx(text);
-        else if (/\.(geojson|json)$/.test(lower)) wps = parseWaypointsFromGeoJson(text);
+        if (/\.kml$/.test(lower)){ wps = parseWaypointsFromKml(text); trls = parseTrailsFromKml(text); }
+        else if (/\.gpx$/.test(lower)){ wps = parseWaypointsFromGpx(text); trls = parseTrailsFromGpx(text); }
+        else if (/\.(geojson|json)$/.test(lower)){ wps = parseWaypointsFromGeoJson(text); trls = parseTrailsFromGeoJson(text); }
         else if (/\.(csv|txt)$/.test(lower)) wps = parseWaypointsFromCsv(text);
         else { // unknown extension — sniff the content
-          if (/^\s*</.test(text)){ wps = parseWaypointsFromKml(text); if (!wps.length) wps = parseWaypointsFromGpx(text); }
-          else if (/^\s*[\[{]/.test(text)) wps = parseWaypointsFromGeoJson(text);
+          if (/^\s*</.test(text)){ wps = parseWaypointsFromKml(text); trls = parseTrailsFromKml(text); if (!wps.length && !trls.length){ wps = parseWaypointsFromGpx(text); trls = parseTrailsFromGpx(text); } }
+          else if (/^\s*[\[{]/.test(text)){ wps = parseWaypointsFromGeoJson(text); trls = parseTrailsFromGeoJson(text); }
           else wps = parseWaypointsFromCsv(text);
         }
       }
     } catch (e) { showToast('Could not read that file.'); return; }
-    if (!wps.length){ showToast('No map pins found. Supported: KML, KMZ, GPX, GeoJSON, CSV (with lat/long).'); return; }
-    showWaypointImportDialog(wps);
+    if (!wps.length && !trls.length){ showToast('No map pins or trails found. Supported: KML, KMZ, GPX, GeoJSON, CSV (with lat/long).'); return; }
+    // Trails first when the file has drawn lines; if it also carried points, the trail dialog chains to the
+    // point importer when it closes, so a mixed file brings in both.
+    if (trls.length) showTrailImportDialog(trls, wps);
+    else showWaypointImportDialog(wps);
   }
   function showWaypointImportDialog(wps){
     var back = document.createElement('div');
@@ -7043,6 +7122,73 @@
         else if (pts.length > 1) map.fitBounds(L.latLngBounds(pts).pad(0.25));
       } catch (e) {}
       showToast((made ? ('Imported ' + made + ' new') : 'Updated') + (updated ? (made ? ', renamed ' + updated + ' existing' : ' ' + updated + ' stand' + (updated === 1 ? '' : 's')) : '') + ' 🎯 — flew the map to them');
+    });
+  }
+
+  // Trail importer — same shape as the waypoint dialog, but for drawn LINES. Trails are module-scoped (not
+  // tied to a farm), so there's no property picker; each imported line keeps its own shape and source color.
+  // Re-importing the same file updates existing trails by source id rather than duplicating them.
+  function showTrailImportDialog(trls, thenWps){
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.62);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:520px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    var chained = false;
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (!chained && thenWps && thenWps.length){ chained = true; showWaypointImportDialog(thenWps); } }
+    var TRAIL_TYPE_OPTS = [['access', 'Access Trail'], ['game', 'Game Trail'], ['boat', 'Boat Route'], ['custom', 'Custom']];
+    var typeOpts = TRAIL_TYPE_OPTS.map(function(p){ return '<option value="' + p[0] + '"' + (p[0] === 'access' ? ' selected' : '') + '>' + p[1] + '</option>'; }).join('');
+    function miles(pts){ var m = 0; for (var i = 1; i < pts.length; i++){ m += distMeters(pts[i-1].lat, pts[i-1].lng, pts[i].lat, pts[i].lng); } return (m / 1609.34).toFixed(2); }
+    var rows = trls.map(function(tr, i){
+      return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #33443a;font-size:12px;cursor:pointer;">' +
+        '<input type="checkbox" class="tr-check" data-i="' + i + '" checked>' +
+        '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(tr.name) + '</span>' +
+        '<span style="flex:0 0 auto;color:#6f8377;font-size:10px;">' + tr.points.length + ' pts · ' + miles(tr.points) + ' mi</span>' +
+      '</label>';
+    }).join('');
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:800;font-size:16px;">🥾 Import ' + trls.length + ' trail' + (trls.length === 1 ? '' : 's') + '</div><button class="tr-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:11.5px;color:#9db0a3;margin-bottom:10px;">Drawn lines found in your file. Pick what kind of trail they are, then import — each keeps its own shape and color. Uncheck any you don\'t want.</div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">' +
+        '<label style="flex:1;min-width:150px;font-size:11px;color:#9db0a3;">Import all as<br><select class="tr-type" style="width:100%;padding:7px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;margin-top:3px;">' + typeOpts + '</select></label>' +
+      '</div>' +
+      '<div style="max-height:220px;overflow:auto;border:1px solid #3c4d42;border-radius:8px;padding:2px 10px;margin-bottom:12px;">' + rows + '</div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button class="tr-import" style="flex:1;padding:10px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;font-weight:700;cursor:pointer;">✓ Import selected</button>' +
+        '<button class="tr-cancel" style="flex:0 0 auto;padding:10px 16px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.tr-close').addEventListener('click', close);
+    card.querySelector('.tr-cancel').addEventListener('click', close);
+    card.querySelector('.tr-import').addEventListener('click', async function(){
+      var btn = this;
+      var type = card.querySelector('.tr-type').value;
+      var chosen = [];
+      Array.prototype.forEach.call(card.querySelectorAll('.tr-check'), function(c){ if (c.checked) chosen.push(trls[parseInt(c.getAttribute('data-i'), 10)]); });
+      if (!chosen.length){ showToast('Nothing selected to import.'); return; }
+      btn.disabled = true; btn.textContent = 'Importing…';
+      var made = 0, updated = 0, allPts = [];
+      for (var i = 0; i < chosen.length; i++){
+        var tr = chosen[i];
+        // Re-import safety: match a prior import by source id (module-scoped) and update it in place.
+        var existing = null;
+        if (tr.srcId){ for (var k = 0; k < trails.length; k++){ var t2 = trails[k]; if (t2 && t2.importId && t2.importId === tr.srcId && t2.module === activeModule){ existing = t2; break; } } }
+        if (existing){
+          existing.name = tr.name || existing.name; existing.type = type; existing.points = tr.points;
+          if (tr.color) existing.color = tr.color; if (tr.srcId) existing.importId = tr.srcId;
+          try { await saveTrail(existing); updated++; } catch (e) { console.error('Outdoor Companion: trail import update failed', e); }
+        } else {
+          var nt = { id: uid(), name: tr.name || ('Trail ' + (i + 1)), type: type, module: activeModule, points: tr.points, color: tr.color || '#eb3843', lineStyle: 'solid', createdAt: Date.now(), notes: 'Imported', hidden: false, importId: tr.srcId || null };
+          trails.push(nt);
+          try { await saveTrail(nt); made++; } catch (e) { console.error('Outdoor Companion: trail import save failed', e); }
+        }
+        tr.points.forEach(function(p){ allPts.push([p.lat, p.lng]); });
+      }
+      renderAllSavedTrails();
+      if (typeof renderTrailsList === 'function') renderTrailsList();
+      close();
+      try { if (allPts.length) map.fitBounds(L.latLngBounds(allPts).pad(0.2)); } catch (e) {}
+      showToast((made ? ('Imported ' + made + ' trail' + (made === 1 ? '' : 's')) : 'Updated') + (updated ? (made ? ', updated ' + updated + ' existing' : ' ' + updated + ' existing') : '') + ' 🥾');
     });
   }
   document.getElementById('importWaypointsBtn').addEventListener('click', function(){ document.getElementById('waypointFileInput').click(); });
