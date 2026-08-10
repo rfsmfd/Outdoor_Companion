@@ -1761,7 +1761,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 207</div>
+    <div id="buildBadge">BUILD 208</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6964,13 +6964,23 @@
       var chosen = [];
       Array.prototype.forEach.call(card.querySelectorAll('.wp-check'), function(c){ if (c.checked) chosen.push(wps[parseInt(c.getAttribute('data-i'), 10)]); });
       if (!chosen.length){ showToast('Nothing selected to import.'); return; }
-      // Guard the easy mistake: the Property dropdown defaults to "Unassigned" whenever you're viewing all
-      // properties, so clicking Import without touching it silently orphans the whole batch (attached to no
-      // farm). Warn and let them back out to pick a property, rather than importing unattached by accident.
-      if (!propId){
-        var goUnassigned = await showConfirm('No property is selected, so these ' + chosen.length + ' stand' + (chosen.length === 1 ? '' : 's') + ' will import as "Unassigned" and won\'t be attached to any farm. Click OK to import them unassigned anyway, or Cancel to go back and pick a property first.');
-        if (!goUnassigned) return;
+      // Confirm the DESTINATION on every import, naming the farm right in the popup, so you always see where
+      // the stands are headed before anything is written. This catches BOTH easy mistakes: importing with no
+      // property (Unassigned — the dropdown's default when viewing all properties) AND importing into the
+      // WRONG farm (e.g. sitting on Roundhill, the dialog pre-picks Roundhill, but you meant Jenkins and
+      // forgot to switch it). The old guard only caught the empty case; the wrong-farm case slipped through.
+      var noun = chosen.length + ' stand' + (chosen.length === 1 ? '' : 's');
+      var typeSel = card.querySelector('.wp-type');
+      var typeLabel = (typeSel.options[typeSel.selectedIndex] && typeSel.options[typeSel.selectedIndex].text) || type;
+      var okDest;
+      if (propId){
+        var destProp = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === propId; })[0];
+        var destName = destProp ? destProp.name : 'the selected property';
+        okDest = await showConfirm('Import ' + noun + ' as "' + typeLabel + '" into "' + destName + '"?  Double-check that\'s the right farm — Cancel to switch it in the Property dropdown first.');
+      } else {
+        okDest = await showConfirm('Import ' + noun + ' as "' + typeLabel + '" with NO property? They\'ll be "Unassigned" — not attached to any farm. Cancel and pick a property in the dropdown first if you meant to attach them.');
       }
+      if (!okDest) return;
       btn.disabled = true; btn.textContent = 'Importing…';
       var made = 0, updated = 0;
       for (var i = 0; i < chosen.length; i++){
