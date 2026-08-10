@@ -1754,7 +1754,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 204</div>
+    <div id="buildBadge">BUILD 205</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6946,12 +6946,23 @@
       Array.prototype.forEach.call(card.querySelectorAll('.wp-check'), function(c){ if (c.checked) chosen.push(wps[parseInt(c.getAttribute('data-i'), 10)]); });
       if (!chosen.length){ showToast('Nothing selected to import.'); return; }
       this.disabled = true; this.textContent = 'Importing…';
-      var made = 0;
+      var made = 0, updated = 0;
       for (var i = 0; i < chosen.length; i++){
         var w = chosen[i];
-        var site = { id: uid(), name: w.name || ('Waypoint ' + (i + 1)), type: type, notes: 'Imported', lat: w.lat, lng: w.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: propId };
-        sites.push(site);
-        try { await saveSite(site); made++; } catch (e) { console.error('Outdoor Companion: import save failed', e); }
+        // If a PRIOR import already dropped a stand at this exact spot (e.g. the names came in wrong on an
+        // older build), UPDATE it in place instead of making a duplicate — matches only previously-imported
+        // sites, within 25 m, so cameras and other sites are never touched. Re-importing the same file thus
+        // cleanly fixes names/type with no duplicates.
+        var existing = null, ed = 1e9;
+        sites.forEach(function(s){ if (s && s.notes === 'Imported' && typeof s.lat === 'number'){ var d = distMeters(w.lat, w.lng, s.lat, s.lng); if (d < ed){ ed = d; existing = s; } } });
+        if (existing && ed < 25){
+          existing.name = w.name || existing.name; existing.type = type; existing.propertyId = propId;
+          try { await saveSite(existing); updated++; } catch (e) { console.error('Outdoor Companion: import update failed', e); }
+        } else {
+          var site = { id: uid(), name: w.name || ('Waypoint ' + (i + 1)), type: type, notes: 'Imported', lat: w.lat, lng: w.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: propId };
+          sites.push(site);
+          try { await saveSite(site); made++; } catch (e) { console.error('Outdoor Companion: import save failed', e); }
+        }
       }
       // Make the new stands VISIBLE: point the property filter at whatever they were imported into (so a
       // stale filter can't hide them), redraw, then fly the map to them — otherwise they land off-screen at
@@ -6964,7 +6975,7 @@
         if (pts.length === 1) map.setView(pts[0], 16);
         else if (pts.length > 1) map.fitBounds(L.latLngBounds(pts).pad(0.25));
       } catch (e) {}
-      showToast('Imported ' + made + ' ' + (made === 1 ? 'stand' : 'stands') + ' 🎯 — flew the map to them');
+      showToast((made ? ('Imported ' + made + ' new') : 'Updated') + (updated ? (made ? ', renamed ' + updated + ' existing' : ' ' + updated + ' stand' + (updated === 1 ? '' : 's')) : '') + ' 🎯 — flew the map to them');
     });
   }
   document.getElementById('importWaypointsBtn').addEventListener('click', function(){ document.getElementById('waypointFileInput').click(); });
