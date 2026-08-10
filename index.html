@@ -1761,7 +1761,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 208</div>
+    <div id="buildBadge">BUILD 209</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6893,12 +6893,18 @@
     var nameI = findCol(['name','title','label','waypoint','marker']);
     // Fall back to ANY header containing name/title/label (e.g. HuntStand's "Stand Name", onX's "Waypoint Name").
     if (nameI < 0){ for (var _n = 0; _n < header.length; _n++){ if (/name|title|label/.test(header[_n])){ nameI = _n; break; } } }
+    // A STABLE SOURCE ID (HuntStand's "HuntStand ID", onX/GIS "id"/"objectid", etc.) lets a re-import update the
+    // SAME stand by identity instead of guessing by distance. Distance-guessing wrongly merged stands sitting a
+    // few meters apart — real HuntStand exports cluster tree-leaner/tripod stands 3–20 m apart. Optional column.
+    var idI = findCol(['huntstand id','waypoint id','marker id','object id','objectid','fid','id']);
+    if (idI < 0){ for (var _i = 0; _i < header.length; _i++){ if (/(^|\s)id$/.test(header[_i])){ idI = _i; break; } } }
     if (latI < 0 || lngI < 0) return wp; // no coordinate columns → can't import
     for (var r = 1; r < lines.length; r++){
       var cols = splitCsv(lines[r]);
       var lat = parseFloat(cols[latI]), lng = parseFloat(cols[lngI]);
       var name = (nameI >= 0 && cols[nameI]) ? cols[nameI].trim() : ('Waypoint ' + r);
-      if (isFinite(lat) && isFinite(lng)) wp.push({ name: name, lat: lat, lng: lng });
+      var srcId = (idI >= 0 && cols[idI]) ? cols[idI].trim() : null;
+      if (isFinite(lat) && isFinite(lng)) wp.push({ name: name, lat: lat, lng: lng, srcId: srcId });
     }
     return wp;
   }
@@ -6985,17 +6991,26 @@
       var made = 0, updated = 0;
       for (var i = 0; i < chosen.length; i++){
         var w = chosen[i];
-        // If a PRIOR import already dropped a stand at this exact spot (e.g. the names came in wrong on an
-        // older build), UPDATE it in place instead of making a duplicate — matches only previously-imported
-        // sites, within 25 m, so cameras and other sites are never touched. Re-importing the same file thus
-        // cleanly fixes names/type with no duplicates.
-        var existing = null, ed = 1e9;
-        sites.forEach(function(s){ if (s && s.notes === 'Imported' && typeof s.lat === 'number'){ var d = distMeters(w.lat, w.lng, s.lat, s.lng); if (d < ed){ ed = d; existing = s; } } });
-        if (existing && ed < 25){
+        // Find the SAME stand from a prior import to update in place (so re-importing a file never duplicates).
+        // Match by STABLE SOURCE ID first (e.g. HuntStand ID) — bulletproof, and blind to distance. Only if the
+        // file carries no id do we fall back to a TIGHT ~2 m proximity: that still catches a genuine re-import of
+        // the identical point, but never merges distinct stands that legitimately sit a few meters apart. (An
+        // earlier 25 m proximity match silently collapsed 6 of 24 real Roundhill stands into their neighbors.)
+        var existing = null;
+        if (w.srcId){
+          for (var si = 0; si < sites.length; si++){ var s2 = sites[si]; if (s2 && s2.notes === 'Imported' && s2.importId && s2.importId === w.srcId){ existing = s2; break; } }
+        }
+        if (!existing){
+          var ed = 1e9, near = null;
+          sites.forEach(function(s){ if (s && s.notes === 'Imported' && typeof s.lat === 'number'){ var d = distMeters(w.lat, w.lng, s.lat, s.lng); if (d < ed){ ed = d; near = s; } } });
+          if (near && ed < 2) existing = near;
+        }
+        if (existing){
           existing.name = w.name || existing.name; existing.type = type; existing.propertyId = propId;
+          if (w.srcId) existing.importId = w.srcId;
           try { await saveSite(existing); updated++; } catch (e) { console.error('Outdoor Companion: import update failed', e); }
         } else {
-          var site = { id: uid(), name: w.name || ('Waypoint ' + (i + 1)), type: type, notes: 'Imported', lat: w.lat, lng: w.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: propId };
+          var site = { id: uid(), name: w.name || ('Waypoint ' + (i + 1)), type: type, notes: 'Imported', importId: w.srcId || null, lat: w.lat, lng: w.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: propId };
           sites.push(site);
           try { await saveSite(site); made++; } catch (e) { console.error('Outdoor Companion: import save failed', e); }
         }
