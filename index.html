@@ -484,7 +484,10 @@
   /* Tap a site row to ring its pin on the map (so you can find it even under an overlapping pin) and reveal
      a delete button for that exact stand — one deliberate removal at a time, no bulk delete. */
   .site-row.selected{background:rgba(255,106,19,0.16);border-color:#FF6A13;}
-  .site-del-btn{margin-left:auto;flex-shrink:0;background:#3a211c;border:1px solid #7a3a30;color:#ffb0a2;border-radius:6px;padding:4px 9px;font-size:13px;cursor:pointer;font-family:inherit;}
+  .site-row-actions{margin-left:auto;display:flex;gap:6px;flex-shrink:0;align-items:center;}
+  .site-move-btn{background:#1c2f20;border:1px solid #3c6d42;color:#a8e0b0;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap;}
+  .site-move-btn:hover{background:#254028;}
+  .site-del-btn{flex-shrink:0;background:#3a211c;border:1px solid #7a3a30;color:#ffb0a2;border-radius:6px;padding:4px 9px;font-size:13px;cursor:pointer;font-family:inherit;}
   .site-del-btn:hover{background:#4a2a22;}
 
   #gps-readout{
@@ -1771,7 +1774,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 211</div>
+    <div id="buildBadge">BUILD 212</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7079,9 +7082,9 @@
       row.innerHTML =
         '<div class="site-badge" style="background:'+t.color+'">'+t.abbrev+'</div>' +
         '<div class="site-meta"><div class="nm">'+escapeHtml(s.name)+'</div><div class="ty">'+t.label+'</div></div>' +
-        (isActive ? '<button class="site-del-btn" title="Delete this stand">🗑</button>' : '');
+        (isActive ? '<div class="site-row-actions"><button class="site-move-btn" title="Move this stand on the map">📍 Move</button><button class="site-del-btn" title="Delete this stand">🗑</button></div>' : '');
       // Tap the row → mark it active, ring its pin on the map, and fly there. The ring makes the exact stand
-      // obvious even when it sits under another pin; the delete button then removes THAT record by identity.
+      // obvious even when it sits under another pin; the row's buttons then Move or Delete THAT record by identity.
       row.addEventListener('click', function(){
         activeSiteId = s.id;
         highlightSiteOnMap(s.id);
@@ -7089,6 +7092,8 @@
         if (markers[s.id]) markers[s.id].openPopup();
         renderList();
       });
+      var mv = row.querySelector('.site-move-btn');
+      if (mv) mv.addEventListener('click', function(ev){ ev.stopPropagation(); repositionSite(s.id); });
       var db = row.querySelector('.site-del-btn');
       if (db) db.addEventListener('click', async function(ev){
         ev.stopPropagation();
@@ -9862,9 +9867,47 @@
     pendingRepositionObsId = null;
   }
 
+  // ---- Move a stand/site: reuse the very same crosshair-confirm screen, repositioning an existing SITE
+  // pin. GPS can be off by several meters when a waypoint is first dropped (weak signal under canopy), so
+  // this lets you nudge a stand to its true spot later without deleting and re-creating it. ----
+  var pendingRepositionSiteId = null;
+  function repositionSite(siteId){
+    var s = sites.filter(function(x){ return x.id === siteId; })[0];
+    if (!s) return;
+    pendingRepositionSiteId = siteId;
+    pendingRepositionObsId = null;
+    pendingLogType = null;
+    var tl = getActiveTypes()[s.type];
+    document.getElementById('logLocationTypeName').textContent = 'Move ' + (tl ? tl.label : 'Stand');
+    logLocationPos = {lat: s.lat, lng: s.lng};
+    document.getElementById('logLocationCoords').textContent = fmtCoord(s.lat) + ', ' + fmtCoord(s.lng);
+    document.getElementById('logLocationPropertyList').style.display = 'none';
+    map.closePopup();
+    closeAllModals();
+    document.getElementById('logLocationModalBackdrop').classList.add('show');
+    ensureLogLocationMap();
+    setTimeout(function(){ logLocationMap.invalidateSize(); logLocationMap.setView([s.lat, s.lng], 18); }, 50);
+  }
+  async function applyRepositionedSite(lat, lng){
+    var s = sites.filter(function(x){ return x.id === pendingRepositionSiteId; })[0];
+    if (s){
+      s.lat = lat; s.lng = lng; s.lastActivityAt = Date.now();
+      try { await saveSite(s); } catch (e) { console.error('Outdoor Companion: failed to save moved stand', e); }
+      renderAll();
+      if (activeSiteId === s.id) highlightSiteOnMap(s.id);
+      showToast('Stand moved');
+    }
+    pendingRepositionSiteId = null;
+  }
+
   document.getElementById('logLocationUseMyLocationBtn').addEventListener('click', function(){
     var pos = lastKnownPos;
     document.getElementById('logLocationModalBackdrop').classList.remove('show');
+    if (pendingRepositionSiteId){
+      if (pos) applyRepositionedSite(pos.lat, pos.lng);
+      else applyRepositionedSite(logLocationPos.lat, logLocationPos.lng);
+      return;
+    }
     if (pendingRepositionObsId){
       if (pos) applyRepositionedLocation(pos.lat, pos.lng, false);
       else applyRepositionedLocation(logLocationPos.lat, logLocationPos.lng, true);
@@ -9878,6 +9921,10 @@
   });
   document.getElementById('logLocationConfirmBtn').addEventListener('click', function(){
     document.getElementById('logLocationModalBackdrop').classList.remove('show');
+    if (pendingRepositionSiteId){
+      applyRepositionedSite(logLocationPos.lat, logLocationPos.lng);
+      return;
+    }
     if (pendingRepositionObsId){
       applyRepositionedLocation(logLocationPos.lat, logLocationPos.lng, false);
       return;
@@ -9888,6 +9935,7 @@
     document.getElementById('logLocationModalBackdrop').classList.remove('show');
     pendingLogType = null;
     pendingRepositionObsId = null;
+    pendingRepositionSiteId = null;
   });
 
   // ---------- mobile sidebar drawer ----------
