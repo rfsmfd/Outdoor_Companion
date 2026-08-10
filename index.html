@@ -1774,7 +1774,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 212</div>
+    <div id="buildBadge">BUILD 213</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6724,6 +6724,9 @@
       var m = L.marker([s.lat,s.lng], {icon: markerIcon(s.type, s.name, s.id)}).addTo(map);
       m.bindPopup(popupHtml(s));
       m.on('popupopen', function(e){ bindPopupActions(e.popup, s.id); });
+      // Clicking a pin also selects it in the Sites list (scrolls + highlights it) — the reverse of
+      // tapping a list row to find it on the map. Closure captures this site's id.
+      (function(sid){ m.on('click', function(){ selectSiteFromMap(sid); }); })(s.id);
       markers[s.id] = m;
     });
   }
@@ -7058,6 +7061,21 @@
     }
   }
 
+  // Reverse lookup: click a pin on the map and jump the Sites list straight to that stand (scrolled into
+  // view, selected, with its Move/Delete buttons) — no hunting for it in the list. A visible marker always
+  // passes the same filters the list uses, so its row is guaranteed to be there.
+  function selectSiteFromMap(id){
+    var s = sites.filter(function(x){ return x.id === id; })[0];
+    if (!s) return;
+    activeSiteId = id;
+    highlightSiteOnMap(id);
+    if (activeTab !== 'sites'){ var tb = document.querySelector('.tab-btn[data-tab="sites"]'); if (tb) tb.click(); }
+    renderList();
+    if (window.innerWidth <= 820) openSidebar();
+    var row = document.querySelector('#site-list .site-row[data-site-id="' + id + '"]');
+    if (row && row.scrollIntoView) row.scrollIntoView({ block: 'center' });
+  }
+
   function renderList(){
     if (activeTab !== 'sites') return;
     var list = document.getElementById('site-list');
@@ -7079,6 +7097,7 @@
       var row = document.createElement('div');
       var isActive = activeSiteId === s.id;
       row.className = 'site-row' + (isActive ? ' selected' : '');
+      row.setAttribute('data-site-id', s.id);
       row.innerHTML =
         '<div class="site-badge" style="background:'+t.color+'">'+t.abbrev+'</div>' +
         '<div class="site-meta"><div class="nm">'+escapeHtml(s.name)+'</div><div class="ty">'+t.label+'</div></div>' +
