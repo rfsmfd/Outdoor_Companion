@@ -1776,7 +1776,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 218</div>
+    <div id="buildBadge">BUILD 219</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8808,12 +8808,13 @@
   // purpose: a property drains toward several low lines, not one uniform way (Jenkins measured R=0.08).
   map.createPane('thermalPane'); map.getPane('thermalPane').style.zIndex = 460; map.getPane('thermalPane').style.pointerEvents = 'none';
   var thermalLayer = L.layerGroup();
-  var thermalOn = false, THERMAL_MIN_ZOOM = 14, thermalReqId = 0, _thermalTimer = null;
+  var thermalOn = false, THERMAL_MIN_ZOOM = 14, thermalReqId = 0, _thermalTimer = null, projHours = 0;
+  function projTimeMs(){ return projHours ? Date.now() + projHours * 3600000 : Date.now(); }
 
   // Which way thermals move right now, from the sun. up=true → scent rides UP-slope (morning); false → DOWN-slope
   // (evening/night pooling); null → neutral midday when wind, not thermals, governs.
-  function thermalPhase(lat, lng){
-    var now = new Date(), H = 3600000;
+  function thermalPhase(lat, lng, atMs){
+    var now = atMs ? new Date(atMs) : new Date(), H = 3600000;
     if (typeof SunCalc === 'undefined') return { up:false, label:'Falling — draining downhill' };
     var t = SunCalc.getTimes(now, lat, lng), m = now.getTime(), sr = t.sunrise.getTime(), ss = t.sunset.getTime();
     if (m >= sr - 0.25*H && m < sr + 2.5*H)  return { up:true,  label:'Morning — rising, riding uphill' };
@@ -8833,7 +8834,7 @@
     if (!thermalOn) return;
     thermalLayer.clearLayers();
     if (map.getZoom() < THERMAL_MIN_ZOOM){ updateThermalChip('Zoom in to read thermals'); return; }
-    var reqId = ++thermalReqId, b = map.getBounds().pad(-0.02), c = map.getCenter(), ph = thermalPhase(c.lat, c.lng);
+    var reqId = ++thermalReqId, b = map.getBounds().pad(-0.02), c = map.getCenter(), ph = thermalPhase(c.lat, c.lng, projTimeMs());
     updateThermalChip('Reading terrain…');
     var COLS = 20, ROWS = 14;
     var minLat = b.getSouth(), maxLat = b.getNorth(), minLng = b.getWest(), maxLng = b.getEast();
@@ -8881,6 +8882,7 @@
     this.classList.toggle('active', thermalOn);
     if (thermalOn){ thermalLayer.addTo(map); updateThermalLayer(); }
     else { thermalLayer.clearLayers(); map.removeLayer(thermalLayer); var chip = document.getElementById('thermalChip'); if (chip) chip.style.display = 'none'; }
+    ensureProjControl();
     try{ localStorage.setItem('oc_thermal_on', thermalOn ? '1' : '0'); }catch(e){}
   });
   map.on('moveend', function(){ if (!thermalOn) return; clearTimeout(_thermalTimer); _thermalTimer = setTimeout(updateThermalLayer, 250); });
@@ -8930,9 +8932,11 @@
     var stands = sites.filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && b.contains([s.lat, s.lng]); });
     if (!stands.length){ updateScentChip('No hunt spots in view'); return; }
     updateScentChip('Reading wind + terrain…');
-    var c = map.getCenter(), wx = await scentWeather(c.lat, c.lng);
+    var c = map.getCenter(), wx;
+    if (projHours === 0){ wx = await scentWeather(c.lat, c.lng); }         // live: current conditions
+    else { await ensureForecast(c.lat, c.lng); wx = forecastAt(projTimeMs()); }  // planning: forecast for the picked hour
     if (reqId !== scentReqId) return;
-    var ph = thermalPhase(c.lat, c.lng), OFF = 35, pts = [];
+    var ph = thermalPhase(c.lat, c.lng, projTimeMs()), OFF = 35, pts = [];
     stands.forEach(function(s){
       var dLat = OFF / 111320, dLng = OFF / (111320 * Math.cos(s.lat * Math.PI / 180));
       pts.push([s.lng + dLng, s.lat]); pts.push([s.lng - dLng, s.lat]); pts.push([s.lng, s.lat + dLat]); pts.push([s.lng, s.lat - dLat]);
@@ -8985,10 +8989,64 @@
     this.classList.toggle('active', scentOn);
     if (scentOn){ scentLayer.addTo(map); updateScentCones(); }
     else { scentLayer.clearLayers(); map.removeLayer(scentLayer); var chip = document.getElementById('scentChip'); if (chip) chip.style.display = 'none'; }
+    ensureProjControl();
     try{ localStorage.setItem('oc_scent_on', scentOn ? '1' : '0'); }catch(e){}
   });
   map.on('moveend', function(){ if (!scentOn) return; clearTimeout(_scentTimer); _scentTimer = setTimeout(updateScentCones, 300); });
   try{ if (localStorage.getItem('oc_scent_on') === '1'){ scentOn = true; scentLayer.addTo(map); document.getElementById('scentToggleBtn').classList.add('active'); updateScentCones(); } }catch(e){}
+
+  // ---- Time-of-day PROJECTION — plan tomorrow's sit. A slider scrubs the hourly forecast; the thermal arrows
+  // and scent cones re-project to that hour (thermals from the sun at that time — pure math; wind + cloud from
+  // the Open-Meteo hourly forecast). "Now" = live. This is the pre-hunt planning half; the HUD is the in-stand half.
+  var _fc = null, _projTimer = null;
+  async function ensureForecast(lat, lng){
+    if (_fc && Date.now() - _fc.at < 1800000 && distMeters(lat, lng, _fc.lat, _fc.lng) < 20000) return _fc;
+    try {
+      var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lng +
+        '&hourly=wind_speed_10m,wind_direction_10m,cloud_cover&wind_speed_unit=mph&forecast_days=3&timezone=auto';
+      var res = await fetch(url); if (!res.ok) return _fc;
+      var d = await res.json(); if (!d.hourly || !d.hourly.time) return _fc;
+      _fc = { lat: lat, lng: lng, at: Date.now(), times: d.hourly.time.map(function(t){ return new Date(t).getTime(); }),
+              spd: d.hourly.wind_speed_10m, dir: d.hourly.wind_direction_10m, cloud: d.hourly.cloud_cover };
+    } catch (e){}
+    return _fc;
+  }
+  function forecastAt(ms){
+    if (!_fc) return null;
+    var best = 0, bd = Infinity;
+    for (var i = 0; i < _fc.times.length; i++){ var dd = Math.abs(_fc.times[i] - ms); if (dd < bd){ bd = dd; best = i; } }
+    var deg = _fc.dir[best];
+    return { windMph: Math.round(_fc.spd[best]), windDirDeg: deg, windDir: degreesToCompass(deg), cloudCoverPct: Math.round(_fc.cloud[best]) };
+  }
+  function updateProjLabel(){
+    var el = document.getElementById('projTimeLabel'); if (!el) return;
+    if (projHours === 0){ el.textContent = 'Now (live)'; return; }
+    var d = new Date(projTimeMs()), today = new Date();
+    var days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var h = d.getHours(), h12 = h % 12; if (h12 === 0) h12 = 12; var mm = d.getMinutes() < 10 ? '0' + d.getMinutes() : d.getMinutes();
+    var dd = Math.round((d.setHours(0,0,0,0) - today.setHours(0,0,0,0)) / 86400000);
+    var day = dd === 0 ? 'Today' : (dd === 1 ? 'Tomorrow' : days[new Date(projTimeMs()).getDay()]);
+    el.textContent = day + ' ' + h12 + ':' + mm + (h >= 12 ? ' PM' : ' AM');
+  }
+  function refreshProjection(){ updateProjLabel(); clearTimeout(_projTimer); _projTimer = setTimeout(function(){ if (thermalOn) updateThermalLayer(); if (scentOn) updateScentCones(); }, 250); }
+  function ensureProjControl(){
+    var el = document.getElementById('projTimeCtrl');
+    if (!el){
+      el = document.createElement('div'); el.id = 'projTimeCtrl';
+      el.style.cssText = 'position:absolute;bottom:16px;left:50%;transform:translateX(-50%);z-index:801;background:rgba(20,32,26,.94);color:#dfeee4;border:1px solid #3c6d42;border-radius:12px;padding:9px 14px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-size:12px;display:flex;flex-direction:column;gap:7px;width:min(430px,90vw);';
+      el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
+          '<span style="color:#9db0a3;">Plan the sit &middot; <span id="projTimeLabel" style="color:#f2f7f3;font-weight:700;">Now (live)</span></span>' +
+          '<button id="projNowBtn" style="background:#2E4636;color:#dff0e4;border:1px solid #3c6d42;border-radius:14px;padding:3px 11px;font-size:11px;cursor:pointer;">Now</button>' +
+        '</div>' +
+        '<input type="range" id="projSlider" min="0" max="48" step="1" value="0" style="width:100%;accent-color:#E8823F;cursor:pointer;">';
+      document.getElementById('map').appendChild(el);
+      document.getElementById('projSlider').addEventListener('input', function(){ projHours = parseInt(this.value, 10) || 0; refreshProjection(); });
+      document.getElementById('projNowBtn').addEventListener('click', function(){ projHours = 0; var s = document.getElementById('projSlider'); if (s) s.value = 0; refreshProjection(); });
+    }
+    el.style.display = (thermalOn || scentOn) ? 'flex' : 'none';
+    updateProjLabel();
+  }
+  ensureProjControl();
 
   document.querySelectorAll('.layer-btn[data-layer]').forEach(function(btn){
     btn.addEventListener('click', function(){
