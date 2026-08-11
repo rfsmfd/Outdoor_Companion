@@ -1787,7 +1787,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 227</div>
+    <div id="buildBadge">BUILD 228</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6721,16 +6721,20 @@
     var inSites = sites.filter(function(s){ return typeof s.lat === 'number' && s.propertyId !== prop.id && typeIsInActiveModule(s.type) && pointInPolygon(s.lat, s.lng, prop.boundary); });
     var inHunts = huntEvents.filter(function(h){ return h.module === prop.module && h.propertyId !== prop.id && h.lat != null && pointInPolygon(h.lat, h.lng, prop.boundary); });
     var inObs = observations.filter(function(o){ return o.propertyId !== prop.id && o.lat != null && o.lng != null && typeIsInActiveModule(o.type, true) && pointInPolygon(o.lat, o.lng, prop.boundary); });
-    var total = inSites.length + inHunts.length + inObs.length;
+    // Trails carry no propertyId natively — attribute the ones lying inside the boundary too (founder's call:
+    // anything in the polygon belongs to that farm). A trail counts as "inside" if its midpoint is inside.
+    var inTrails = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ if (t.module !== prop.module || t.propertyId === prop.id || !t.points || !t.points.length) return false; var mid = t.points[Math.floor(t.points.length / 2)]; return mid && pointInPolygon(mid.lat, mid.lng, prop.boundary); });
+    var total = inSites.length + inHunts.length + inObs.length + inTrails.length;
     if (!total) return;
-    var fromOther = inSites.filter(function(s){ return s.propertyId; }).length + inHunts.filter(function(h){ return h.propertyId; }).length + inObs.filter(function(o){ return o.propertyId; }).length;
-    var ok = await showConfirm(total + ' feature' + (total === 1 ? '' : 's') + ' fall inside ' + prop.name + (fromOther ? (' (' + fromOther + ' currently on another property)') : '') + '. Move them all into ' + prop.name + '?');
+    var fromOther = inSites.filter(function(s){ return s.propertyId; }).length + inHunts.filter(function(h){ return h.propertyId; }).length + inObs.filter(function(o){ return o.propertyId; }).length + inTrails.filter(function(t){ return t.propertyId; }).length;
+    var ok = await showConfirm(total + ' feature' + (total === 1 ? '' : 's') + ' fall inside ' + prop.name + (fromOther ? (' (' + fromOther + ' currently on another property)') : '') + '. Attach them all to ' + prop.name + '?');
     if (!ok) return;
     for (var i = 0; i < inSites.length; i++){ inSites[i].propertyId = prop.id; try { await saveSite(inSites[i]); } catch (e) {} }
     for (var k = 0; k < inHunts.length; k++){ inHunts[k].propertyId = prop.id; try { await saveHuntEvent(inHunts[k]); } catch (e) {} }
     for (var m = 0; m < inObs.length; m++){ inObs[m].propertyId = prop.id; try { await saveObservation(inObs[m]); } catch (e) {} }
+    for (var n = 0; n < inTrails.length; n++){ inTrails[n].propertyId = prop.id; try { await saveTrail(inTrails[n]); } catch (e) {} }
     renderPropertySelect(); renderAll();
-    showToast('Moved ' + total + ' into ' + prop.name);
+    showToast('Attached ' + total + ' to ' + prop.name);
   }
 
   // ---------- 🗺 Property Setup wizard — the bundled, guided "do this first" flow ----------
@@ -6746,7 +6750,12 @@
       entries: sites.filter(function(s){ return inProp(s) && s.type === 'access'; }).length,
       feeding: sites.filter(function(s){ return inProp(s) && s.type === 'feeding'; }).length,
       bedding: sites.filter(function(s){ return inProp(s) && s.type === 'bedding'; }).length,
-      paths: (typeof trails !== 'undefined' ? trails : []).filter(function(t){ return t.module === activeModule && t.type === 'access'; }).length
+      paths: (typeof trails !== 'undefined' ? trails : []).filter(function(t){
+        if (t.module !== activeModule || t.type !== 'access' || !t.points || !t.points.length) return false;
+        if (t.propertyId) return t.propertyId === prop.id;         // attributed (via boundary re-home) — count by tag
+        var mid = t.points[Math.floor(t.points.length / 2)];       // not yet attributed — fall back to "is it inside?"
+        return mid && pointInProperty(mid.lat, mid.lng, prop);
+      }).length
     };
   }
   function startAddPin(prop, type){
