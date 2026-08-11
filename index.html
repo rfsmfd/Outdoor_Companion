@@ -1778,7 +1778,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 224</div>
+    <div id="buildBadge">BUILD 225</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6519,6 +6519,7 @@
     activePropertyId = this.value || null;
     renderMarkers();
     renderList();
+    if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries();
     if (activePropertyId){
       var prop = properties.filter(function(p){ return p.id === activePropertyId; })[0];
       if (prop && typeof prop.centerLat === 'number'){
@@ -6551,10 +6552,15 @@
       var siteCount = sites.filter(function(s){ return s.propertyId === p.id; }).length;
       var row = document.createElement('div');
       row.className = 'property-row';
+      var hasBound = !!(p.boundary && p.boundary.length >= 3);
       row.innerHTML =
-        '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + '</div></div>' +
-        '<button class="btn-ghost" data-act="delete-prop" data-id="' + p.id + '" style="color:#D94A2E;">Delete</button>';
+        '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + (hasBound ? ' · boundary set' : ' · square only') + '</div></div>' +
+        '<div style="display:flex;gap:6px;flex-shrink:0;">' +
+          '<button class="btn-ghost" data-act="draw-bound" data-id="' + p.id + '" style="font-size:11px;padding:5px 9px;">' + (hasBound ? '✏️ Edit boundary' : '✏️ Draw boundary') + '</button>' +
+          '<button class="btn-ghost" data-act="delete-prop" data-id="' + p.id + '" style="color:#D94A2E;font-size:11px;padding:5px 9px;">Delete</button>' +
+        '</div>';
       list.appendChild(row);
+      row.querySelector('[data-act="draw-bound"]').addEventListener('click', function(){ drawPropertyBoundary(p); });
       row.querySelector('[data-act="delete-prop"]').addEventListener('click', async function(){
         var sure = confirm('Delete "' + p.name + '"?\n\nSites assigned to it will NOT be deleted — they\'ll just become Unassigned.');
         if (!sure) return;
@@ -6626,6 +6632,76 @@
       try{ await saveObservation(orphanedObs[j]); }catch(e){ console.error('Outdoor Companion: failed to backfill observation', e); }
     }
     showToast(total + ' record' + (total===1?'':'s') + ' reconnected to ' + prop.name);
+  }
+
+  // ---------- Property boundary: draw-pen polygon (replaces the crude pan-zoom box) ----------
+  // Founder's design: trace the real boundary with a draw pen — follow the VGIN parcel line where it's right,
+  // cut your own where it's wrong; doesn't need to be 100%, tighter is better; editable forever (redraw). The
+  // boundary is ORGANIZATIONAL (attribution + "what's mine"), never a wall — the reads still reach past it.
+  function pointInPolygon(lat, lng, poly){
+    var inside = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++){
+      var yi = poly[i][0], xi = poly[i][1], yj = poly[j][0], xj = poly[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+  function pointInProperty(lat, lng, prop){
+    if (prop.boundary && prop.boundary.length >= 3) return pointInPolygon(lat, lng, prop.boundary);
+    if (prop.bounds) return lat >= prop.bounds.south && lat <= prop.bounds.north && lng >= prop.bounds.west && lng <= prop.bounds.east;
+    return false;
+  }
+  var _boundaryDrawer = null, propertyBoundaryLayer = null;
+  function renderPropertyBoundaries(){
+    if (!map.getPane('boundaryPane')){ map.createPane('boundaryPane'); map.getPane('boundaryPane').style.zIndex = 420; map.getPane('boundaryPane').style.pointerEvents = 'none'; }
+    if (!propertyBoundaryLayer) propertyBoundaryLayer = L.layerGroup().addTo(map);
+    propertyBoundaryLayer.clearLayers();
+    (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
+      if (p.module && p.module !== activeModule) return;
+      if (!p.boundary || p.boundary.length < 3) return;
+      var active = (p.id === activePropertyId);
+      L.polygon(p.boundary, { pane: 'boundaryPane', interactive: false, color: active ? '#3F8CFF' : '#6d8aa8', weight: active ? 3 : 1.5, opacity: active ? 0.95 : 0.5, fill: active, fillColor: '#3F8CFF', fillOpacity: active ? 0.05 : 0 }).addTo(propertyBoundaryLayer);
+    });
+  }
+  function drawPropertyBoundary(prop){
+    var mp = document.getElementById('managePropertiesModalBackdrop'); if (mp) mp.classList.remove('show');
+    if (typeof prop.centerLat === 'number') map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15));
+    try { if (typeof getParcelLayer === 'function' && !parcelLayerActive){ getParcelLayer().addTo(map); } } catch (e) {}
+    showToast('Trace ' + prop.name + ' — click each corner, click the first point to close. Follow the parcel line where it\'s right, cut your own where it\'s wrong.');
+    if (_boundaryDrawer){ try { _boundaryDrawer.disable(); } catch (e) {} }
+    _boundaryDrawer = new L.Draw.Polygon(map, { allowIntersection: false, shapeOptions: { color: '#3F8CFF', weight: 3, fillOpacity: 0.08 } });
+    _boundaryDrawer.enable();
+    map.once('draw:created', async function(e){
+      _boundaryDrawer = null;
+      var latlngs = e.layer.getLatLngs()[0];
+      if (!latlngs || latlngs.length < 3){ showToast('Need at least 3 corners — try again from Manage Properties.'); return; }
+      prop.boundary = latlngs.map(function(pt){ return [pt.lat, pt.lng]; });
+      var b = e.layer.getBounds(), c = b.getCenter();
+      prop.bounds = { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() };
+      prop.centerLat = c.lat; prop.centerLng = c.lng;
+      try { await saveProperty(prop); } catch (err) { console.error('Outdoor Companion: failed to save boundary', err); }
+      renderPropertyBoundaries();
+      showToast('Boundary saved for ' + prop.name);
+      await offerRehomeForBoundary(prop);
+    });
+  }
+  // After a boundary is drawn/redrawn, offer to pull every feature inside it INTO this property — including
+  // ones currently tagged to another property (the "split a big box into two farms" case). One confirm.
+  async function offerRehomeForBoundary(prop){
+    if (!prop.boundary || prop.boundary.length < 3) return;
+    var inSites = sites.filter(function(s){ return typeof s.lat === 'number' && s.propertyId !== prop.id && typeIsInActiveModule(s.type) && pointInPolygon(s.lat, s.lng, prop.boundary); });
+    var inHunts = huntEvents.filter(function(h){ return h.module === prop.module && h.propertyId !== prop.id && h.lat != null && pointInPolygon(h.lat, h.lng, prop.boundary); });
+    var inObs = observations.filter(function(o){ return o.propertyId !== prop.id && o.lat != null && o.lng != null && typeIsInActiveModule(o.type, true) && pointInPolygon(o.lat, o.lng, prop.boundary); });
+    var total = inSites.length + inHunts.length + inObs.length;
+    if (!total) return;
+    var fromOther = inSites.filter(function(s){ return s.propertyId; }).length + inHunts.filter(function(h){ return h.propertyId; }).length + inObs.filter(function(o){ return o.propertyId; }).length;
+    var ok = await showConfirm(total + ' feature' + (total === 1 ? '' : 's') + ' fall inside ' + prop.name + (fromOther ? (' (' + fromOther + ' currently on another property)') : '') + '. Move them all into ' + prop.name + '?');
+    if (!ok) return;
+    for (var i = 0; i < inSites.length; i++){ inSites[i].propertyId = prop.id; try { await saveSite(inSites[i]); } catch (e) {} }
+    for (var k = 0; k < inHunts.length; k++){ inHunts[k].propertyId = prop.id; try { await saveHuntEvent(inHunts[k]); } catch (e) {} }
+    for (var m = 0; m < inObs.length; m++){ inObs[m].propertyId = prop.id; try { await saveObservation(inObs[m]); } catch (e) {} }
+    renderPropertySelect(); renderAll();
+    showToast('Moved ' + total + ' into ' + prop.name);
   }
 
   document.getElementById('addPropertyBtn').addEventListener('click', async function(){
@@ -7283,7 +7359,7 @@
     });
   }
 
-  function renderAll(){ renderMarkers(); renderList(); }
+  function renderAll(){ renderMarkers(); renderList(); if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries(); }
 
   // ---------- observation rendering ----------
   // Distinguishes an actual fish species catch (needs weight/length/tag/photo) from
@@ -12279,6 +12355,8 @@
     for (var i=0;i<properties.length;i++){
       var pr = properties[i];
       if (pr.module && pr.module !== activeModule) continue;
+      // Prefer the drawn boundary polygon (tight, unambiguous); fall back to the old bounding box.
+      if (pr.boundary && pr.boundary.length >= 3){ if (typeof pointInPolygon === 'function' && pointInPolygon(lat, lng, pr.boundary)) return pr.id; continue; }
       var b = pr.bounds;
       if (b && lat >= b.south && lat <= b.north && lng >= b.west && lng <= b.east) return pr.id;
     }
