@@ -1669,6 +1669,7 @@
       <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
       <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
       <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt Tonight</button>
+      <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🌤 Plan Ahead — forecast</button>
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
     </div>
@@ -1777,7 +1778,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 222</div>
+    <div id="buildBadge">BUILD 223</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7870,6 +7871,7 @@
     document.getElementById('buckGalleryBtn').style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
   }
 
   // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
@@ -8287,6 +8289,114 @@
     })();
   }
 
+  // ---------- 🌤 Forecast / "Is it a huntable day?" — the FIRST thing the founder checks (wind, then the front) ----------
+  // His own workflow starts here: wind 50 mph = don't bother. Shows the next few days split into the MORNING and
+  // EVENING sits (that's when you hunt), each with wind / temp / pressure-trend / thermal / solunar and a
+  // go-caution-no-go stoplight. Reuses the Open-Meteo forecast we already fetch; pure readout + honest reasons.
+  function forecastLocation(){
+    if (activePropertyId && typeof properties !== 'undefined'){ var p = properties.filter(function(x){ return x.id === activePropertyId; })[0]; if (p && typeof p.centerLat === 'number') return { lat: p.centerLat, lng: p.centerLng }; }
+    var s = (typeof sites !== 'undefined' ? sites : []).filter(function(x){ return typeof x.lat === 'number'; })[0]; if (s) return { lat: s.lat, lng: s.lng };
+    try { var c = map.getCenter(); return { lat: c.lat, lng: c.lng }; } catch (e){ return null; }
+  }
+  async function fetchHuntForecast(lat, lng){
+    var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lng +
+      '&hourly=temperature_2m,wind_speed_10m,wind_direction_10m,surface_pressure,cloud_cover,precipitation' +
+      '&daily=sunrise,sunset&wind_speed_unit=mph&temperature_unit=fahrenheit&timezone=auto&forecast_days=6';
+    var res = await fetch(url); if (!res.ok) return null;
+    var d = await res.json(); if (!d.hourly || !d.daily) return null;
+    var times = d.hourly.time.map(function(t){ return new Date(t).getTime(); });
+    function idxAt(ms){ var best = 0, bd = Infinity; for (var i = 0; i < times.length; i++){ var dd = Math.abs(times[i] - ms); if (dd < bd){ bd = dd; best = i; } } return best; }
+    function H(arr, i){ return (arr && arr[i] != null) ? arr[i] : null; }
+    function pressureTrendAt(i){ var j = Math.max(0, i - 12), a = H(d.hourly.surface_pressure, j), b = H(d.hourly.surface_pressure, i); if (a == null || b == null) return 'steady'; var diff = b - a; return diff >= 1.2 ? 'rising' : (diff <= -1.2 ? 'falling' : 'steady'); }
+    function precipWin(a, z){ var mx = 0; for (var i = 0; i < times.length; i++){ if (times[i] >= a && times[i] <= z){ var p = H(d.hourly.precipitation, i); if (p != null && p > mx) mx = p; } } return mx; }
+    function sit(primeMs, winA, winZ, label, kind){
+      var i = idxAt(primeMs), deg = H(d.hourly.wind_direction_10m, i);
+      var per = getSolunarPeriodsForDay(new Date(primeMs), lat, lng), sol = null;
+      if (per){ if (winsOverlap(winA, winZ, per.major1) || winsOverlap(winA, winZ, per.major2)) sol = 'major'; else if (winsOverlap(winA, winZ, per.minor1) || winsOverlap(winA, winZ, per.minor2)) sol = 'minor'; }
+      return { label: label, kind: kind, timeMs: primeMs, winA: winA, winZ: winZ,
+        windMph: Math.round(H(d.hourly.wind_speed_10m, i) || 0), windDeg: deg, windDir: deg != null ? degreesToCompass(deg) : '—',
+        tempF: Math.round(H(d.hourly.temperature_2m, i) || 0), cloudPct: Math.round(H(d.hourly.cloud_cover, i) || 0),
+        precipMm: precipWin(winA, winZ), pressureTrend: pressureTrendAt(i), thermal: kind === 'am' ? 'rising' : 'falling', solunar: sol };
+    }
+    var days = [];
+    for (var di = 0; di < d.daily.time.length; di++){
+      if (!d.daily.sunrise[di] || !d.daily.sunset[di]) continue;
+      var sr = new Date(d.daily.sunrise[di]).getTime(), ss = new Date(d.daily.sunset[di]).getTime();
+      days.push({ dateMs: sr, sr: sr, ss: ss,
+        am: sit(sr + 2700000, sr - 1800000, sr + 9000000, 'Morning', 'am'),   // prime sunrise+45m; window -30m..+2.5h
+        pm: sit(ss - 2700000, ss - 9000000, ss + 1800000, 'Evening', 'pm') });  // prime sunset-45m; window -2.5h..+30m
+    }
+    return { days: days, lat: lat, lng: lng };
+  }
+  function sitQuality(sit, prevTemp){
+    if (sit.windMph > 22) return { light: 'red', reason: 'Too windy (' + sit.windMph + ' mph) — sit it out.' };
+    var s = 58, notes = [];
+    if (sit.windMph >= 4 && sit.windMph <= 12){ s += 12; notes.push('steady ' + sit.windDir + ' wind'); }
+    else if (sit.windMph > 12){ s -= 8; notes.push('breezy ' + sit.windMph + ' ' + sit.windDir); }
+    else { s -= 2; notes.push('near calm, scent hangs'); }
+    if (sit.precipMm >= 3){ s -= 25; notes.push('heavy rain'); }
+    else if (sit.precipMm >= 0.2){ s += 4; notes.push('light rain, they move after'); }
+    if (sit.pressureTrend === 'rising'){ s += 14; notes.push('pressure rising, behind a front'); }
+    else if (sit.pressureTrend === 'falling'){ s += 4; notes.push('pressure falling, front nearing'); }
+    if (prevTemp != null && (prevTemp - sit.tempF) >= 8){ s += 12; notes.push('big temp drop'); }
+    else if (prevTemp != null && (sit.tempF - prevTemp) >= 10){ s -= 8; notes.push('warming up'); }
+    if (sit.cloudPct >= 70){ s += 4; notes.push('overcast, longer movement'); }
+    if (sit.solunar){ s += 8; notes.push('⭐ ' + sit.solunar + ' feed'); }
+    return { light: s >= 72 ? 'green' : (s >= 50 ? 'yellow' : 'red'), reason: notes.slice(0, 3).join(', ') };
+  }
+  function fcLight(l){ var c = l === 'green' ? '#4CAF50' : (l === 'yellow' ? '#E8B04B' : '#D94A2E'); return '<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:' + c + ';box-shadow:0 0 5px ' + c + ',0 0 0 1px rgba(0,0,0,.3);vertical-align:middle;"></span>'; }
+  function fcDayLabel(ms){ var dt = new Date(ms), t0 = new Date(); t0.setHours(0,0,0,0); var dd = Math.round((new Date(ms).setHours(0,0,0,0) - t0.getTime()) / 86400000); var wd = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; return dd === 0 ? 'Today' : (dd === 1 ? 'Tomorrow' : wd[dt.getDay()] + ' ' + (dt.getMonth()+1) + '/' + dt.getDate()); }
+  async function showForecastPanel(){
+    var loc = forecastLocation();
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:560px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><div style="font-weight:800;font-size:16px;">🌤 Plan ahead — is it a huntable day?</div><button class="fc-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div id="fcBody" style="font-size:12.5px;color:#9db0a3;padding:14px 0;">Reading the forecast…</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.fc-close').addEventListener('click', close);
+    if (!loc){ document.getElementById('fcBody').textContent = 'Add a property or a site first so I know where to read the forecast.'; return; }
+    var fc = null; try { fc = await fetchHuntForecast(loc.lat, loc.lng); } catch (e){}
+    if (!back.parentNode) return;
+    var body = document.getElementById('fcBody'); if (!body) return;
+    if (!fc || !fc.days.length){ body.innerHTML = '<div style="color:#e6b5a8;">Couldn\'t reach the forecast (needs a connection). Try again with signal.</div>'; return; }
+    var now = Date.now(), nextSit = null;
+    for (var i = 0; i < fc.days.length && !nextSit; i++){
+      if (fc.days[i].am.timeMs + 3600000 > now) nextSit = fc.days[i].am;
+      else if (fc.days[i].pm.timeMs + 3600000 > now) nextSit = fc.days[i].pm;
+    }
+    var moon = getMoonPhase(new Date()), html = '';
+    if (nextSit){
+      var nq = sitQuality(nextSit, null), word = nq.light === 'green' ? 'Good to go' : (nq.light === 'yellow' ? 'Marginal' : 'Tough — sit it out');
+      html += '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:12px;">' +
+        '<div style="font-size:12px;color:#9db0a3;">Next sit — ' + fcDayLabel(nextSit.timeMs) + ' ' + nextSit.label.toLowerCase() + '</div>' +
+        '<div style="font-size:18px;font-weight:800;margin:3px 0;">' + fcLight(nq.light) + ' ' + word + '</div>' +
+        '<div style="font-size:12px;color:#cfe0d6;">' + nextSit.windDir + ' ' + nextSit.windMph + ' mph · ' + nextSit.tempF + '° · ' + (nq.reason || '') + '</div>' +
+        '<div style="font-size:11px;color:#9db0a3;margin-top:4px;">🌙 ' + (moon && moon.name ? moon.name : '') + ' (' + (moon ? moon.illumination : 0) + '% lit)</div>' +
+      '</div>';
+    }
+    function sitCell(st, prevTemp){
+      var q = sitQuality(st, prevTemp), tr = st.pressureTrend === 'rising' ? '↑' : (st.pressureTrend === 'falling' ? '↓' : '→');
+      var rain = st.precipMm >= 0.2 ? (' · 🌧 ' + (st.precipMm >= 3 ? 'heavy' : 'light')) : '';
+      return '<div style="flex:1;min-width:0;background:#1E2B23;border:1px solid #3c4d42;border-radius:9px;padding:9px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:11px;color:#9db0a3;">' + (st.kind === 'am' ? '🌅 AM ' : '🌇 PM ') + hbClock(st.timeMs) + '</span>' + fcLight(q.light) + '</div>' +
+        '<div style="font-size:13px;color:#f2f7f3;margin-top:3px;">' + st.windDir + ' ' + st.windMph + ' mph</div>' +
+        '<div style="font-size:11px;color:#9db0a3;margin-top:2px;">' + st.tempF + '° · ' + tr + ' press · ' + st.thermal + ' thermal' + rain + (st.solunar ? ' · ⭐' : '') + '</div>' +
+        '<div style="font-size:10.5px;color:#7f8c86;margin-top:3px;line-height:1.35;">' + (q.reason || '') + '</div>' +
+      '</div>';
+    }
+    for (var di = 0; di < fc.days.length; di++){
+      var day = fc.days[di], prev = di > 0 ? fc.days[di-1] : null;
+      html += '<div style="font-weight:700;font-size:12px;margin:10px 0 5px;">' + fcDayLabel(day.dateMs) + '</div>' +
+        '<div style="display:flex;gap:8px;">' + sitCell(day.am, prev ? prev.am.tempF : null) + sitCell(day.pm, prev ? prev.pm.tempF : null) + '</div>';
+    }
+    html += '<div style="font-size:9.5px;color:#6f8377;margin-top:12px;line-height:1.45;">Wind is the first gate, then the front — rising pressure + a temp drop = deer on their feet. Forecast confidence fades a few days out, and wind is a regional read (your stand may differ). The 🚦 is a starting read, not a promise.</div>';
+    body.innerHTML = html;
+  }
+
   // ---------- Huntability Ship 3b: front-screen "on their feet" alert ----------
   // Brings the killable-now read TO you instead of making you dig into each buck. On app open and after a
   // tagging session on the board, any buck whose recent movement has shifted into daylight (state
@@ -8559,6 +8669,7 @@
   }
 
   document.getElementById('huntTodayBtn').addEventListener('click', showHuntTodayPanel);
+  document.getElementById('forecastBtn').addEventListener('click', showForecastPanel);
   document.getElementById('buckGalleryBtn').addEventListener('click', function(){
     resetBuckProfileForm();
     renderBuckProfilesList();
