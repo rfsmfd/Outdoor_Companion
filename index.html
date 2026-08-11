@@ -1768,6 +1768,7 @@
       <input type="range" id="contourOpacitySlider" min="10" max="100" value="45" title="Contour line transparency" style="display:none;width:70px;vertical-align:middle;margin:0 6px;accent-color:#E8823F;cursor:pointer;" />
       <button class="layer-btn" id="hydroToggleBtn" title="Streams &amp; drainage lines (USGS National Hydrography Dataset) over any layer">💧 Streams</button>
       <button class="layer-btn" id="thermalToggleBtn" title="Thermal drift — which way your scent drains at each spot, from the LiDAR slope, flipped by time of day (rising uphill in the morning, falling downhill in the evening)">🌡 Thermals</button>
+      <button class="layer-btn" id="scentToggleBtn" title="Scent cones — where your scent blows from each hunt spot right now (wind + thermals combined). A wider cone = swirlier, less certain. Red = where a deer would wind you.">🌬 Scent cones</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
@@ -1775,7 +1776,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 217</div>
+    <div id="buildBadge">BUILD 218</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3321,6 +3322,7 @@
         tempF: Math.round(data.current.temperature_2m),
         windMph: Math.round(data.current.wind_speed_10m),
         windDir: windDirCompass,
+        windDirDeg: windDirDeg, // raw meteorological degrees (direction wind comes FROM) — for scent-vector math
         windDirDisplay: windDirDisplay, // includes "(shifting from X)" when meaningful
         pressureHpa: pressureHpa,
         pressureInHg: hpaToInHg(data.current.surface_pressure),
@@ -8883,6 +8885,110 @@
   });
   map.on('moveend', function(){ if (!thermalOn) return; clearTimeout(_thermalTimer); _thermalTimer = setTimeout(updateThermalLayer, 250); });
   try{ if (localStorage.getItem('oc_thermal_on') === '1'){ thermalOn = true; thermalLayer.addTo(map); document.getElementById('thermalToggleBtn').classList.add('active'); updateThermalLayer(); } }catch(e){}
+
+  // 🌬 Scent cones — the HuntStand-style "where does my scent blow from this stand," but ours COMBINES wind
+  // with the local thermal (from the LiDAR slope) into one honest read. Your scent travels the way the air
+  // moves: downwind + down/up-slope by time of day. We add the two as a vector — physics does the handoff
+  // (light wind → thermal-driven, strong wind → wind-driven, in-between → the true diagonal). Cone WIDTH =
+  // confidence: tight when one force cleanly dominates, wide when they fight (honest "it's swirling"). Drawn
+  // at every hunt spot (Tree Stand or 🏹-flagged) so it feeds the Where-to-Hunt-Tonight call — red is where a
+  // deer downwind would smell you. Direction/thermal are terrain+sun math; wind needs signal (degrades to
+  // thermal-only offline). This is the map layer; Hunt Mode later points the same cone at your active stand.
+  map.createPane('scentPane'); map.getPane('scentPane').style.zIndex = 455; map.getPane('scentPane').style.pointerEvents = 'none';
+  var scentLayer = L.layerGroup();
+  var scentOn = false, scentReqId = 0, _scentTimer = null, _scentWx = null, _scentWxAt = 0;
+  async function scentWeather(lat, lng){
+    if (_scentWx && Date.now() - _scentWxAt < 600000) return _scentWx;   // wind is regional; a 10-min cache is plenty
+    var w = await fetchCurrentWeather(lat, lng);
+    if (w){ _scentWx = w; _scentWxAt = Date.now(); }
+    return w;
+  }
+  function scentProjLL(lat, lng, bearingDeg, distM){
+    var b = bearingDeg * Math.PI / 180;
+    return [lat + (distM * Math.cos(b)) / 111320, lng + (distM * Math.sin(b)) / (111320 * Math.cos(lat * Math.PI / 180))];
+  }
+  function scentConePoly(lat, lng, bearing, halfDeg, R){
+    var pts = [[lat, lng]];
+    for (var i = 0; i <= 14; i++){ pts.push(scentProjLL(lat, lng, bearing - halfDeg + (2 * halfDeg) * (i / 14), R)); }
+    pts.push([lat, lng]); return pts;
+  }
+  function scentRingPoly(lat, lng, R){ var pts = []; for (var i = 0; i <= 20; i++){ pts.push(scentProjLL(lat, lng, 360 * i / 20, R)); } return pts; }
+  function updateScentChip(text){
+    var el = document.getElementById('scentChip');
+    if (!el){ el = document.createElement('div'); el.id = 'scentChip';
+      el.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);z-index:800;background:rgba(46,26,22,.92);color:#f2ddd5;border:1px solid #7a3a30;border-radius:20px;padding:5px 13px;font-size:12px;font-weight:600;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4);white-space:nowrap;';
+      document.getElementById('map').appendChild(el); }
+    el.style.top = (typeof thermalOn !== 'undefined' && thermalOn) ? '40px' : '8px';  // sit below the thermal chip if both on
+    el.textContent = '🌬 ' + text;
+    el.style.display = scentOn ? 'block' : 'none';
+  }
+  async function updateScentCones(){
+    if (!scentOn) return;
+    scentLayer.clearLayers();
+    if (map.getZoom() < THERMAL_MIN_ZOOM){ updateScentChip('Zoom in to see scent cones'); return; }
+    var reqId = ++scentReqId, b = map.getBounds();
+    var stands = sites.filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && b.contains([s.lat, s.lng]); });
+    if (!stands.length){ updateScentChip('No hunt spots in view'); return; }
+    updateScentChip('Reading wind + terrain…');
+    var c = map.getCenter(), wx = await scentWeather(c.lat, c.lng);
+    if (reqId !== scentReqId) return;
+    var ph = thermalPhase(c.lat, c.lng), OFF = 35, pts = [];
+    stands.forEach(function(s){
+      var dLat = OFF / 111320, dLng = OFF / (111320 * Math.cos(s.lat * Math.PI / 180));
+      pts.push([s.lng + dLng, s.lat]); pts.push([s.lng - dLng, s.lat]); pts.push([s.lng, s.lat + dLat]); pts.push([s.lng, s.lat - dLat]);
+    });
+    var elev = null;
+    try {
+      var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: pts, spatialReference: { wkid: 4326 } })) +
+        '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+      var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+      var data = await resp.json();
+      if (data.samples) elev = data.samples.map(function(s){ return (s && s.value != null) ? parseFloat(s.value) : NaN; });
+    } catch (e){}
+    if (reqId !== scentReqId) return;
+    var windMph = wx ? wx.windMph : 0, windFromDeg = (wx && wx.windDirDeg != null) ? wx.windDirDeg : null, cloud = (wx && wx.cloudCoverPct != null) ? wx.cloudCoverPct : 40, D2R = Math.PI / 180;
+    stands.forEach(function(s, i){
+      var thermMph = 0, thermBearing = 0;
+      if (elev){
+        var zE = elev[i*4], zW = elev[i*4+1], zN = elev[i*4+2], zS = elev[i*4+3];
+        if ([zE, zW, zN, zS].every(isFinite)){
+          var dzdx = (zE - zW) / (2 * OFF), dzdy = (zN - zS) / (2 * OFF);
+          var slopeDeg = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
+          var vE = ph.up === true ? dzdx : -dzdx, vN = ph.up === true ? dzdy : -dzdy;   // morning uphill, else downhill
+          thermBearing = (Math.atan2(vE, vN) * 180 / Math.PI + 360) % 360;
+          var slopeF = Math.min(1, slopeDeg / 6);
+          var phaseF = ph.up === null ? 0.25 : (ph.label.indexOf('Night') >= 0 ? 0.6 : 1.0);
+          var skyF = 1 - 0.6 * (cloud / 100);   // clear skies drive strong thermals; overcast mutes them
+          thermMph = slopeF * phaseF * skyF * 6; // express thermal push in mph-equivalent so it blends with wind
+        }
+      }
+      var windScent = (windFromDeg != null) ? (windFromDeg + 180) % 360 : null;  // scent travels DOWNWIND
+      var re = 0, rn = 0, total = 0;
+      if (windScent != null && windMph > 0){ re += windMph * Math.sin(windScent * D2R); rn += windMph * Math.cos(windScent * D2R); total += windMph; }
+      if (thermMph > 0){ re += thermMph * Math.sin(thermBearing * D2R); rn += thermMph * Math.cos(thermBearing * D2R); total += thermMph; }
+      var poly;
+      if (total < 1){ poly = scentRingPoly(s.lat, s.lng, 85); }   // dead calm, no thermal — scent just hangs around you
+      else {
+        var scentBearing = (Math.atan2(re, rn) * 180 / Math.PI + 360) % 360;
+        var coherence = Math.hypot(re, rn) / total;              // 1 = wind & thermal agree (tight), 0 = they fight (wide)
+        var half = 14 + (1 - coherence) * 34;
+        var R = Math.max(120, Math.min(340, 110 + total * 9));
+        poly = scentConePoly(s.lat, s.lng, scentBearing, half, R);
+      }
+      L.polygon(poly, { pane: 'scentPane', color: '#D94A2E', weight: 1, opacity: 0.5, fillColor: '#D94A2E', fillOpacity: 0.15, interactive: false }).addTo(scentLayer);
+    });
+    var wtxt = wx ? (wx.windDir + ' ' + windMph + ' mph') : 'wind offline (thermal only)';
+    updateScentChip(stands.length + ' hunt spot' + (stands.length === 1 ? '' : 's') + ' · ' + wtxt + ' · ' + ph.label.split('—')[0].trim().toLowerCase());
+  }
+  document.getElementById('scentToggleBtn').addEventListener('click', function(){
+    scentOn = !scentOn;
+    this.classList.toggle('active', scentOn);
+    if (scentOn){ scentLayer.addTo(map); updateScentCones(); }
+    else { scentLayer.clearLayers(); map.removeLayer(scentLayer); var chip = document.getElementById('scentChip'); if (chip) chip.style.display = 'none'; }
+    try{ localStorage.setItem('oc_scent_on', scentOn ? '1' : '0'); }catch(e){}
+  });
+  map.on('moveend', function(){ if (!scentOn) return; clearTimeout(_scentTimer); _scentTimer = setTimeout(updateScentCones, 300); });
+  try{ if (localStorage.getItem('oc_scent_on') === '1'){ scentOn = true; scentLayer.addTo(map); document.getElementById('scentToggleBtn').classList.add('active'); updateScentCones(); } }catch(e){}
 
   document.querySelectorAll('.layer-btn[data-layer]').forEach(function(btn){
     btn.addEventListener('click', function(){
