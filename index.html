@@ -1767,6 +1767,7 @@
       </select>
       <input type="range" id="contourOpacitySlider" min="10" max="100" value="45" title="Contour line transparency" style="display:none;width:70px;vertical-align:middle;margin:0 6px;accent-color:#E8823F;cursor:pointer;" />
       <button class="layer-btn" id="hydroToggleBtn" title="Streams &amp; drainage lines (USGS National Hydrography Dataset) over any layer">💧 Streams</button>
+      <button class="layer-btn" id="thermalToggleBtn" title="Thermal drift — which way your scent drains at each spot, from the LiDAR slope, flipped by time of day (rising uphill in the morning, falling downhill in the evening)">🌡 Thermals</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
@@ -1774,7 +1775,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 216</div>
+    <div id="buildBadge">BUILD 217</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8796,6 +8797,92 @@
   try{
     if (localStorage.getItem('oc_hydro_on') === '1'){ hydroOn = true; hydroLayer.addTo(map); document.getElementById('hydroToggleBtn').classList.add('active'); raiseOverlaysAndMarkers(); }
   }catch(e){}
+
+  // 🌡 Thermal drift — the direction your SCENT drains at each spot, computed from the LiDAR slope and flipped
+  // by time of day. Thermals aren't wind: warm air rides UP-slope through the morning; cool air sinks DOWN-slope
+  // (and down every draw) in the evening/night. DIRECTION is pure local terrain math — no weather feed, works
+  // offline. Strength/confidence (cloud, wind, humidity) belongs to Hunt Mode, next. Validated on real 3DEP
+  // LiDAR: even "flat" coastal-plain ground carries ~3° median slope — enough to map. Arrows are PER-SPOT on
+  // purpose: a property drains toward several low lines, not one uniform way (Jenkins measured R=0.08).
+  map.createPane('thermalPane'); map.getPane('thermalPane').style.zIndex = 460; map.getPane('thermalPane').style.pointerEvents = 'none';
+  var thermalLayer = L.layerGroup();
+  var thermalOn = false, THERMAL_MIN_ZOOM = 14, thermalReqId = 0, _thermalTimer = null;
+
+  // Which way thermals move right now, from the sun. up=true → scent rides UP-slope (morning); false → DOWN-slope
+  // (evening/night pooling); null → neutral midday when wind, not thermals, governs.
+  function thermalPhase(lat, lng){
+    var now = new Date(), H = 3600000;
+    if (typeof SunCalc === 'undefined') return { up:false, label:'Falling — draining downhill' };
+    var t = SunCalc.getTimes(now, lat, lng), m = now.getTime(), sr = t.sunrise.getTime(), ss = t.sunset.getTime();
+    if (m >= sr - 0.25*H && m < sr + 2.5*H)  return { up:true,  label:'Morning — rising, riding uphill' };
+    if (m >= ss - 1.75*H && m < ss + 1.5*H)  return { up:false, label:'Evening — falling, draining downhill' };
+    if (m >= sr + 2.5*H && m < ss - 1.75*H)  return { up:null,  label:'Midday — thermals weak, play the wind' };
+    return { up:false, label:'Night — cold air pooling in the lows' };
+  }
+  function updateThermalChip(text){
+    var el = document.getElementById('thermalChip');
+    if (!el){ el = document.createElement('div'); el.id = 'thermalChip';
+      el.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:20px;padding:5px 13px;font-size:12px;font-weight:600;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4);white-space:nowrap;';
+      document.getElementById('map').appendChild(el); }
+    el.textContent = '🌡 ' + text;
+    el.style.display = thermalOn ? 'block' : 'none';
+  }
+  async function updateThermalLayer(){
+    if (!thermalOn) return;
+    thermalLayer.clearLayers();
+    if (map.getZoom() < THERMAL_MIN_ZOOM){ updateThermalChip('Zoom in to read thermals'); return; }
+    var reqId = ++thermalReqId, b = map.getBounds().pad(-0.02), c = map.getCenter(), ph = thermalPhase(c.lat, c.lng);
+    updateThermalChip('Reading terrain…');
+    var COLS = 20, ROWS = 14;
+    var minLat = b.getSouth(), maxLat = b.getNorth(), minLng = b.getWest(), maxLng = b.getEast();
+    var mPerLat = 111320, mPerLng = 111320 * Math.cos((minLat + maxLat) / 2 * Math.PI / 180);
+    var dxM = (maxLng - minLng) * mPerLng / (COLS - 1), dyM = (maxLat - minLat) * mPerLat / (ROWS - 1);
+    var pts = [];
+    for (var r = 0; r < ROWS; r++){ var la = maxLat - (maxLat - minLat) * (r / (ROWS - 1)); for (var cc = 0; cc < COLS; cc++){ pts.push([minLng + (maxLng - minLng) * (cc / (COLS - 1)), la]); } }
+    var elev;
+    try {
+      var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: pts, spatialReference: { wkid: 4326 } })) +
+        '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+      var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+      var data = await resp.json();
+      if (!data.samples) throw new Error('no samples');
+      elev = data.samples.map(function(s){ return (s && s.value != null) ? parseFloat(s.value) : NaN; });
+    } catch (e){ if (reqId === thermalReqId) updateThermalChip('Terrain data unavailable here'); return; }
+    if (reqId !== thermalReqId) return; // a newer pan/zoom superseded this fetch
+    function E(rr, cc){ return elev[rr * COLS + cc]; }
+    var color = ph.up === true ? '#E8B04B' : (ph.up === null ? '#9db0a3' : '#5FB0C9');
+    var drew = 0;
+    for (var rr = 1; rr < ROWS - 1; rr++){
+      for (var cc2 = 1; cc2 < COLS - 1; cc2++){
+        var zc = E(rr, cc2), zE = E(rr, cc2 + 1), zW = E(rr, cc2 - 1), zN = E(rr - 1, cc2), zS = E(rr + 1, cc2);
+        if (!([zc, zE, zW, zN, zS].every(isFinite))) continue;
+        var dzdx = (zE - zW) / (2 * dxM), dzdy = (zN - zS) / (2 * dyM);
+        var slopeDeg = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
+        if (slopeDeg < 0.4) continue; // sub-noise flat — no reliable thermal to draw here
+        var vE = ph.up === true ? dzdx : -dzdx, vN = ph.up === true ? dzdy : -dzdy; // morning uphill, else downhill
+        var bearing = (Math.atan2(vE, vN) * 180 / Math.PI + 360) % 360;
+        var la2 = maxLat - (maxLat - minLat) * (rr / (ROWS - 1)), ln2 = minLng + (maxLng - minLng) * (cc2 / (COLS - 1));
+        var strong = Math.min(1, slopeDeg / 6), op = (0.35 + 0.5 * strong).toFixed(2), sz = Math.round(18 + 14 * strong), mid = sz / 2;
+        var html = '<div style="transform:rotate(' + Math.round(bearing) + 'deg);opacity:' + op + ';">' +
+          '<svg width="' + sz + '" height="' + sz + '" viewBox="0 0 ' + sz + ' ' + sz + '">' +
+            '<line x1="' + mid + '" y1="' + (sz - 3) + '" x2="' + mid + '" y2="5" stroke="' + color + '" stroke-width="2.4"/>' +
+            '<polygon points="' + mid + ',2 ' + (mid - 4) + ',9 ' + (mid + 4) + ',9" fill="' + color + '"/>' +
+          '</svg></div>';
+        L.marker([la2, ln2], { icon: L.divIcon({ className: '', html: html, iconSize: [sz, sz], iconAnchor: [mid, mid] }), pane: 'thermalPane', interactive: false, keyboard: false }).addTo(thermalLayer);
+        drew++;
+      }
+    }
+    updateThermalChip(drew ? ph.label : 'Too flat here to read thermals');
+  }
+  document.getElementById('thermalToggleBtn').addEventListener('click', function(){
+    thermalOn = !thermalOn;
+    this.classList.toggle('active', thermalOn);
+    if (thermalOn){ thermalLayer.addTo(map); updateThermalLayer(); }
+    else { thermalLayer.clearLayers(); map.removeLayer(thermalLayer); var chip = document.getElementById('thermalChip'); if (chip) chip.style.display = 'none'; }
+    try{ localStorage.setItem('oc_thermal_on', thermalOn ? '1' : '0'); }catch(e){}
+  });
+  map.on('moveend', function(){ if (!thermalOn) return; clearTimeout(_thermalTimer); _thermalTimer = setTimeout(updateThermalLayer, 250); });
+  try{ if (localStorage.getItem('oc_thermal_on') === '1'){ thermalOn = true; thermalLayer.addTo(map); document.getElementById('thermalToggleBtn').classList.add('active'); updateThermalLayer(); } }catch(e){}
 
   document.querySelectorAll('.layer-btn[data-layer]').forEach(function(btn){
     btn.addEventListener('click', function(){
