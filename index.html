@@ -1777,7 +1777,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 221</div>
+    <div id="buildBadge">BUILD 222</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8243,14 +8243,15 @@
     // Per-spot SCENT check — does tonight's wind+thermal blow your scent TOWARD the deer at this stand (a pass,
     // no matter how hot it is) or away (green light)? Deer direction = toward the camera(s) it borrows activity
     // from; a stand on its own camera just shows the scent direction. Async (needs wind + a terrain sample).
+    function scentLight(c){ return '<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:' + c + ';margin-right:7px;vertical-align:middle;box-shadow:0 0 5px ' + c + ',0 0 0 1px rgba(0,0,0,.3);"></span>'; }
     function scentVerdict(sc, deerDir){
-      if (sc.calm) return '💨 <span style="color:#E8B04B;">Dead calm</span> — scent hanging; a circling deer can wind you.';
+      if (sc.calm) return scentLight('#E8B04B') + '<span style="color:#E8B04B;">Dead calm</span> — scent hanging; a circling deer can wind you.';
       var to = scentCompass16(sc.bearing), swirl = sc.coherence < 0.55 ? ' <span style="color:#9db0a3;">· swirly, trust your nose</span>' : '';
-      if (deerDir == null) return '💨 Scent blows <b>' + to + '</b>' + swirl;
+      if (deerDir == null) return scentLight('#7f8c86') + 'Scent blows <b>' + to + '</b>' + swirl;
       var d = Math.abs(sc.bearing - deerDir) % 360; if (d > 180) d = 360 - d;
-      if (d < 60) return '💨 <span style="color:#e6857a;">Scent blows toward your deer (' + to + ') — risky</span>' + swirl;
-      if (d > 120) return '💨 <span style="color:#a7d89a;">Scent blows away from your deer (' + to + ') — good</span>' + swirl;
-      return '💨 <span style="color:#E8B04B;">Crosswind — quarters past your deer (' + to + ')</span>' + swirl;
+      if (d < 60) return scentLight('#D94A2E') + '<span style="color:#e6857a;">Scent toward your deer (' + to + ') — risky</span>' + swirl;
+      if (d > 120) return scentLight('#4CAF50') + '<span style="color:#a7d89a;">Scent away from your deer (' + to + ') — good</span>' + swirl;
+      return scentLight('#E8B04B') + '<span style="color:#E8B04B;">Crosswind — quarters past (' + to + ')</span>' + swirl;
     }
     (async function fillScentLines(){
       var hs = hunt.filter(function(x){ return x.hasData; });
