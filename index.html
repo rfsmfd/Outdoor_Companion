@@ -1787,7 +1787,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 226</div>
+    <div id="buildBadge">BUILD 227</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6581,15 +6581,15 @@
       var siteCount = sites.filter(function(s){ return s.propertyId === p.id; }).length;
       var row = document.createElement('div');
       row.className = 'property-row';
-      var hasBound = !!(p.boundary && p.boundary.length >= 3);
+      var stx = propSetupStatus(p), doneN = (stx.boundary?1:0) + (stx.stands>0?1:0) + (stx.entries>0?1:0) + (stx.paths>0?1:0) + (stx.feeding>0?1:0) + (stx.bedding>0?1:0);
       row.innerHTML =
-        '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + (hasBound ? ' · boundary set' : ' · square only') + '</div></div>' +
+        '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + ' · setup ' + doneN + '/6</div></div>' +
         '<div style="display:flex;gap:6px;flex-shrink:0;">' +
-          '<button class="btn-ghost" data-act="draw-bound" data-id="' + p.id + '" style="font-size:11px;padding:5px 9px;">' + (hasBound ? '✏️ Edit boundary' : '✏️ Draw boundary') + '</button>' +
+          '<button class="btn-ghost" data-act="setup-prop" data-id="' + p.id + '" style="font-size:11px;padding:5px 10px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;">🗺 Set up</button>' +
           '<button class="btn-ghost" data-act="delete-prop" data-id="' + p.id + '" style="color:#D94A2E;font-size:11px;padding:5px 9px;">Delete</button>' +
         '</div>';
       list.appendChild(row);
-      row.querySelector('[data-act="draw-bound"]').addEventListener('click', function(){ drawPropertyBoundary(p); });
+      row.querySelector('[data-act="setup-prop"]').addEventListener('click', function(){ document.getElementById('managePropertiesModalBackdrop').classList.remove('show'); showPropertySetup(p); });
       row.querySelector('[data-act="delete-prop"]').addEventListener('click', async function(){
         var sure = confirm('Delete "' + p.name + '"?\n\nSites assigned to it will NOT be deleted — they\'ll just become Unassigned.');
         if (!sure) return;
@@ -6733,15 +6733,97 @@
     showToast('Moved ' + total + ' into ' + prop.name);
   }
 
+  // ---------- 🗺 Property Setup wizard — the bundled, guided "do this first" flow ----------
+  // Founder's requirement: Step 1 on first use and whenever you add a property; be honest it takes a few minutes
+  // but pays big dividends, and that some features can't run without it. Each step has a ? HOW help (a new user
+  // who doesn't get the process is sunk). Orchestrates tools we already built + tracks progress derived from the
+  // data, so you can stop and resume. Everything stays editable.
+  function propSetupStatus(prop){
+    var inProp = function(s){ return s.propertyId === prop.id; };
+    return {
+      boundary: !!(prop.boundary && prop.boundary.length >= 3),
+      stands: sites.filter(function(s){ return inProp(s) && (s.type === 'stand' || s.type === 'camera'); }).length,
+      entries: sites.filter(function(s){ return inProp(s) && s.type === 'access'; }).length,
+      feeding: sites.filter(function(s){ return inProp(s) && s.type === 'feeding'; }).length,
+      bedding: sites.filter(function(s){ return inProp(s) && s.type === 'bedding'; }).length,
+      paths: (typeof trails !== 'undefined' ? trails : []).filter(function(t){ return t.module === activeModule && t.type === 'access'; }).length
+    };
+  }
+  function startAddPin(prop, type){
+    activePropertyId = prop.id; var ps = document.getElementById('propertySelect'); if (ps) ps.value = prop.id;
+    renderMarkers(); renderList(); if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries();
+    pendingSiteType = type;
+    var addBtn = document.getElementById('addSiteBtn');
+    if (addBtn && !addBtn.classList.contains('active')) addBtn.click();
+    var lbl = getActiveTypes()[type] ? getActiveTypes()[type].label : type;
+    showToast('Tap the spot on the map for a ' + lbl + ' on ' + prop.name + ' — repeat for more.');
+  }
+  function showPropertySetup(prop){
+    var st = propSetupStatus(prop);
+    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100006;background:rgba(0,0,0,.62);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div'); card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:540px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    function launch(fn){ close(); setTimeout(fn, 60); }
+    var steps = [
+      { done: st.boundary, icon:'🗺', title:'1. Draw the boundary', sub: st.boundary ? 'Boundary set' : 'So the app knows what\'s yours', btn: st.boundary ? 'Redraw' : 'Draw', act:'boundary',
+        help:'Tap <b>Draw</b> — the map flies to your farm with the parcel lines showing. Click each <b>corner</b> (follow the parcel line where it\'s right, cut your own where it\'s wrong), then click your <b>first point</b> to close it. If a line\'s off, just Redraw — it\'s editable forever.' },
+      { done: st.stands>0, icon:'📥', title:'2. Import / add stands & cameras', sub: st.stands>0 ? (st.stands+' placed') : 'Bring in what you already have', btn:'Import', act:'import',
+        help:'Tap <b>Import</b> → pick a file exported from another app: <b>KML, KMZ, GPX, GeoJSON, or CSV</b> (onX, HuntStand, Google Earth, Garmin). HuntStand has no exporter — use the ChatGPT-built browser script to pull your stands to a CSV first (ask me if you need it again). Then pick the type and Import selected.<br>No file? Add them by hand: <b>+ Add Site → Tree Stand / Trail Camera</b>.' },
+      { done: st.entries>0, icon:'🅿', title:'3. Parking / entry points', sub: st.entries>0 ? (st.entries+' placed') : 'Where you start — powers walk-in routing', btn:'Add', act:'entry',
+        help:'Tap <b>Add</b>, then tap the exact spot where you <b>park / step in</b>. It\'s preset to Parking/Access — just name it (e.g. "North gate — walk the ditch") and Save. Repeat for each entry. These are what the walk-in planner routes from.' },
+      { done: st.paths>0, icon:'🥾', title:'4. Access paths', sub: st.paths>0 ? (st.paths+' access trails') : 'Draw the lanes you walk in on', btn:'Draw', act:'path',
+        help:'Tap <b>Draw</b>, click along the lane on the aerial bend by bend, and <b>double-click to finish</b>. Name it (defaults to Access Trail). <b>Already imported your HuntStand trails? Those are done</b> — this is only for lanes you didn\'t import.' },
+      { done: st.feeding>0, icon:'🌾', title:'5. Feeding areas', sub: st.feeding>0 ? (st.feeding+' placed') : 'Fields/food — drives morning-crossing warnings', btn:'Add', act:'feeding',
+        help:'Tap <b>Add</b>, then tap your field or food plot (preset to Feeding). Name it and note what\'s planted if you like — food changes year to year. Mark the edges you actually hunt.' },
+      { done: st.bedding>0, icon:'🛏', title:'6. Bedding areas', sub: st.bedding>0 ? (st.bedding+' placed') : 'So routes avoid blowing them out', btn:'Add', act:'bedding',
+        help:'Tap <b>Add</b>, then tap the bedding you <b>KNOW</b> (preset to Bedding). These keep your routes and scent <b>away</b> from bedding — you\'re not hunting into them. Your knowledge beats any map here.' }
+    ];
+    var doneCount = steps.filter(function(s){ return s.done; }).length;
+    var rowsHtml = steps.map(function(s, i){
+      return '<div style="border:1px solid #3c4d42;border-radius:9px;margin-bottom:8px;background:#1E2B23;overflow:hidden;">' +
+        '<div style="display:flex;align-items:center;gap:9px;padding:10px;">' +
+          '<div style="font-size:18px;flex:0 0 auto;width:22px;text-align:center;">' + (s.done ? '<span style="color:#4CAF50;">✓</span>' : s.icon) + '</div>' +
+          '<div style="flex:1;min-width:0;"><div style="font-weight:700;font-size:13px;">' + s.title + '</div><div style="font-size:11px;color:#9db0a3;">' + s.sub + '</div></div>' +
+          '<button class="ps-help" data-i="' + i + '" title="How?" style="flex:0 0 auto;font-size:12px;width:26px;height:26px;border-radius:50%;border:1px solid #3c4d42;background:transparent;color:#9db0a3;cursor:pointer;">?</button>' +
+          '<button class="ps-act" data-act="' + s.act + '" style="flex:0 0 auto;font-size:11px;padding:6px 11px;border-radius:7px;border:1px solid #3c6d42;background:#2E4636;color:#dff0e4;cursor:pointer;">' + s.btn + '</button>' +
+        '</div>' +
+        '<div class="ps-helpbody" data-i="' + i + '" style="display:none;font-size:11.5px;color:#c7d4cc;line-height:1.55;padding:0 12px 11px;border-top:1px solid #33443a;">' + s.help + '</div>' +
+      '</div>';
+    }).join('');
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><div style="font-weight:800;font-size:16px;">🗺 Set up ' + escapeHtml(prop.name) + '</div><button class="ps-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:12px;color:#cfe0d6;line-height:1.55;background:#1b2822;border:1px solid #3c4d42;border-radius:9px;padding:11px;margin-bottom:12px;">This takes a few minutes, but it\'s the <b>foundation everything else feeds off</b> — where to hunt, wind &amp; scent, walk-in routes. Do it right and the app works for you; leave it out and some of those features simply <b>can\'t run</b>. <b>Stop and come back anytime</b> — progress saves, and tap <b>?</b> on any step for how-to.</div>' +
+      '<div style="font-size:11px;color:#9db0a3;margin-bottom:8px;font-weight:700;">' + doneCount + ' of ' + steps.length + ' done</div>' +
+      rowsHtml +
+      '<div style="font-size:10px;color:#6f8377;margin-top:8px;line-height:1.4;">Each button opens the tool on the map. Come back here (⚙ Properties → Set up) to continue. All of it is editable later.</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.ps-close').addEventListener('click', close);
+    Array.prototype.forEach.call(card.querySelectorAll('.ps-help'), function(b){
+      b.addEventListener('click', function(){ var hb = card.querySelector('.ps-helpbody[data-i="' + b.getAttribute('data-i') + '"]'); if (hb) hb.style.display = (hb.style.display === 'none' ? 'block' : 'none'); });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll('.ps-act'), function(b){
+      b.addEventListener('click', function(){
+        var act = b.getAttribute('data-act');
+        if (act === 'boundary') launch(function(){ drawPropertyBoundary(prop); });
+        else if (act === 'import') launch(function(){ activePropertyId = prop.id; var ps = document.getElementById('propertySelect'); if (ps) ps.value = prop.id; document.getElementById('importWaypointsBtn').click(); });
+        else if (act === 'path') launch(function(){ document.getElementById('drawTrailBtn').click(); });
+        else launch(function(){ startAddPin(prop, act); });
+      });
+    });
+  }
+
   document.getElementById('addPropertyBtn').addEventListener('click', async function(){
     var nameInput = document.getElementById('newPropertyName');
     var name = nameInput.value.trim();
     if (!name) return;
-    await createPropertyFromCurrentMapView(name);
+    var newProp = await createPropertyFromCurrentMapView(name);
     nameInput.value = '';
     renderPropertySelect();
     renderPropertiesManageList();
-    showToast((activeModule === 'fishing' ? 'Lake' : 'Property') + ' "' + name + '" saved — this map view will be remembered');
+    document.getElementById('managePropertiesModalBackdrop').classList.remove('show');
+    // Property Setup is the front door — open it the moment a property is created (first-run and every new one).
+    if (newProp) showPropertySetup(newProp);
   });
 
   var activeDateFilter = null; // null = All Time, otherwise {from, to, label}
@@ -8842,6 +8924,7 @@
     openPlacementForm(e.latlng);
   });
 
+  var pendingSiteType = null; // when set by Property Setup, the placement form preselects this site type
   function openPlacementForm(latlng){
     if (tempMarker) map.removeLayer(tempMarker);
     tempMarker = L.marker(latlng, {icon: markerIcon('custom')}).addTo(map);
@@ -8882,6 +8965,7 @@
       var cancelBtn = document.getElementById('f_cancel');
       var propSel = document.getElementById('f_property');
       if (propSel && activePropertyId) propSel.value = activePropertyId; // default to whatever property filter is active
+      if (pendingSiteType){ var tSel = document.getElementById('f_type'); if (tSel) tSel.value = pendingSiteType; pendingSiteType = null; }
       if (saveBtn) saveBtn.addEventListener('click', async function(){
         var name = document.getElementById('f_name').value.trim();
         var type = document.getElementById('f_type').value;
