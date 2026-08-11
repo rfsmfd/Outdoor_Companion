@@ -604,6 +604,14 @@
   #recordTrailBtn.active .record-dot{
     border-radius:4px; /* stop-square, matching the standard record-button convention */
   }
+  #drawTrailBtn{
+    position:absolute; bottom:170px; left:14px; z-index:1000;
+    width:42px; height:42px; border-radius:50%;
+    background:#fff; border:2px solid #1A1204; color:#14201A; font-size:18px;
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4); cursor:pointer;
+  }
+  #drawTrailBtn.active{ background:#3F8CFF; color:#fff; }
   @keyframes recordPulse{
     0%, 100% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 0 rgba(217,74,46,0.5); }
     50% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 6px rgba(217,74,46,0); }
@@ -1774,11 +1782,12 @@
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
+    <button id="drawTrailBtn" title="Draw a path / access route on the map">✏️</button>
     <div id="recordTrailInfoLabel"></div>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 225</div>
+    <div id="buildBadge">BUILD 226</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2865,6 +2874,26 @@
       if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
       if (lastKnownPos) sampleTrailPoint(lastKnownPos.lat, lastKnownPos.lng);
     }
+  });
+
+  // Draw a path/access route ON the map (click-to-trace the aerial) instead of walking it with GPS. Reuses the
+  // exact trail-save flow — feeds the drawn line into currentTrailPoints, then opens Save Trail (defaults to
+  // Access type). This is how interior lanes not imported from HuntStand become real, routable access routes.
+  var _pathDrawer = null;
+  document.getElementById('drawTrailBtn').addEventListener('click', function(){
+    var btn = this;
+    if (_pathDrawer){ try { _pathDrawer.disable(); } catch (e) {} _pathDrawer = null; btn.classList.remove('active'); return; }
+    btn.classList.add('active');
+    showToast('Click along the path — a click at each bend. Double-click (or the Finish button) to end, then name it.');
+    _pathDrawer = new L.Draw.Polyline(map, { shapeOptions: { color: '#3F8CFF', weight: 4 } });
+    _pathDrawer.enable();
+    map.once('draw:created', function(e){
+      _pathDrawer = null; btn.classList.remove('active');
+      var latlngs = e.layer.getLatLngs();
+      if (!latlngs || latlngs.length < 2){ showToast('A path needs at least 2 points.'); return; }
+      currentTrailPoints = latlngs.map(function(pt){ return { lat: pt.lat, lng: pt.lng, timestamp: Date.now() }; });
+      openSaveTrailModal(false, null);
+    });
   });
 
   function renderTrailColorSwatches(){
