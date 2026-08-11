@@ -1777,7 +1777,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 220</div>
+    <div id="buildBadge">BUILD 221</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8148,7 +8148,7 @@
       var ph = deerPhotosAtSite(o);
       if (!ph.length) return;
       photos = photos.concat(ph);
-      sources.push({ name: o.name, dist: d, count: ph.length });
+      sources.push({ name: o.name, dist: d, count: ph.length, lat: o.lat, lng: o.lng });
     });
     sources.sort(function(a, b){ return a.dist - b.dist; });
     return { photos: photos, sources: sources };
@@ -8213,6 +8213,7 @@
         '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;">🌅 ' + win + star + '</div>' +
         '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">Daylight ' + r.base.pct + '% all-time' + (r.recent.located ? (' · ' + r.recent.pct + '% recent') : '') + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '') + '</div>' +
         borrowLine +
+        (x.huntable ? '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' : '') +
       '</div>';
     }
     var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;"><div style="font-weight:800;font-size:16px;">🎯 Where to hunt tonight</div><button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
@@ -8228,7 +8229,7 @@
       else { html += '<div style="font-size:11.5px;color:#E8B04B;background:rgba(232,176,75,.1);border-radius:8px;padding:9px;margin-bottom:10px;line-height:1.5;">You haven\'t marked any hunt spots yet. Below is where deer are moving on your ground — tap a spot on the map → <b>🏹 I hunt here</b>, or drop a Tree Stand, to turn it into a real recommendation.</div>'; }
       if (obs.length){ html += '<div style="font-weight:700;font-size:12px;margin:12px 0 6px;color:#9db0a3;">👁 Also active (observation cams)</div>'; obs.forEach(function(x){ html += spotCard(x, null); }); }
     }
-    html += '<div style="font-size:9.5px;color:#6f8377;margin-top:10px;line-height:1.45;">v1 — ranks by your own daylight deer activity + recency + tonight\'s solunar. Wind-smart approach and true stand placement come as you add stands.</div>';
+    html += '<div style="font-size:9.5px;color:#6f8377;margin-top:10px;line-height:1.45;">Ranks by your own daylight deer activity + recency + tonight\'s solunar. The 💨 line reads tonight\'s wind + thermals at each stand — <b>a spot where your scent blows toward the deer is a pass no matter how hot it is,</b> so let the wind override the order.</div>';
     card.innerHTML = html;
     back.appendChild(card); document.body.appendChild(back);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
@@ -8239,6 +8240,50 @@
     if (lat != null && typeof fetchCurrentWeather === 'function'){
       fetchCurrentWeather(lat, lng).then(function(w){ var el = document.getElementById('ht-wind'); if (el && w) el.textContent = (w.windDirDisplay || w.windDir) + ' ' + w.windMph + ' mph'; }).catch(function(){ var el = document.getElementById('ht-wind'); if (el) el.textContent = '—'; });
     }
+    // Per-spot SCENT check — does tonight's wind+thermal blow your scent TOWARD the deer at this stand (a pass,
+    // no matter how hot it is) or away (green light)? Deer direction = toward the camera(s) it borrows activity
+    // from; a stand on its own camera just shows the scent direction. Async (needs wind + a terrain sample).
+    function scentVerdict(sc, deerDir){
+      if (sc.calm) return '💨 <span style="color:#E8B04B;">Dead calm</span> — scent hanging; a circling deer can wind you.';
+      var to = scentCompass16(sc.bearing), swirl = sc.coherence < 0.55 ? ' <span style="color:#9db0a3;">· swirly, trust your nose</span>' : '';
+      if (deerDir == null) return '💨 Scent blows <b>' + to + '</b>' + swirl;
+      var d = Math.abs(sc.bearing - deerDir) % 360; if (d > 180) d = 360 - d;
+      if (d < 60) return '💨 <span style="color:#e6857a;">Scent blows toward your deer (' + to + ') — risky</span>' + swirl;
+      if (d > 120) return '💨 <span style="color:#a7d89a;">Scent blows away from your deer (' + to + ') — good</span>' + swirl;
+      return '💨 <span style="color:#E8B04B;">Crosswind — quarters past your deer (' + to + ')</span>' + swirl;
+    }
+    (async function fillScentLines(){
+      var hs = hunt.filter(function(x){ return x.hasData; });
+      if (!hs.length || !back.parentNode || lat == null) return;
+      var wx = await scentWeather(lat, lng); if (!back.parentNode) return;
+      var windMph = wx ? wx.windMph : 0, windFrom = (wx && wx.windDirDeg != null) ? wx.windDirDeg : null, cloud = (wx && wx.cloudCoverPct != null) ? wx.cloudCoverPct : 40;
+      var OFF = 35, pts = [];
+      hs.forEach(function(x){ var s = x.site, dLat = OFF / 111320, dLng = OFF / (111320 * Math.cos(s.lat * Math.PI / 180)); pts.push([s.lng + dLng, s.lat]); pts.push([s.lng - dLng, s.lat]); pts.push([s.lng, s.lat + dLat]); pts.push([s.lng, s.lat - dLat]); });
+      var elev = null;
+      try {
+        var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: pts, spatialReference: { wkid: 4326 } })) + '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+        var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+        var data = await resp.json(); if (data.samples) elev = data.samples.map(function(s){ return (s && s.value != null) ? parseFloat(s.value) : NaN; });
+      } catch (e){}
+      if (!back.parentNode) return;
+      var ph = thermalPhase(lat, lng);
+      hs.forEach(function(x, i){
+        var s = x.site, thMph = 0, thBear = 0;
+        if (elev){
+          var zE = elev[i*4], zW = elev[i*4+1], zN = elev[i*4+2], zS = elev[i*4+3];
+          if ([zE, zW, zN, zS].every(isFinite)){
+            var dzdx = (zE - zW) / (2 * OFF), dzdy = (zN - zS) / (2 * OFF), slopeDeg = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
+            var vE = ph.up === true ? dzdx : -dzdx, vN = ph.up === true ? dzdy : -dzdy;
+            thBear = (Math.atan2(vE, vN) * 180 / Math.PI + 360) % 360;
+            var slopeF = Math.min(1, slopeDeg / 6), phaseF = ph.up === null ? 0.25 : (ph.label.indexOf('Night') >= 0 ? 0.6 : 1.0), skyF = 1 - 0.6 * (cloud / 100);
+            thMph = slopeF * phaseF * skyF * 6;
+          }
+        }
+        var sc = combineScent(thBear, thMph, windFrom, windMph);
+        var deerDir = (x.borrow && x.borrow.length && x.borrow[0].lat != null) ? bearingBetween(s.lat, s.lng, x.borrow[0].lat, x.borrow[0].lng) : null;
+        var el = card.querySelector('.ht-scent[data-sid="' + s.id + '"]'); if (el) el.innerHTML = scentVerdict(sc, deerDir);
+      });
+    })();
   }
 
   // ---------- Huntability Ship 3b: front-screen "on their feet" alert ----------
@@ -8928,6 +8973,11 @@
     return { calm: false, bearing: (Math.atan2(re, rn) * 180 / Math.PI + 360) % 360, coherence: Math.hypot(re, rn) / total, total: total };
   }
   function scentCompass16(b){ return ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round((b % 360) / 22.5) % 16]; }
+  function bearingBetween(lat1, lng1, lat2, lng2){
+    var D2R = Math.PI / 180, y = Math.sin((lng2 - lng1) * D2R) * Math.cos(lat2 * D2R);
+    var x = Math.cos(lat1 * D2R) * Math.sin(lat2 * D2R) - Math.sin(lat1 * D2R) * Math.cos(lat2 * D2R) * Math.cos((lng2 - lng1) * D2R);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
   function updateScentChip(text){
     var el = document.getElementById('scentChip');
     if (!el){ el = document.createElement('div'); el.id = 'scentChip';
