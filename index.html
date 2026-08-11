@@ -1669,6 +1669,7 @@
       <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
       <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
       <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt Tonight</button>
+      <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
     </div>
 
@@ -1776,7 +1777,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 219</div>
+    <div id="buildBadge">BUILD 220</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7868,6 +7869,7 @@
   function updateBuckGalleryButtonVisibility(){
     document.getElementById('buckGalleryBtn').style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
   }
 
   // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
@@ -8915,6 +8917,17 @@
     pts.push([lat, lng]); return pts;
   }
   function scentRingPoly(lat, lng, R){ var pts = []; for (var i = 0; i <= 20; i++){ pts.push(scentProjLL(lat, lng, 360 * i / 20, R)); } return pts; }
+  // Shared scent math (used by the cones AND Hunt Mode). Adds the wind vector (scent travels DOWNWIND) and the
+  // thermal vector — physics does the handoff. Returns the resultant bearing + coherence (1 = both agree/tight,
+  // 0 = they fight/wide) + total push, or {calm:true} when there's nothing to carry your scent.
+  function combineScent(thermBearing, thermMph, windFromDeg, windMph){
+    var D2R = Math.PI / 180, re = 0, rn = 0, total = 0;
+    if (windFromDeg != null && windMph > 0){ var ws = (windFromDeg + 180) % 360; re += windMph * Math.sin(ws * D2R); rn += windMph * Math.cos(ws * D2R); total += windMph; }
+    if (thermMph > 0){ re += thermMph * Math.sin(thermBearing * D2R); rn += thermMph * Math.cos(thermBearing * D2R); total += thermMph; }
+    if (total < 1) return { calm: true, total: total };
+    return { calm: false, bearing: (Math.atan2(re, rn) * 180 / Math.PI + 360) % 360, coherence: Math.hypot(re, rn) / total, total: total };
+  }
+  function scentCompass16(b){ return ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'][Math.round((b % 360) / 22.5) % 16]; }
   function updateScentChip(text){
     var el = document.getElementById('scentChip');
     if (!el){ el = document.createElement('div'); el.id = 'scentChip';
@@ -8966,18 +8979,13 @@
           thermMph = slopeF * phaseF * skyF * 6; // express thermal push in mph-equivalent so it blends with wind
         }
       }
-      var windScent = (windFromDeg != null) ? (windFromDeg + 180) % 360 : null;  // scent travels DOWNWIND
-      var re = 0, rn = 0, total = 0;
-      if (windScent != null && windMph > 0){ re += windMph * Math.sin(windScent * D2R); rn += windMph * Math.cos(windScent * D2R); total += windMph; }
-      if (thermMph > 0){ re += thermMph * Math.sin(thermBearing * D2R); rn += thermMph * Math.cos(thermBearing * D2R); total += thermMph; }
+      var sc = combineScent(thermBearing, thermMph, windFromDeg, windMph);
       var poly;
-      if (total < 1){ poly = scentRingPoly(s.lat, s.lng, 85); }   // dead calm, no thermal — scent just hangs around you
+      if (sc.calm){ poly = scentRingPoly(s.lat, s.lng, 85); }   // dead calm, no thermal — scent just hangs around you
       else {
-        var scentBearing = (Math.atan2(re, rn) * 180 / Math.PI + 360) % 360;
-        var coherence = Math.hypot(re, rn) / total;              // 1 = wind & thermal agree (tight), 0 = they fight (wide)
-        var half = 14 + (1 - coherence) * 34;
-        var R = Math.max(120, Math.min(340, 110 + total * 9));
-        poly = scentConePoly(s.lat, s.lng, scentBearing, half, R);
+        var half = 14 + (1 - sc.coherence) * 34;                // tight when one force dominates, wide when they fight
+        var R = Math.max(120, Math.min(340, 110 + sc.total * 9));
+        poly = scentConePoly(s.lat, s.lng, sc.bearing, half, R);
       }
       L.polygon(poly, { pane: 'scentPane', color: '#D94A2E', weight: 1, opacity: 0.5, fillColor: '#D94A2E', fillOpacity: 0.15, interactive: false }).addTo(scentLayer);
     });
@@ -9047,6 +9055,129 @@
     updateProjLabel();
   }
   ensureProjControl();
+
+  // ---- 🎯 HUNT MODE — the in-stand cockpit. The other half of the thermals work: the map/slider is for
+  // planning the night before; THIS is for the moment of truth. Shows a live shooting-light countdown (the
+  // hunt timer) + the scent read at your stand right now (thermal + wind combined, same engine as the cones),
+  // in plain "who can smell you" language. Shows the ANSWER and the raw ingredients so you can overrule it. ----
+  function legalLightState(lat, lng){
+    var now = Date.now(), t; try { t = SunCalc.getTimes(new Date(now), lat, lng); } catch (e){ return null; }
+    if (!t.sunrise || isNaN(t.sunrise.getTime()) || !t.sunset || isNaN(t.sunset.getTime())) return null;
+    var sr = t.sunrise.getTime(), ss = t.sunset.getTime(), legalStart = sr - 1800000, legalEnd = ss + 1800000;
+    if (now < legalStart) return { phase: 'pre', msLeft: legalStart - now, sr: sr, ss: ss };
+    if (now <= legalEnd) return { phase: 'open', msLeft: legalEnd - now, sr: sr, ss: ss };
+    return { phase: 'closed', msLeft: 0, sr: sr, ss: ss };
+  }
+  function fmtHM(ms){ var m = Math.max(0, Math.round(ms / 60000)), h = Math.floor(m / 60); m = m % 60; return (h > 0 ? h + 'h ' : '') + m + 'm'; }
+  function hmClock(ms){ var d = new Date(ms), h = d.getHours(), hh = h % 12; if (hh === 0) hh = 12; var mm = d.getMinutes(); return hh + ':' + (mm < 10 ? '0' + mm : mm) + (h < 12 ? 'a' : 'p'); }
+  async function standThermalPoint(lat, lng, cloudPct){
+    var OFF = 35, ph = thermalPhase(lat, lng), dLat = OFF / 111320, dLng = OFF / (111320 * Math.cos(lat * Math.PI / 180));
+    var pts = [[lng + dLng, lat], [lng - dLng, lat], [lng, lat + dLat], [lng, lat - dLat]];
+    try {
+      var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: pts, spatialReference: { wkid: 4326 } })) +
+        '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+      var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+      var data = await resp.json();
+      if (!data.samples) return { mph: 0, bearing: 0, phase: ph };
+      var e = data.samples.map(function(s){ return (s && s.value != null) ? parseFloat(s.value) : NaN; });
+      if (!([e[0], e[1], e[2], e[3]].every(isFinite))) return { mph: 0, bearing: 0, phase: ph };
+      var dzdx = (e[0] - e[1]) / (2 * OFF), dzdy = (e[2] - e[3]) / (2 * OFF);
+      var slopeDeg = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
+      var vE = ph.up === true ? dzdx : -dzdx, vN = ph.up === true ? dzdy : -dzdy;
+      var slopeF = Math.min(1, slopeDeg / 6), phaseF = ph.up === null ? 0.25 : (ph.label.indexOf('Night') >= 0 ? 0.6 : 1.0), skyF = 1 - 0.6 * ((cloudPct == null ? 40 : cloudPct) / 100);
+      return { mph: slopeF * phaseF * skyF * 6, bearing: (Math.atan2(vE, vN) * 180 / Math.PI + 360) % 360, phase: ph, slopeDeg: slopeDeg };
+    } catch (e){ return { mph: 0, bearing: 0, phase: ph }; }
+  }
+  function pickHuntStand(){
+    if (activeHuntId){ var h = huntEvents.filter(function(x){ return x.id === activeHuntId; })[0]; if (h && h.siteId){ var s0 = sites.filter(function(x){ return x.id === h.siteId; })[0]; if (s0 && typeof s0.lat === 'number') return s0; } }
+    var hs = sites.filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number'; });
+    if (!hs.length) return null;
+    if (lastKnownPos){ hs.sort(function(a, b){ return distMeters(lastKnownPos.lat, lastKnownPos.lng, a.lat, a.lng) - distMeters(lastKnownPos.lat, lastKnownPos.lng, b.lat, b.lng); }); }
+    return hs[0];
+  }
+  var _hmStand = null, _hmBack = null, _hmTick = null, _hmRefresh = null;
+  function huntModeClose(){
+    if (_hmTick){ clearInterval(_hmTick); _hmTick = null; }
+    if (_hmRefresh){ clearInterval(_hmRefresh); _hmRefresh = null; }
+    if (_hmBack && _hmBack.parentNode) document.body.removeChild(_hmBack);
+    _hmBack = null; _hmStand = null;
+  }
+  function hmUpdateCountdown(){
+    if (!_hmBack || !_hmStand) return;
+    var num = _hmBack.querySelector('#hmCountNum'), sub = _hmBack.querySelector('#hmCountSub'), sun = _hmBack.querySelector('#hmSunLine');
+    var L = legalLightState(_hmStand.lat, _hmStand.lng); if (!L || !num) return;
+    if (L.phase === 'pre'){ num.textContent = fmtHM(L.msLeft); sub.textContent = 'until legal light opens'; }
+    else if (L.phase === 'open'){ num.textContent = fmtHM(L.msLeft); sub.textContent = 'of legal light left'; num.style.color = L.msLeft < 1800000 ? '#E8823F' : '#f2f7f3'; }
+    else { num.textContent = 'Closed'; sub.textContent = 'legal light is over for today'; }
+    if (sun) sun.textContent = 'sunrise ' + hmClock(L.sr) + ' · sunset ' + hmClock(L.ss) + ' · legal to ' + hmClock(L.ss + 1800000);
+  }
+  async function hmRenderBody(){
+    if (!_hmBack || !_hmStand) return;
+    var s = _hmStand, body = _hmBack.querySelector('#hmBody'); if (!body) return;
+    var wx = await scentWeather(s.lat, s.lng); if (!_hmBack) return;
+    var th = await standThermalPoint(s.lat, s.lng, wx ? wx.cloudCoverPct : null); if (!_hmBack) return;
+    var windMph = wx ? wx.windMph : 0, windFrom = (wx && wx.windDirDeg != null) ? wx.windDirDeg : null, windCompass = wx ? wx.windDir : '—';
+    var sc = combineScent(th.bearing, th.mph, windFrom, windMph);
+    var scentTo = sc.calm ? null : scentCompass16(sc.bearing), safeFrom = sc.calm ? null : scentCompass16((sc.bearing + 180) % 360);
+    var conf = sc.calm ? 'dead calm' : (sc.coherence > 0.85 ? 'clean &amp; predictable' : (sc.coherence > 0.55 ? 'a bit mixed' : 'swirling — trust your nose'));
+    var driver = sc.calm ? '—' : (th.mph > windMph * 1.1 ? 'thermal-driven' : (windMph > th.mph * 1.1 ? 'wind-driven' : 'wind + thermal'));
+    var arrow = sc.calm ? '' : '<svg width="86" height="86" viewBox="0 0 86 86" style="flex:0 0 auto;"><circle cx="43" cy="43" r="40" fill="#14201a" stroke="#2c3f34"/><text x="43" y="15" text-anchor="middle" fill="#6f8377" font-size="11">N</text>' +
+      '<g transform="rotate(' + Math.round(sc.bearing) + ' 43 43)"><line x1="43" y1="43" x2="43" y2="10" stroke="#D94A2E" stroke-width="3.5"/><polygon points="43,6 38,15 48,15" fill="#D94A2E"/></g>' +
+      '<g transform="rotate(' + Math.round((sc.bearing + 180) % 360) + ' 43 43)"><circle cx="43" cy="15" r="3.5" fill="#7CCB7C"/></g>' +
+      '<circle cx="43" cy="43" r="3.5" fill="#D94A2E"/></svg>';
+    var scentMain = sc.calm
+      ? '<div style="font-size:15px;color:#f2f7f3;">Dead calm — scent is hanging right around you.</div><div style="font-size:12.5px;color:#8aa596;margin-top:4px;">Nothing to carry it off. A deer that circles can hit you from any side.</div>'
+      : '<div style="font-size:16px;color:#f2f7f3;font-weight:600;">Scent drifting ' + scentTo + '</div>' +
+        '<div style="font-size:12.5px;color:#c7d4cc;margin-top:5px;line-height:1.5;">A deer downwind to your <b style="color:#e6b5a8;">' + scentTo + '</b> will wind you. Deer working in from the <b style="color:#a7d89a;">' + safeFrom + '</b> stay clean.</div>' +
+        '<div style="font-size:11.5px;color:#8aa596;margin-top:6px;">' + driver + ' · ' + conf + '</div>';
+    var onStand = '';
+    if (activeHuntId){ var h2 = huntEvents.filter(function(x){ return x.id === activeHuntId; })[0]; if (h2 && h2.siteId === s.id && h2.checkInAt){ onStand = '<span style="color:#9ED17A;">· on stand ' + fmtHM(Date.now() - h2.checkInAt) + '</span>'; } }
+    body.innerHTML =
+      '<div style="background:#1c2b23;border-radius:12px;padding:14px;margin-bottom:10px;border-left:3px solid #D94A2E;display:flex;gap:14px;align-items:center;">' + arrow + '<div>' + scentMain + '</div></div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<div style="flex:1;background:#1c2b23;border-radius:12px;padding:12px;"><div style="font-size:11px;color:#8aa596;margin-bottom:3px;">💨 Wind</div><div style="font-size:15px;color:#f2f7f3;">' + windCompass + ' ' + windMph + ' mph</div><div style="font-size:11px;color:#8aa596;margin-top:2px;">' + (wx ? (wx.tempF + '°') : 'offline') + '</div></div>' +
+        '<div style="flex:1;background:#1c2b23;border-radius:12px;padding:12px;"><div style="font-size:11px;color:#8aa596;margin-bottom:3px;">🌡 Thermal</div><div style="font-size:15px;color:#f2f7f3;">' + (th.mph > 0.3 ? scentCompass16(th.bearing) : 'flat/weak') + '</div><div style="font-size:11px;color:#8aa596;margin-top:2px;">' + th.phase.label.split('—')[0].trim().toLowerCase() + ' ' + onStand + '</div></div>' +
+      '</div>';
+  }
+  function showHuntMode(){
+    huntModeClose();
+    _hmStand = pickHuntStand();
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100008;background:rgba(6,10,8,.93);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;max-width:460px;width:100%;color:#e8f0ea;box-shadow:0 12px 44px rgba(0,0,0,.6);margin:auto;';
+    _hmBack = back;
+    if (!_hmStand){
+      card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="font-weight:800;font-size:17px;">🎯 Hunt Mode</div><button id="hmClose" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
+        '<div style="font-size:13px;color:#c7d4cc;line-height:1.5;">No hunt spots yet. Drop a <b>Tree Stand</b>, or open any site and tap <b>🏹 I hunt here</b> — then Hunt Mode can read the wind and thermals right at your stand.</div>';
+      back.appendChild(card); document.body.appendChild(back);
+      card.querySelector('#hmClose').addEventListener('click', huntModeClose);
+      back.addEventListener('click', function(e){ if (e.target === back) huntModeClose(); });
+      return;
+    }
+    var opts = sites.filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number'; })
+      .map(function(s){ return '<option value="' + escapeHtml(s.id) + '"' + (s.id === _hmStand.id ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>'; }).join('');
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;">' +
+        '<select id="hmStandSel" style="flex:1;min-width:0;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;">' + opts + '</select>' +
+        '<button id="hmClose" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button>' +
+      '</div>' +
+      '<div style="background:#1c2b23;border-radius:12px;padding:16px;text-align:center;margin-bottom:12px;">' +
+        '<div id="hmCountNum" style="font-size:34px;font-weight:500;color:#f2f7f3;line-height:1;">—</div>' +
+        '<div id="hmCountSub" style="font-size:12px;color:#8aa596;margin-top:5px;">legal light</div>' +
+        '<div id="hmSunLine" style="font-size:11px;color:#6f8377;margin-top:8px;">—</div>' +
+      '</div>' +
+      '<div id="hmBody"><div style="text-align:center;color:#8aa596;padding:18px;">Reading wind &amp; terrain…</div></div>' +
+      '<div style="font-size:10.5px;color:#6f8377;margin-top:12px;line-height:1.4;text-align:center;">A physics-informed read, not gospel — a swirly day is the app telling you to trust your nose. Updates every few minutes.</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    card.querySelector('#hmClose').addEventListener('click', huntModeClose);
+    back.addEventListener('click', function(e){ if (e.target === back) huntModeClose(); });
+    card.querySelector('#hmStandSel').addEventListener('change', function(){ var v = this.value, ns = sites.filter(function(x){ return x.id === v; })[0]; if (ns){ _hmStand = ns; hmUpdateCountdown(); hmRenderBody(); } });
+    hmUpdateCountdown(); hmRenderBody();
+    _hmTick = setInterval(hmUpdateCountdown, 1000);
+    _hmRefresh = setInterval(hmRenderBody, 240000);
+  }
+  var _hmBtn = document.getElementById('huntModeBtn'); if (_hmBtn) _hmBtn.addEventListener('click', showHuntMode);
 
   document.querySelectorAll('.layer-btn[data-layer]').forEach(function(btn){
     btn.addEventListener('click', function(){
