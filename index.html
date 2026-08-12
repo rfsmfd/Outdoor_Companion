@@ -1794,7 +1794,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 233</div>
+    <div id="buildBadge">BUILD 234</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9707,6 +9707,15 @@
     if (!be){ body.innerHTML = '<div style="background:#3a2a1a;border:1px solid #7a5a2a;border-radius:10px;padding:12px;font-size:12.5px;color:#f0dcc0;line-height:1.55;">No <b>parking / entry points</b> on this property yet. Drop one where you actually step in — <b>Property Setup → 🅿 step 3</b>, or <b>+ Add Site → Parking/Access</b> — and the walk-in routes from it.</div>'; return; }
     var entry = be.entry, plan = be.plan; _wiEntry = entry;
     drawWalkInRoute(plan, entry, stand, true);
+    // --- diagnostic: when it falls back to a straight line, say exactly WHY (the data reality) ---
+    var _accT = walkInAccessTrails(), _verts = [];
+    _accT.forEach(function(t){ t.points.forEach(function(p){ _verts.push(p); }); });
+    function _nearVert(pt){ var mn = Infinity; for (var i = 0; i < _verts.length; i++){ var d = distMeters(pt.lat, pt.lng, _verts[i].lat, _verts[i].lng); if (d < mn) mn = d; } return mn; }
+    var _eD = _verts.length ? _nearVert(entry) : Infinity, _sD = _verts.length ? _nearVert(stand) : Infinity, _diag;
+    if (!_accT.length) _diag = 'no Access-type trails in this module — your lanes may be a different trail type (or the property boundary), not Access paths';
+    else if (plan.onTrail) _diag = _accT.length + ' access paths · routed on your lanes ✓';
+    else if (_eD > 250 || _sD > 250) _diag = _accT.length + ' access paths, but the ' + (_eD >= _sD ? 'parking' : 'stand') + ' is ' + ydsLabel(Math.max(_eD, _sD)) + ' from the nearest lane — no path reaches it';
+    else _diag = _accT.length + ' access paths, both ends near a lane (entry ' + ydsLabel(_eD) + ' / stand ' + ydsLabel(_sD) + ') but they don\'t link into ONE network — a gap or T-junction wider than ~22 m';
     var feet = Math.round(routeMeters(plan.route) * 3.28084);
     var ph = thermalPhase(stand.lat, stand.lng), isAM = ph.up === true, isPM = ph.up === false;
     var sitLabel = isAM ? '🌅 Morning sit — rising thermal, deer still out in the fields' : (isPM ? '🌇 Evening sit — falling thermal' : '🕛 Midday — thermals flat');
@@ -9744,7 +9753,8 @@
       '<div style="display:flex;gap:10px;">' +
         '<div style="flex:1;background:#1c2b23;border-radius:11px;padding:11px;"><div style="font-size:11px;color:#8aa596;">💨 Wind</div><div style="font-size:14px;color:#f2f7f3;">' + (wx ? (wx.windDir + ' ' + windMph + ' mph') : 'offline') + '</div></div>' +
         '<div style="flex:1;background:#1c2b23;border-radius:11px;padding:11px;"><div style="font-size:11px;color:#8aa596;">🧭 Your scent</div><div style="font-size:14px;color:#f2f7f3;">' + scentTo + '</div></div>' +
-      '</div>';
+      '</div>' +
+      '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;border-top:1px solid #24332a;padding-top:8px;">🔧 ' + _diag + '</div>';
   }
   function showWalkIn(){
     wiClose();
