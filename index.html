@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 248</div>
+    <div id="buildBadge">BUILD 249</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8804,7 +8804,7 @@
     function close(){ if (back.parentNode) document.body.removeChild(back); }
     function spotCard(x, rank){
       if (!x.hasData || !x.read){
-        return '<div class="ht-spot" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
+        return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
             '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' 🏹</div>' +
             '<div style="font-size:11px;color:#9db0a3;">no data yet</div>' +
@@ -8815,7 +8815,7 @@
       var r = x.read, win = r.windowText ? (bucketLabel(r.useBest) + ' · ' + r.windowText) : '—';
       var star = x.solunarHit ? (' <span style="color:#E8B04B;">⭐ ' + x.solunarHit + ' feed</span>') : '';
       var borrowLine = (x.borrow && x.borrow.length) ? ('<div style="font-size:10px;color:#E8B04B;margin-top:2px;">📷 in range of <b>' + escapeHtml(x.borrow[0].name) + '</b> (' + ydsLabel(x.borrow[0].dist) + ')' + (x.borrow.length > 1 ? (' +' + (x.borrow.length - 1) + ' more cam' + (x.borrow.length - 1 === 1 ? '' : 's')) : '') + ' — no camera of its own</div>') : '';
-      return '<div class="ht-spot" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
+      return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
           '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' ' + (x.huntable ? '🏹' : '👁') + '</div>' +
           '<div style="font-size:11px;font-weight:800;color:' + r.tone + ';">' + HB_VERDICT[r.state] + '</div>' +
@@ -8826,7 +8826,10 @@
         (x.huntable ? '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' : '') +
       '</div>';
     }
-    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;"><div style="font-weight:800;font-size:16px;">🎯 Where to hunt</div><button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+    var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
+        '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">←</button>' +
+        '<div style="font-weight:800;font-size:16px;flex:1;min-width:0;">🎯 Where to hunt</div>' +
+        '<button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button></div>' +
       '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + (plannedHunt ? ('🗓 Planning: <b style="color:#dff0e4;">' + plannedHunt.label + '</b>') : now.toDateString()) + '</div>' +
       '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:12px;font-size:11.5px;line-height:1.6;">' +
         '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
@@ -8844,8 +8847,13 @@
     back.appendChild(card); document.body.appendChild(back);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('.ht-close').addEventListener('click', close);
+    var _htBack = card.querySelector('.ht-back'); if (_htBack) _htBack.addEventListener('click', function(){ close(); showForecastPanel(); });
     Array.prototype.forEach.call(card.querySelectorAll('.ht-spot'), function(el){
-      el.addEventListener('click', function(){ var la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng')); close(); try { map.setView([la, ln], 17); } catch (e) {} });
+      el.addEventListener('click', function(){ var sid = el.getAttribute('data-sid'), la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng'));
+        var st = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === sid; })[0];
+        close(); try { map.setView([la, ln], 17); } catch (e) {} flashSiteRing(la, ln);
+        if (st){ _wiPreStand = st; showToast('📍 ' + st.name + ' selected — tap 🚶 Walk-In to plan your way in.'); }
+      });
     });
     if (plannedHunt && plannedHunt.wind){ var _hw = document.getElementById('ht-wind'); if (_hw) _hw.textContent = plannedHunt.wind.dir + ' ' + plannedHunt.wind.mph + ' mph'; }
     else if (lat != null && typeof fetchCurrentWeather === 'function'){
@@ -8962,6 +8970,14 @@
   function huntTimeMs(){ return plannedHunt ? plannedHunt.ms : Date.now(); }
   function planNow(){ plannedHunt = { kind: 'now', ms: Date.now(), label: 'Now (live)', wind: null, cloud: null }; }
   function planFromSit(sit){ plannedHunt = { kind: sit.kind, ms: sit.timeMs, label: fcDayLabel(sit.timeMs) + ' ' + (sit.kind === 'am' ? 'AM' : 'PM'), wind: { mph: sit.windMph, dir: sit.windDir, deg: sit.windDeg }, cloud: sit.cloudPct }; }
+  // Pulsing ring to flag a just-picked stand on the map (the "farm opens with the stand highlighted" hand-off).
+  var _siteRing = null, _wiPreStand = null;
+  function flashSiteRing(lat, lng){
+    if (_siteRing){ try { map.removeLayer(_siteRing); } catch (e) {} _siteRing = null; }
+    var ring = L.circleMarker([lat, lng], { radius: 16, color: '#FFD24A', weight: 3, opacity: 1, fill: false, interactive: false }).addTo(map);
+    _siteRing = ring; var r = 16, grow = true, ticks = 0;
+    var iv = setInterval(function(){ if (!ring._map){ clearInterval(iv); return; } r += grow ? 3 : -3; if (r > 28) grow = false; if (r < 12) grow = true; ring.setRadius(r); if (++ticks > 45){ clearInterval(iv); try { map.removeLayer(ring); } catch (e) {} if (_siteRing === ring) _siteRing = null; } }, 110);
+  }
   async function showForecastPanel(){
     var loc = forecastLocation();
     var back = document.createElement('div');
@@ -10210,8 +10226,9 @@
       card.querySelector('#wiClose').addEventListener('click', close); back.addEventListener('click', function(e){ if (e.target === back) close(); });
       return;
     }
-    _wiStand = stands.slice().sort(function(a, b){ return lastKnownPos ? (distMeters(lastKnownPos.lat, lastKnownPos.lng, a.lat, a.lng) - distMeters(lastKnownPos.lat, lastKnownPos.lng, b.lat, b.lng)) : 0; })[0];
-    _wiEntry = null; _wiRoutePref = 'stealth';
+    var _pre = _wiPreStand && stands.filter(function(s){ return s.id === _wiPreStand.id; })[0];   // handed off from Where-to-Hunt
+    _wiStand = _pre || stands.slice().sort(function(a, b){ return lastKnownPos ? (distMeters(lastKnownPos.lat, lastKnownPos.lng, a.lat, a.lng) - distMeters(lastKnownPos.lat, lastKnownPos.lng, b.lat, b.lng)) : 0; })[0];
+    _wiPreStand = null; _wiEntry = null; _wiRoutePref = 'stealth';
     var standOpts = stands.map(function(s){ return '<option value="' + escapeHtml(s.id) + '"' + (s.id === _wiStand.id ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>'; }).join('');
     var entries = walkInEntries();
     var modeOpts = Object.keys(WALK_MODES).map(function(mk){ return '<option value="' + mk + '"' + (mk === _wiMode ? ' selected' : '') + '>' + WALK_MODES[mk].icon + ' ' + WALK_MODES[mk].label + '</option>'; }).join('');
