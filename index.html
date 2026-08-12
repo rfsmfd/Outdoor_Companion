@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 261</div>
+    <div id="buildBadge">BUILD 262</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6980,8 +6980,78 @@
     prop.landcover.types = _coverUndo.types; prop.landcover.confirmed = _coverUndo.confirmed; _coverUndo = null;
     saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: undo save failed', e); }); renderLandcoverOverlay(); updateCoverUndoBtn(); showToast('Undid the last cover change.');
   }
-  function updateCoverUndoBtn(){ var b = document.getElementById('lcUndoBtn'); if (b) b.style.display = (coverEditMode && _coverUndo) ? 'inline-block' : 'none'; }
+  function updateCoverUndoBtn(){ var b = document.getElementById('lcUndoBtn'); if (b) b.style.display = _coverUndo ? 'inline-block' : 'none'; }
   function setActiveCoverTool(id){ ['lcBoxBtn','lcLineBtn','lcDrawBtn'].forEach(function(bid){ var el = document.getElementById(bid); if (el){ var on = (bid === id); el.style.background = on ? '#3c6d42' : '#26332b'; el.style.color = on ? '#fff' : '#dff0e4'; } }); }
+  // ---- 🌿 SMZ (Streamside Management Zone) auto-fill: grow the Drainage corridor to the real stream BOTTOM ----
+  // A drainage isn't a hairline — it's the creek plus its wooded bottom (the loggers' un-cut hardwood buffer through
+  // the pine). We anchor on the NHD drainage cells already in the grid, read the LiDAR elevation, and grow Drainage
+  // to every nearby cell that's LOW relative to the creek — HAND = Height Above Nearest Drainage — fused with the
+  // hardwood signal (the SMZ often reads as hardwood-through-pine on the aerial), which rescues it where the flat
+  // coastal-plain ground makes elevation alone marginal. Bounded by a max horizontal distance so it never floods a stand.
+  function currentCoverProp(){
+    var list = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return (!p.module || p.module === activeModule) && p.landcover && p.landcover.grid; });
+    return list.filter(function(p){ return p.id === activePropertyId; })[0] || list[0] || null;
+  }
+  // Sample 3DEP elevation on a coarse lattice over the cover bbox → bilinear source for HAND. Chunked getSamples.
+  async function sampleElevLattice(lc){
+    var bb = lc.bbox, midLat = (bb.n + bb.s) / 2;
+    var wM = (bb.e - bb.w) * 111320 * Math.cos(midLat * Math.PI / 180), hM = (bb.n - bb.s) * 111320;
+    var gw = Math.max(8, Math.min(44, Math.round(wM / 22) + 1)), gh = Math.max(8, Math.min(44, Math.round(hM / 22) + 1));
+    var pts = [];
+    for (var r = 0; r < gh; r++){ var lat = bb.n - (bb.n - bb.s) * (r / (gh - 1)); for (var c = 0; c < gw; c++){ pts.push([bb.w + (bb.e - bb.w) * (c / (gw - 1)), lat]); } }
+    var vals = new Array(pts.length); for (var z = 0; z < vals.length; z++) vals[z] = NaN;
+    var CH = 220;
+    for (var off = 0; off < pts.length; off += CH){
+      var chunk = pts.slice(off, off + CH);
+      try {
+        var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: chunk, spatialReference: { wkid: 4326 } })) +
+          '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+        var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+        var data = await resp.json();
+        if (data && data.samples){ data.samples.forEach(function(s, i){ var li = (s.locationId != null) ? s.locationId : i; var v = (s && s.value != null) ? parseFloat(s.value) : NaN; if (off + li < vals.length) vals[off + li] = v; }); }
+      } catch (e){ /* leave that chunk NaN */ }
+    }
+    return { gw: gw, gh: gh, vals: vals };
+  }
+  async function fillSMZ(prop){
+    prop = prop || currentCoverProp();
+    if (!prop || !prop.landcover || !prop.landcover.grid){ showToast('Scan a property first (Property Setup → Scan field vs woods).'); return; }
+    var lc = prop.landcover, types = ensureTypes(lc), conf = ensureConfirmed(lc), cols = lc.cols, rows = lc.rows, N = cols * rows, cellM = lc.cellM || 6;
+    var Dcells = []; for (var i = 0; i < N; i++){ if (types.charAt(i) === 'D') Dcells.push(i); }
+    if (!Dcells.length){ showToast('No drainage lines yet — Rescan to pull the NHD streams, or trace a drain with 〰 first.'); return; }
+    showToast('Reading the low ground along your drains (LiDAR)…');
+    var el = await sampleElevLattice(lc); if (!el){ showToast('Elevation read failed — try again.'); return; }
+    var gw = el.gw, gh = el.gh, vals = el.vals;
+    function elevCell(x, y){
+      var u = ((x + 0.5) / cols) * (gw - 1), v = ((y + 0.5) / rows) * (gh - 1);
+      var c0 = Math.max(0, Math.min(gw - 1, Math.floor(u))), r0 = Math.max(0, Math.min(gh - 1, Math.floor(v)));
+      var c1 = Math.min(gw - 1, c0 + 1), r1 = Math.min(gh - 1, r0 + 1), fu = u - c0, fv = v - r0;
+      var a = vals[r0 * gw + c0], b = vals[r0 * gw + c1], cc = vals[r1 * gw + c0], d = vals[r1 * gw + c1];
+      var cand = [a, b, cc, d].filter(function(z){ return isFinite(z); });
+      if (!cand.length) return NaN;
+      if (![a, b, cc, d].every(isFinite)) return cand.reduce(function(s, z){ return s + z; }, 0) / cand.length;   // partial → mean of valid corners
+      return a * (1 - fu) * (1 - fv) + b * fu * (1 - fv) + cc * (1 - fu) * fv + d * fu * fv;
+    }
+    // multi-source BFS from the drainage cells, carrying each source's elevation to its nearest neighbours
+    var maxCells = Math.max(4, Math.round(75 / cellM)), dist = new Int16Array(N), srcE = new Float32Array(N);
+    for (var q0 = 0; q0 < N; q0++) dist[q0] = -1;
+    var queue = []; Dcells.forEach(function(k){ dist[k] = 0; srcE[k] = elevCell(k % cols, (k / cols) | 0); queue.push(k); });
+    var head = 0;
+    while (head < queue.length){ var k = queue[head++]; var dd = dist[k]; if (dd >= maxCells) continue; var kx = k % cols, ky = (k / cols) | 0;
+      var nb = [k - 1, k + 1, k - cols, k + cols], nbx = [kx - 1, kx + 1, kx, kx], nby = [ky, ky, ky - 1, ky + 1];
+      for (var n = 0; n < 4; n++){ var nk = nb[n]; if (nbx[n] < 0 || nbx[n] >= cols || nby[n] < 0 || nby[n] >= rows) continue; if (dist[nk] !== -1) continue; dist[nk] = dd + 1; srcE[nk] = srcE[k]; queue.push(nk); } }
+    // classify: within the corridor, LOW ground (HAND ≤ ~1.5 m) OR a hardwood strip → the SMZ bottom
+    var HAND = 1.5, add = [];
+    for (var m = 0; m < N; m++){ if (dist[m] <= 0 || dist[m] > maxCells) continue;
+      var t = types.charAt(m); if (t === 'D' || t === 'O' || t === 'F' || t === 'R' || t === 'A') continue;   // keep water/open field; skip existing drain
+      if (conf.charAt(m) === '1') continue;   // respect cells you've already confirmed by hand
+      var e = elevCell(m % cols, (m / cols) | 0), low = isFinite(e) && isFinite(srcE[m]) && (e - srcE[m]) <= HAND;
+      if (low || t === 'H') add.push(m);
+    }
+    if (!add.length){ showToast('No new stream bottom found near your drains — they may already be filled.'); return; }
+    applyTypeToCells(prop, add, 'D');
+    showToast('Filled ~' + acresOf(lc, add.length).toFixed(1) + ' ac of stream bottom (SMZ) as Drainage. ↩ Undo if it overreached.');
+  }
   // Show the exact cells about to change — a white outline + faint fill — so you SEE the selection while you pick.
   function clearCoverSelection(){ if (_coverSelOverlay){ map.removeLayer(_coverSelOverlay); _coverSelOverlay = null; } }
   function showCoverSelection(prop, cells){
@@ -7097,6 +7167,7 @@
         '<span style="white-space:nowrap;">' + toolBtn('lcUndoBtn', '↩', 'Undo last change') + toolBtn('lcWidthBtn', '〰 med', 'Drain corridor width — tap to cycle narrow/med/wide') + toolBtn('lcBoxBtn', '▭', 'Box-select a patch') + toolBtn('lcLineBtn', '〰', 'Trace a line (drains)') + toolBtn('lcDrawBtn', '▱', 'Draw an area') +
         '<button id="lcEditBtn" style="font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c4d42;background:transparent;color:#cfe0d6;cursor:pointer;">✏️ Edit</button></span></div>' +
         ['R','A','F','H','P','W','C','D','S','O'].map(sw).join('') +
+        '<button id="lcSmzBtn" title="Auto-fill the wooded stream bottoms (SMZ) from the LiDAR low ground + your NHD drains" style="width:100%;margin-top:7px;font-size:10.5px;padding:4px 6px;border-radius:6px;border:1px solid #3c6d42;background:#22323b;color:#dff0e4;cursor:pointer;">🌿 Fill drain bottoms (SMZ)</button>' +
         '<div style="display:flex;align-items:center;gap:6px;margin-top:7px;border-top:1px solid #2c3f34;padding-top:6px;"><span style="font-size:10px;color:#8aa596;">Fade</span><input id="lcOpacity" type="range" min="15" max="100" value="' + Math.round(landcoverOpacity * 100) + '" style="flex:1;accent-color:#7CCB7C;cursor:pointer;"></div>';
       document.body.appendChild(el);
       el.querySelector('#lcEditBtn').addEventListener('click', function(){ setCoverEditMode(!coverEditMode); });
@@ -7104,6 +7175,7 @@
       el.querySelector('#lcBoxBtn').addEventListener('click', function(){ startCoverBox(); });
       el.querySelector('#lcLineBtn').addEventListener('click', function(){ startCoverLine(); });
       el.querySelector('#lcUndoBtn').addEventListener('click', function(){ undoCoverEdit(); });
+      el.querySelector('#lcSmzBtn').addEventListener('click', function(){ fillSMZ(); });
       el.querySelector('#lcWidthBtn').addEventListener('click', function(){ _coverLineRadius = _coverLineRadius >= 3 ? 1 : _coverLineRadius + 1; this.textContent = '〰 ' + (_coverLineRadius <= 1 ? 'narrow' : _coverLineRadius >= 3 ? 'wide' : 'med'); showToast('Drain corridor width: ' + (_coverLineRadius <= 1 ? 'narrow (~1 cell)' : _coverLineRadius >= 3 ? 'wide (~7 cells)' : 'medium (~5 cells)') + '. Now trace the 〰 line.'); });
       el.querySelector('#lcOpacity').addEventListener('input', function(){ landcoverOpacity = this.value / 100; renderLandcoverOverlay(); });
     }
