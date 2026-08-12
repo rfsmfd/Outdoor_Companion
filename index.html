@@ -1794,7 +1794,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 234</div>
+    <div id="buildBadge">BUILD 235</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2057,6 +2057,7 @@
           <button class="chip" data-style="dashed">Dashed</button>
           <button class="chip" data-style="dotted">Dotted</button>
         </div>
+        <div style="font-size:10.5px;color:#8aa596;margin-top:6px;line-height:1.4;">Style also tells the <b>🚶 Walk-In</b> planner how to travel it: <b>Solid</b> = vehicle-ready (truck / UTV / eBike) · <b>Dashed</b> = walk-only · <b>Dotted</b> = walk-only &amp; rough.</div>
       </div>
       <div class="row" style="margin-top:14px;">
         <button class="btn-ghost" id="discardTrailBtn" style="flex:1;">Discard</button>
@@ -6850,7 +6851,7 @@
       { done: st.entries>0, icon:'🅿', title:'3. Parking / entry points', sub: st.entries>0 ? (st.entries+' placed') : 'Where you start — powers walk-in routing', btn:'Add', act:'entry',
         help:'Tap <b>Add</b>, then tap the exact spot where you <b>park / step in</b>. It\'s preset to Parking/Access — just name it (e.g. "North gate — walk the ditch") and Save. Repeat for each entry. These are what the walk-in planner routes from.' },
       { done: st.paths>0, icon:'🥾', title:'4. Access paths', sub: st.paths>0 ? (st.paths+' access trails') : 'Draw the lanes you walk in on', btn:'Draw', act:'path',
-        help:'Tap <b>Draw</b>, click along the lane on the aerial bend by bend, and <b>double-click to finish</b>. Name it (defaults to Access Trail). <b>Already imported your HuntStand trails? Those are done</b> — this is only for lanes you didn\'t import.' },
+        help:'Tap <b>Draw</b>, click along the lane on the aerial bend by bend, and <b>double-click to finish</b>. Name it, and set the <b>line style</b> to how you travel it: <b>Solid</b> = vehicle-ready (truck/UTV/eBike), <b>Dashed</b> = walk-only, <b>Dotted</b> = walk-only &amp; rough — the Walk-In planner routes your ride vs. your boots off that. <b>Already imported your HuntStand trails? Those are done.</b>' },
       { done: st.feeding>0, icon:'🌾', title:'5. Feeding areas', sub: st.feeding>0 ? (st.feeding+' placed') : 'Fields/food — drives morning-crossing warnings', btn:'Add', act:'feeding',
         help:'Tap <b>Add</b>, then tap your field or food plot (preset to Feeding). Name it and note what\'s planted if you like — food changes year to year. Mark the edges you actually hunt.' },
       { done: st.bedding>0, icon:'🛏', title:'6. Bedding areas', sub: st.bedding>0 ? (st.bedding+' placed') : 'So routes avoid blowing them out', btn:'Add', act:'bedding',
@@ -9616,13 +9617,32 @@
   // hunt: passing too close to KNOWN bedding, and skirting your FIELDS on a MORNING sit (rising thermal, deer
   // still out feeding). Then it reads whether your SCENT drifts into that bedding as you walk. Honest by
   // design: it only knows the bedding/fields YOU marked and the paths YOU drew — the property base feeds it.
-  var _wiBack = null, _wiStand = null, _wiEntry = null, _walkInLayer = null;
+  var _wiBack = null, _wiStand = null, _wiEntry = null, _walkInLayer = null, _wiMode = 'ebike';
   function walkInStands(){ return sites.filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
   function walkInEntries(){ return sites.filter(function(s){ return s.type === 'access' && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
   function walkInBedding(){ return sites.filter(function(s){ return s.type === 'bedding' && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
   function walkInFeeding(){ return sites.filter(function(s){ return s.type === 'feeding' && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
-  function walkInAccessTrails(){ return (typeof trails !== 'undefined' ? trails : []).filter(function(t){ return t.module === activeModule && t.type === 'access' && t.points && t.points.length >= 2; }); }
-  function nearestVertexIdx(pts, lat, lng){ var bi = 0, bd = Infinity; for (var i = 0; i < pts.length; i++){ var d = distMeters(lat, lng, pts[i].lat, pts[i].lng); if (d < bd){ bd = d; bi = i; } } return bi; }
+  // A trail's LINE STYLE encodes how drivable it is (founder's field convention, taught to users in the help):
+  // solid = vehicle-ready, dashed = walk-only, dotted = walk-only & rough. Travel mode filters the network on it.
+  function trailDrivable(t){ return (t.lineStyle || 'solid') === 'solid'; }
+  var WALK_MODES = { walk: { label: 'Walk', icon: '🚶', motor: false }, ebike: { label: 'eBike', icon: '🚲', motor: true }, utv: { label: 'UTV/ATV', icon: '🛺', motor: true }, truck: { label: 'Truck', icon: '🛻', motor: true } };
+  // Routable paths for a travel mode: motorized modes ride only SOLID (vehicle-ready) lines; on foot, everything.
+  // (Dropped the old type==='access' filter — ANY trail is a walkable lane; line style, not type, decides driving.)
+  function walkInPaths(mode){
+    var motor = !!(WALK_MODES[mode] && WALK_MODES[mode].motor);
+    return (typeof trails !== 'undefined' ? trails : []).filter(function(t){
+      if (t.module !== activeModule || t.hidden || !t.points || t.points.length < 2) return false;
+      if (motor && !trailDrivable(t)) return false;   // truck/UTV/eBike skip walk-only (dashed/dotted) lanes
+      return true;
+    });
+  }
+  // project point p onto segment a→b; returns {t in [0,1], q(lat,lng), d(meters)}
+  function projOnSeg(p, a, b){
+    var mLat = 111320, mLng = 111320 * Math.cos((a.lat + b.lat) / 2 * Math.PI / 180);
+    var bx = (b.lng - a.lng) * mLng, by = (b.lat - a.lat) * mLat, px = (p.lng - a.lng) * mLng, py = (p.lat - a.lat) * mLat;
+    var L2 = bx * bx + by * by, t = L2 > 0 ? ((px * bx + py * by) / L2) : 0; if (t < 0) t = 0; if (t > 1) t = 1;
+    return { t: t, q: { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t }, d: Math.hypot(px - t * bx, py - t * by) };
+  }
   // point→segment distance in meters (local planar approx — fine at farm scale)
   function segPointDistM(pLat, pLng, aLat, aLng, bLat, bLng){
     var mLat = 111320, mLng = 111320 * Math.cos((aLat + bLat) / 2 * Math.PI / 180);
@@ -9633,56 +9653,60 @@
   function routeMeters(route){ var m = 0; for (var i = 1; i < route.length; i++) m += distMeters(route[i-1].lat, route[i-1].lng, route[i].lat, route[i].lng); return m; }
   function routeMinDistToPin(route, pin){ if (route.length < 2) return distMeters(route[0].lat, route[0].lng, pin.lat, pin.lng); var mn = Infinity; for (var i = 1; i < route.length; i++){ var d = segPointDistM(pin.lat, pin.lng, route[i-1].lat, route[i-1].lng, route[i].lat, route[i].lng); if (d < mn) mn = d; } return mn; }
   function routeNearestPointTo(route, pin){ var mn = Infinity, best = route[0]; route.forEach(function(p){ var d = distMeters(p.lat, p.lng, pin.lat, pin.lng); if (d < mn){ mn = d; best = p; } }); return best; }
-  // Build a walking GRAPH from ALL your Access paths: every path vertex is a node, consecutive vertices are
-  // edges, and vertices from DIFFERENT paths that nearly touch (a junction/crossing, within ~22 m) get joined.
-  // That lets the route HOP between connected lanes — the way you really walk in — instead of needing one
-  // single path to run the entire way (the old logic drew a straight line whenever no lone path did).
-  function buildAccessGraph(){
-    var segs = walkInAccessTrails(), nodes = [], adj = {};
-    function addEdge(a, b, w){ (adj[a] = adj[a] || []).push({ to: b, w: w }); (adj[b] = adj[b] || []).push({ to: a, w: w }); }
-    segs.forEach(function(t){
-      var prev = -1, prevPt = null;
-      t.points.forEach(function(p){
-        var id = nodes.length; nodes.push({ lat: p.lat, lng: p.lng, trail: t.id });
-        if (prev >= 0) addEdge(prev, id, distMeters(prevPt.lat, prevPt.lng, p.lat, p.lng));
-        prev = id; prevPt = p;
-      });
-    });
-    var SNAP = 22;
-    for (var i = 0; i < nodes.length; i++){ for (var j = i + 1; j < nodes.length; j++){ if (nodes[i].trail !== nodes[j].trail){ var d = distMeters(nodes[i].lat, nodes[i].lng, nodes[j].lat, nodes[j].lng); if (d < SNAP) addEdge(i, j, d); } } }
-    return { nodes: nodes, adj: adj };
+  // Build the routable segment set for a travel mode (each {a,b,trail,splits:[]}). Rebuilt per route call
+  // because routing mutates splits[]; farm-scale so cheap.
+  function buildWalkSegs(mode){
+    var segs = [];
+    walkInPaths(mode).forEach(function(t){ for (var i = 1; i < t.points.length; i++){ segs.push({ a: { lat: t.points[i-1].lat, lng: t.points[i-1].lng }, b: { lat: t.points[i].lat, lng: t.points[i].lng }, trail: t.id, splits: [] }); } });
+    return segs;
   }
-  // Dijkstra from the nearest node to the entry → nearest node to the stand (each must be within ~250 m of a
-  // path, else there's genuinely nothing to route on and we fall back to a straight line).
-  function routeOnGraph(g, entry, stand){
-    if (!g.nodes.length) return null;
-    function nearest(lat, lng){ var bi = -1, bd = Infinity; for (var i = 0; i < g.nodes.length; i++){ var d = distMeters(lat, lng, g.nodes[i].lat, g.nodes[i].lng); if (d < bd){ bd = d; bi = i; } } return { i: bi, d: bd }; }
-    var e = nearest(entry.lat, entry.lng), s = nearest(stand.lat, stand.lng), MAX = 250;
-    if (e.i < 0 || s.i < 0 || e.d > MAX || s.d > MAX) return null;
-    var N = g.nodes.length, dist = new Array(N), prev = new Array(N), done = new Array(N);
+  // Route entry→stand over the whole path NETWORK: attach each end to the nearest POINT on the nearest lane,
+  // JOIN lanes that touch/cross (a lane vertex within ~25 m of ANOTHER lane's SEGMENT — catches T-junctions and
+  // near-miss gaps, not just shared vertices), split segments at every such point, then Dijkstra. Returns
+  // {route,eD,sD} on success, or {none:true, …reason} so the caller can explain a straight-line fallback.
+  function routeOnSegs(segs, entry, stand){
+    if (!segs.length) return { none: true, noPaths: true };
+    function attach(p){ var best = null; segs.forEach(function(s){ var pr = projOnSeg(p, s.a, s.b); if (!best || pr.d < best.pr.d) best = { s: s, pr: pr }; }); return best; }
+    var eA = attach(entry), sA = attach(stand), MAXATT = 300;
+    if (!eA || !sA || eA.pr.d > MAXATT || sA.pr.d > MAXATT) return { none: true, eD: eA ? eA.pr.d : Infinity, sD: sA ? sA.pr.d : Infinity };
+    eA.s.splits.push(eA.pr.t); sA.s.splits.push(sA.pr.t);
+    var verts = []; segs.forEach(function(s){ verts.push({ lat: s.a.lat, lng: s.a.lng, trail: s.trail }); verts.push({ lat: s.b.lat, lng: s.b.lng, trail: s.trail }); });
+    var SNAP = 25, bridges = [];
+    verts.forEach(function(v){ segs.forEach(function(s){ if (s.trail === v.trail) return; var pr = projOnSeg(v, s.a, s.b); if (pr.d < SNAP){ s.splits.push(pr.t); bridges.push({ from: { lat: v.lat, lng: v.lng }, to: pr.q }); } }); });
+    var nodes = [], adj = {};
+    function nid(lat, lng){ for (var i = 0; i < nodes.length; i++){ if (distMeters(lat, lng, nodes[i].lat, nodes[i].lng) < 3) return i; } nodes.push({ lat: lat, lng: lng }); return nodes.length - 1; }
+    function addEdge(a, b){ if (a === b) return; var w = distMeters(nodes[a].lat, nodes[a].lng, nodes[b].lat, nodes[b].lng); (adj[a] = adj[a] || []).push({ to: b, w: w }); (adj[b] = adj[b] || []).push({ to: a, w: w }); }
+    segs.forEach(function(s){
+      var ts = [0, 1].concat(s.splits).filter(function(x){ return x >= 0 && x <= 1; }).sort(function(a, b){ return a - b; });
+      var chain = []; ts.forEach(function(t){ if (!chain.length || Math.abs(t - chain[chain.length - 1]) > 1e-4) chain.push(t); });
+      var ids = chain.map(function(t){ return nid(s.a.lat + (s.b.lat - s.a.lat) * t, s.a.lng + (s.b.lng - s.a.lng) * t); });
+      for (var i = 1; i < ids.length; i++) addEdge(ids[i-1], ids[i]);
+    });
+    bridges.forEach(function(br){ addEdge(nid(br.from.lat, br.from.lng), nid(br.to.lat, br.to.lng)); });
+    var startId = nid(eA.pr.q.lat, eA.pr.q.lng), endId = nid(sA.pr.q.lat, sA.pr.q.lng);
+    var N = nodes.length, dist = new Array(N), prev = new Array(N), done = new Array(N);
     for (var k = 0; k < N; k++){ dist[k] = Infinity; prev[k] = -1; done[k] = false; }
-    dist[e.i] = 0;
+    dist[startId] = 0;
     for (var it = 0; it < N; it++){
       var u = -1, ud = Infinity; for (var m = 0; m < N; m++){ if (!done[m] && dist[m] < ud){ ud = dist[m]; u = m; } }
-      if (u < 0 || u === s.i) break; done[u] = true;
-      (g.adj[u] || []).forEach(function(ed){ if (dist[u] + ed.w < dist[ed.to]){ dist[ed.to] = dist[u] + ed.w; prev[ed.to] = u; } });
+      if (u < 0 || u === endId) break; done[u] = true;
+      (adj[u] || []).forEach(function(ed){ if (dist[u] + ed.w < dist[ed.to]){ dist[ed.to] = dist[u] + ed.w; prev[ed.to] = u; } });
     }
-    if (dist[s.i] === Infinity) return null;
-    var pathIds = [], c = s.i; while (c !== -1){ pathIds.unshift(c); c = prev[c]; }
-    var mid = pathIds.map(function(id){ return { lat: g.nodes[id].lat, lng: g.nodes[id].lng }; });
-    return { route: [{ lat: entry.lat, lng: entry.lng }].concat(mid, [{ lat: stand.lat, lng: stand.lng }]), trailName: 'your access paths' };
+    if (dist[endId] === Infinity) return { none: true, disconnected: true, eD: eA.pr.d, sD: sA.pr.d };
+    var pathIds = [], c = endId; while (c !== -1){ pathIds.unshift(c); c = prev[c]; }
+    var mid = pathIds.map(function(id){ return { lat: nodes[id].lat, lng: nodes[id].lng }; });
+    return { route: [{ lat: entry.lat, lng: entry.lng }].concat(mid, [{ lat: stand.lat, lng: stand.lng }]), eD: eA.pr.d, sD: sA.pr.d };
   }
-  function buildWalkRoute(entry, stand){
-    var routed = routeOnGraph(buildAccessGraph(), entry, stand);
-    if (routed) return { route: routed.route, onTrail: true, trailName: routed.trailName };
-    return { route: [{ lat: entry.lat, lng: entry.lng }, { lat: stand.lat, lng: stand.lng }], onTrail: false, trailName: null };
+  function buildWalkRoute(entry, stand, mode){
+    var res = routeOnSegs(buildWalkSegs(mode || 'walk'), entry, stand);
+    if (res && res.route) return { route: res.route, onTrail: true, trailName: 'your paths', diag: res };
+    return { route: [{ lat: entry.lat, lng: entry.lng }, { lat: stand.lat, lng: stand.lng }], onTrail: false, trailName: null, diag: res || {} };
   }
-  function bestEntryFor(stand){
+  function bestEntryFor(stand, mode){
     var es = walkInEntries(); if (!es.length) return null;
-    var g = buildAccessGraph(), best = null;   // build the graph ONCE, route every entry on it
+    var best = null;
     es.forEach(function(e){
-      var routed = routeOnGraph(g, e, stand);
-      var plan = routed ? { route: routed.route, onTrail: true, trailName: routed.trailName } : { route: [{ lat: e.lat, lng: e.lng }, { lat: stand.lat, lng: stand.lng }], onTrail: false, trailName: null };
+      var plan = buildWalkRoute(e, stand, mode);
       var m = routeMeters(plan.route), score = m * (plan.onTrail ? 0.85 : 1);   // prefer a real path over a shorter straight line
       if (!best || score < best.score) best = { entry: e, plan: plan, meters: m, score: score };
     });
@@ -9703,19 +9727,20 @@
     if (!_wiBack || !_wiStand) return;
     var body = _wiBack.querySelector('#wiBody'); if (!body) return;
     var stand = _wiStand;
-    var be = _wiEntry ? { entry: _wiEntry, plan: buildWalkRoute(_wiEntry, stand) } : bestEntryFor(stand);
+    var be = _wiEntry ? { entry: _wiEntry, plan: buildWalkRoute(_wiEntry, stand, _wiMode) } : bestEntryFor(stand, _wiMode);
     if (!be){ body.innerHTML = '<div style="background:#3a2a1a;border:1px solid #7a5a2a;border-radius:10px;padding:12px;font-size:12.5px;color:#f0dcc0;line-height:1.55;">No <b>parking / entry points</b> on this property yet. Drop one where you actually step in — <b>Property Setup → 🅿 step 3</b>, or <b>+ Add Site → Parking/Access</b> — and the walk-in routes from it.</div>'; return; }
     var entry = be.entry, plan = be.plan; _wiEntry = entry;
     drawWalkInRoute(plan, entry, stand, true);
-    // --- diagnostic: when it falls back to a straight line, say exactly WHY (the data reality) ---
-    var _accT = walkInAccessTrails(), _verts = [];
-    _accT.forEach(function(t){ t.points.forEach(function(p){ _verts.push(p); }); });
+    // --- diagnostic: when it falls back to a straight line, say exactly WHY (the data reality), mode-aware ---
+    var _modeLbl = (WALK_MODES[_wiMode] ? WALK_MODES[_wiMode].label : _wiMode), _motor = !!(WALK_MODES[_wiMode] && WALK_MODES[_wiMode].motor);
+    var _paths = walkInPaths(_wiMode), _allN = walkInPaths('walk').length, _verts = [];
+    _paths.forEach(function(t){ t.points.forEach(function(p){ _verts.push(p); }); });
     function _nearVert(pt){ var mn = Infinity; for (var i = 0; i < _verts.length; i++){ var d = distMeters(pt.lat, pt.lng, _verts[i].lat, _verts[i].lng); if (d < mn) mn = d; } return mn; }
     var _eD = _verts.length ? _nearVert(entry) : Infinity, _sD = _verts.length ? _nearVert(stand) : Infinity, _diag;
-    if (!_accT.length) _diag = 'no Access-type trails in this module — your lanes may be a different trail type (or the property boundary), not Access paths';
-    else if (plan.onTrail) _diag = _accT.length + ' access paths · routed on your lanes ✓';
-    else if (_eD > 250 || _sD > 250) _diag = _accT.length + ' access paths, but the ' + (_eD >= _sD ? 'parking' : 'stand') + ' is ' + ydsLabel(Math.max(_eD, _sD)) + ' from the nearest lane — no path reaches it';
-    else _diag = _accT.length + ' access paths, both ends near a lane (entry ' + ydsLabel(_eD) + ' / stand ' + ydsLabel(_sD) + ') but they don\'t link into ONE network — a gap or T-junction wider than ~22 m';
+    if (!_paths.length) _diag = _allN ? ('no vehicle-ready (solid) lanes for ' + _modeLbl + ' — ' + _allN + ' walk-only lane' + (_allN === 1 ? '' : 's') + ' exist; set a drivable lane to Solid, or switch to Walk') : 'no trails in this module yet — draw your lanes (✏️) or import them';
+    else if (plan.onTrail) _diag = _paths.length + ' ' + _modeLbl + ' lane' + (_paths.length === 1 ? '' : 's') + ' · routed on your network ✓';
+    else if (_eD > 300 || _sD > 300) _diag = _paths.length + ' lanes, but the ' + (_eD >= _sD ? 'parking' : 'stand') + ' is ' + ydsLabel(Math.max(_eD, _sD)) + ' from the nearest lane — none reaches it';
+    else _diag = _paths.length + ' lanes, both ends near one (entry ' + ydsLabel(_eD) + ' / stand ' + ydsLabel(_sD) + ') but they don\'t link into ONE network — a gap wider than ~27 yds between lanes';
     var feet = Math.round(routeMeters(plan.route) * 3.28084);
     var ph = thermalPhase(stand.lat, stand.lng), isAM = ph.up === true, isPM = ph.up === false;
     var sitLabel = isAM ? '🌅 Morning sit — rising thermal, deer still out in the fields' : (isPM ? '🌇 Evening sit — falling thermal' : '🕛 Midday — thermals flat');
@@ -9735,7 +9760,7 @@
     if (bedWarn){ if (level === 'go') level = 'caution'; issues.push('⚠️ Route passes <b>' + ydsLabel(bedWarn.d) + '</b> from bedding (' + escapeHtml(bedWarn.pin.name) + ') — ' + (bedWarn.d < 70 ? 'too tight, you\'ll bump them.' : 'ease through quiet and slow.')); }
     if (feedWarn && isAM){ if (level === 'go') level = 'caution'; issues.push('⚠️ Skirts your field <b>' + escapeHtml(feedWarn.pin.name) + '</b> (' + ydsLabel(feedWarn.d) + ') on a morning walk — deer feeding there at first light will blow out.'); }
     else if (feedWarn){ issues.push('• Passes field ' + escapeHtml(feedWarn.pin.name) + ' (' + ydsLabel(feedWarn.d) + ') — fine for an evening slip-in.'); }
-    if (!plan.onTrail) issues.push('• No connected Access path reached this route — drew a straight line. Check your lanes are saved as <b>Access</b> trails and actually link up (junctions within ~20 yds), or draw the missing bit (✏️).');
+    if (!plan.onTrail) issues.push('• Couldn\'t route on your lanes for <b>' + _modeLbl + '</b> — drew a straight line. ' + (_motor ? 'Motorized modes use only <b>solid</b> (vehicle-ready) lanes — set a drivable lane to Solid, or switch to Walk.' : 'Check your lanes link up (gaps under ~27 yds) or draw the missing bit (✏️).'));
     var V = { go: { c: '#4CAF50', t: 'GO', s: 'Clean walk in' }, caution: { c: '#E8B04B', t: 'CAUTION', s: 'Doable — mind the notes' }, avoid: { c: '#D94A2E', t: 'RECONSIDER', s: 'This approach risks the hunt' } }[level];
     if (!issues.length) issues.push('✓ Stays clear of your marked bedding and fields, and your scent doesn\'t drift into them on the way.');
     var scentTo = sc.calm ? 'dead calm' : ('drifts ' + scentCompass16(sc.bearing));
@@ -9776,18 +9801,21 @@
     _wiEntry = null;
     var standOpts = stands.map(function(s){ return '<option value="' + escapeHtml(s.id) + '"' + (s.id === _wiStand.id ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>'; }).join('');
     var entries = walkInEntries();
+    var modeOpts = Object.keys(WALK_MODES).map(function(mk){ return '<option value="' + mk + '"' + (mk === _wiMode ? ' selected' : '') + '>' + WALK_MODES[mk].icon + ' ' + WALK_MODES[mk].label + '</option>'; }).join('');
+    var modeSel = '<div style="margin-bottom:10px;"><div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Getting there on</div><select id="wiModeSel" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;">' + modeOpts + '</select></div>';
     var entrySel = entries.length > 1 ? ('<div style="margin-bottom:10px;"><div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Enter from</div><select id="wiEntrySel" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;"><option value="">Closest (auto)</option>' + entries.map(function(e){ return '<option value="' + escapeHtml(e.id) + '">' + escapeHtml(e.name) + '</option>'; }).join('') + '</select></div>') : '';
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;">' +
         '<select id="wiStandSel" style="flex:1;min-width:0;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;">' + standOpts + '</select>' +
         '<button id="wiClose" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button>' +
-      '</div>' + entrySel +
+      '</div>' + modeSel + entrySel +
       '<div id="wiBody"><div style="text-align:center;color:#8aa596;padding:18px;">Plotting your way in…</div></div>' +
       '<div style="font-size:10.5px;color:#6f8377;margin-top:12px;line-height:1.4;text-align:center;">Routes from the entry points, paths, bedding &amp; fields YOU marked. The more of your ground is in, the sharper this gets.</div>';
     back.appendChild(card); document.body.appendChild(back);
     card.querySelector('#wiClose').addEventListener('click', close);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('#wiStandSel').addEventListener('change', function(){ var v = this.value; var ns = sites.filter(function(x){ return x.id === v; })[0]; if (ns){ _wiStand = ns; _wiEntry = null; wiRenderBody(); } });
+    var msel = card.querySelector('#wiModeSel'); if (msel) msel.addEventListener('change', function(){ _wiMode = this.value; _wiEntry = null; wiRenderBody(); });
     var esel = card.querySelector('#wiEntrySel'); if (esel) esel.addEventListener('change', function(){ var v = this.value; _wiEntry = v ? (sites.filter(function(x){ return x.id === v; })[0] || null) : null; wiRenderBody(); });
     wiRenderBody();
   }
