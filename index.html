@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 245</div>
+    <div id="buildBadge">BUILD 246</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6777,7 +6777,7 @@
   // on the property, paint it back for the hunter to VERIFY, and let them re-run it as the ground changes (timber
   // cut, fields rotated). Codes: f=field, w=woods, c=cutover/scrub, .=outside boundary / nodata.
   var IMAGERY_EXPORT = 'https://services.arcgisonline.com/arcgis/rest/services/World_Imagery/MapServer/export';
-  var landcoverVisible = false, landcoverOverlays = [];
+  var landcoverVisible = false, landcoverOverlays = [], landcoverOpacity = 0.55, _coverSelOverlay = null;
   function propBBox(prop){
     if (prop.boundary && prop.boundary.length >= 3){ var n = -90, s = 90, e = -180, w = 180; prop.boundary.forEach(function(pt){ n = Math.max(n, pt[0]); s = Math.min(s, pt[0]); e = Math.max(e, pt[1]); w = Math.min(w, pt[1]); }); return { n: n, s: s, e: e, w: w }; }
     if (prop.bounds) return { n: prop.bounds.north, s: prop.bounds.south, e: prop.bounds.east, w: prop.bounds.west };
@@ -6947,7 +6947,7 @@
       }
       ctx.putImageData(id, 0, 0);
       var bb = lc.bbox;
-      landcoverOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'landcoverPane', opacity: 0.55, interactive: false }).addTo(map));
+      landcoverOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'landcoverPane', opacity: landcoverOpacity, interactive: false }).addTo(map));
       pushCoverLabels(p, lc, types);
     });
   }
@@ -6971,10 +6971,24 @@
   function acresOf(lc, n){ return n * (lc.cellM * lc.cellM) / 4046.86; }
   function ensureConfirmed(lc){ if (!lc.confirmed || lc.confirmed.length !== lc.cols * lc.rows) lc.confirmed = new Array(lc.cols * lc.rows + 1).join('0'); return lc.confirmed; }
   function applyTypeToCells(prop, cells, code){ var lc = prop.landcover, arr = ensureTypes(lc).split(''), conf = ensureConfirmed(lc).split(''); cells.forEach(function(k){ arr[k] = code; conf[k] = '1'; }); lc.types = arr.join(''); lc.confirmed = conf.join(''); saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: save cover edit failed', e); }); renderLandcoverOverlay(); }
+  // Show the exact cells about to change — a white outline + faint fill — so you SEE the selection while you pick.
+  function clearCoverSelection(){ if (_coverSelOverlay){ map.removeLayer(_coverSelOverlay); _coverSelOverlay = null; } }
+  function showCoverSelection(prop, cells){
+    clearCoverSelection();
+    var lc = prop.landcover, cols = lc.cols, rows = lc.rows, sel = new Uint8Array(cols * rows); cells.forEach(function(k){ sel[k] = 1; });
+    var cv = document.createElement('canvas'); cv.width = cols; cv.height = rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(cols, rows);
+    for (var k = 0; k < cols * rows; k++){ if (!sel[k]) continue; var o = k * 4, x = k % cols, y = (k / cols) | 0;
+      var border = (x + 1 >= cols || !sel[k+1]) || (x <= 0 || !sel[k-1]) || (y + 1 >= rows || !sel[k+cols]) || (y <= 0 || !sel[k-cols]);
+      id.data[o] = 255; id.data[o+1] = 255; id.data[o+2] = 255; id.data[o+3] = border ? 255 : 70;
+    }
+    ctx.putImageData(id, 0, 0);
+    var bb = lc.bbox; _coverSelOverlay = L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'coverLabelPane', opacity: 0.95, interactive: false }).addTo(map);
+  }
   function pickCoverType(cb, ctx){
-    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100050;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;';
-    var card = document.createElement('div'); card.style.cssText = 'background:#1b2822;border:1px solid #35443a;border-radius:14px;padding:14px;max-width:330px;width:100%;max-height:80vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);';
-    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    // Non-covering bottom sheet: the map (and the white selection outline) stays visible while you choose.
+    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100050;background:transparent;pointer-events:none;font-family:inherit;';
+    var card = document.createElement('div'); card.style.cssText = 'pointer-events:auto;position:fixed;left:50%;bottom:58px;transform:translateX(-50%);width:330px;max-width:92vw;max-height:58vh;overflow:auto;background:#1b2822;border:1px solid #35443a;border-radius:14px;padding:14px;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.55);';
+    function close(){ if (back.parentNode) document.body.removeChild(back); clearCoverSelection(); }
     var opts = Object.keys(COVER_TYPES).map(function(code){ var d = COVER_TYPES[code];
       return '<button class="ct-opt" data-code="' + code + '" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:#26332b;border:1px solid #3c4d42;border-radius:9px;padding:8px 10px;margin-bottom:6px;color:#e8f0ea;cursor:pointer;">' +
         '<span style="width:14px;height:14px;border-radius:3px;background:rgb(' + d.color.join(',') + ');flex:0 0 auto;"></span>' +
@@ -6982,7 +6996,6 @@
     }).join('');
     card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:800;font-size:13.5px;">' + (ctx || 'Set cover type') + '</div><button class="ct-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' + opts;
     back.appendChild(card); document.body.appendChild(back);
-    back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('.ct-x').addEventListener('click', close);
     Array.prototype.forEach.call(card.querySelectorAll('.ct-opt'), function(b){ b.addEventListener('click', function(){ var code = b.getAttribute('data-code'); close(); cb(code); }); });
   }
@@ -6991,9 +7004,9 @@
     if (v && !landcoverVisible) setLandcoverVisible(true);
     try { map.getContainer().style.cursor = v ? 'crosshair' : ''; } catch (e) {}
     var eb = document.getElementById('lcEditBtn'); if (eb){ eb.textContent = v ? '✓ Done' : '✏️ Edit'; eb.style.background = v ? '#2E4636' : 'transparent'; }
-    var db = document.getElementById('lcDrawBtn'); if (db) db.style.display = v ? 'inline-block' : 'none';
-    if (!v && _coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
-    if (v) showToast('Tap a block to relabel it, or ▱ Draw for a custom shape. Tap ✓ Done when finished.');
+    ['lcDrawBtn', 'lcBoxBtn', 'lcLineBtn'].forEach(function(idd){ var bx = document.getElementById(idd); if (bx) bx.style.display = v ? 'inline-block' : 'none'; });
+    if (!v){ if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; } clearCoverSelection(); }
+    if (v) showToast('Tap a block to relabel it · ▭ box · ▱ area · 〰 line (for drains). Tap ✓ Done when finished.');
   }
   function startCoverDrawArea(){
     if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
@@ -7008,7 +7021,43 @@
       for (var y = 0; y < lc.rows; y++){ var lat = lc.bbox.n - (lc.bbox.n - lc.bbox.s) * ((y + 0.5) / lc.rows);
         for (var x = 0; x < lc.cols; x++){ var lng = lc.bbox.w + (lc.bbox.e - lc.bbox.w) * ((x + 0.5) / lc.cols); if (pointInPolygon(lat, lng, poly)) cells.push(y * lc.cols + x); } }
       if (!cells.length){ showToast('No cells inside that shape.'); return; }
+      showCoverSelection(prop, cells);
       pickCoverType(function(code){ applyTypeToCells(prop, cells, code); showToast('Set ~' + acresOf(lc, cells.length).toFixed(1) + ' ac to ' + COVER_TYPES[code].label + '.'); }, 'Drawn area ≈ ' + acresOf(lc, cells.length).toFixed(1) + ' ac');
+    });
+  }
+  function startCoverBox(){
+    if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
+    _coverDrawer = new L.Draw.Rectangle(map, { shapeOptions: { color: '#FFD24A', weight: 2, fillOpacity: 0.05 } });
+    _coverDrawer.enable();
+    showToast('Drag a box over the patch, then pick its type.');
+    map.once('draw:created', function(ev){
+      _coverDrawer = null; var b = ev.layer.getBounds();
+      var prop = propWithCoverAt(b.getCenter().lat, b.getCenter().lng); if (!prop || !prop.landcover){ showToast('Draw inside a scanned property.'); return; }
+      var lc = prop.landcover, cells = [];
+      for (var y = 0; y < lc.rows; y++){ var lat = lc.bbox.n - (lc.bbox.n - lc.bbox.s) * ((y + 0.5) / lc.rows); if (lat > b.getNorth() || lat < b.getSouth()) continue;
+        for (var x = 0; x < lc.cols; x++){ var lng = lc.bbox.w + (lc.bbox.e - lc.bbox.w) * ((x + 0.5) / lc.cols); if (lng >= b.getWest() && lng <= b.getEast()) cells.push(y * lc.cols + x); } }
+      if (!cells.length){ showToast('No cells in that box.'); return; }
+      showCoverSelection(prop, cells);
+      pickCoverType(function(code){ applyTypeToCells(prop, cells, code); showToast('Set ~' + acresOf(lc, cells.length).toFixed(1) + ' ac to ' + COVER_TYPES[code].label + '.'); }, 'Box ≈ ' + acresOf(lc, cells.length).toFixed(1) + ' ac');
+    });
+  }
+  function startCoverLine(){
+    if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
+    _coverDrawer = new L.Draw.Polyline(map, { shapeOptions: { color: '#00E5FF', weight: 3 } });
+    _coverDrawer.enable();
+    showToast('Trace the drain (or feature) as a line — double-click to finish, then pick its type.');
+    map.once('draw:created', function(ev){
+      _coverDrawer = null; var lls = ev.layer.getLatLngs(); if (!lls || lls.length < 2) return;
+      var prop = propWithCoverAt(lls[0].lat, lls[0].lng); if (!prop || !prop.landcover){ showToast('Draw inside a scanned property.'); return; }
+      var lc = prop.landcover, cellSet = {}, cells = [];
+      function markLine(lat, lng){ var x = Math.floor((lng - lc.bbox.w) / (lc.bbox.e - lc.bbox.w) * lc.cols), y = Math.floor((lc.bbox.n - lat) / (lc.bbox.n - lc.bbox.s) * lc.rows);
+        for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++){ if (dx !== 0 && dy !== 0) continue; var xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < lc.cols && yy < lc.rows){ var idx = yy * lc.cols + xx; if (!cellSet[idx]){ cellSet[idx] = 1; cells.push(idx); } } } }
+      for (var i = 1; i < lls.length; i++){ var la1 = lls[i-1].lat, ln1 = lls[i-1].lng, la2 = lls[i].lat, ln2 = lls[i].lng;
+        var dxc = Math.abs((ln2 - ln1) / (lc.bbox.e - lc.bbox.w) * lc.cols), dyc = Math.abs((la2 - la1) / (lc.bbox.n - lc.bbox.s) * lc.rows), st = Math.max(1, Math.ceil(Math.max(dxc, dyc)));
+        for (var t = 0; t <= st; t++){ var f = t / st; markLine(la1 + (la2 - la1) * f, ln1 + (ln2 - ln1) * f); } }
+      if (!cells.length){ showToast('Nothing traced.'); return; }
+      showCoverSelection(prop, cells);
+      pickCoverType(function(code){ applyTypeToCells(prop, cells, code); showToast('Set the traced line to ' + COVER_TYPES[code].label + '.'); }, 'Traced line — pick type (Drainage?)');
     });
   }
   map.on('click', function(e){
@@ -7016,21 +7065,27 @@
     var prop = propWithCoverAt(e.latlng.lat, e.latlng.lng); if (!prop){ showToast('Tap inside a scanned property to relabel a block.'); return; }
     var lc = prop.landcover, idx = cellIndexAt(lc, e.latlng.lat, e.latlng.lng); if (idx < 0) return;
     var cells = floodFillRegion(lc, idx), cur = COVER_TYPES[ensureTypes(lc).charAt(idx)];
+    showCoverSelection(prop, cells);
     pickCoverType(function(code){ applyTypeToCells(prop, cells, code); showToast('Set ' + cells.length + ' cells (~' + acresOf(lc, cells.length).toFixed(1) + ' ac) to ' + COVER_TYPES[code].label + '.'); }, 'This block ≈ ' + acresOf(lc, cells.length).toFixed(1) + ' ac' + (cur ? (' · now ' + cur.label) : ''));
   });
   function ensureLandcoverLegend(){
     var el = document.getElementById('landcoverLegend');
     if (!el){
       el = document.createElement('div'); el.id = 'landcoverLegend';
-      el.style.cssText = 'position:fixed;left:250px;bottom:46px;z-index:1200;background:rgba(15,20,17,0.92);color:#e8f0ea;font:11px sans-serif;padding:9px 11px;border-radius:9px;border:1px solid #2c3f34;line-height:1.5;box-shadow:0 4px 14px rgba(0,0,0,.45);max-width:186px;';
+      el.style.cssText = 'position:fixed;left:250px;bottom:46px;z-index:1200;background:rgba(15,20,17,0.92);color:#e8f0ea;font:11px sans-serif;padding:9px 11px;border-radius:9px;border:1px solid #2c3f34;line-height:1.5;box-shadow:0 4px 14px rgba(0,0,0,.45);width:210px;';
       function sw(code){ var d = COVER_TYPES[code]; return '<div style="display:flex;align-items:center;gap:6px;"><span style="width:11px;height:11px;border-radius:2px;background:rgb(' + d.color.join(',') + ');flex:0 0 auto;"></span><span style="font-size:10.5px;">' + d.label + '</span></div>'; }
+      var toolBtn = function(id, label, title){ return '<button id="' + id + '" title="' + title + '" style="display:none;font-size:11px;padding:2px 6px;border-radius:5px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;margin-right:3px;">' + label + '</button>'; };
       el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px;"><b style="font-size:11px;">🌲 Cover <span style="color:#8aa596;font-weight:400;">+½mi</span></b>' +
-        '<span style="white-space:nowrap;"><button id="lcDrawBtn" style="display:none;font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;margin-right:4px;">▱ Draw</button>' +
+        '<span style="white-space:nowrap;">' + toolBtn('lcBoxBtn', '▭', 'Box-select a patch') + toolBtn('lcLineBtn', '〰', 'Trace a line (drains)') + toolBtn('lcDrawBtn', '▱', 'Draw an area') +
         '<button id="lcEditBtn" style="font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c4d42;background:transparent;color:#cfe0d6;cursor:pointer;">✏️ Edit</button></span></div>' +
-        ['R','A','F','H','P','W','C','D','S','O'].map(sw).join('');
+        ['R','A','F','H','P','W','C','D','S','O'].map(sw).join('') +
+        '<div style="display:flex;align-items:center;gap:6px;margin-top:7px;border-top:1px solid #2c3f34;padding-top:6px;"><span style="font-size:10px;color:#8aa596;">Fade</span><input id="lcOpacity" type="range" min="15" max="100" value="' + Math.round(landcoverOpacity * 100) + '" style="flex:1;accent-color:#7CCB7C;cursor:pointer;"></div>';
       document.body.appendChild(el);
       el.querySelector('#lcEditBtn').addEventListener('click', function(){ setCoverEditMode(!coverEditMode); });
       el.querySelector('#lcDrawBtn').addEventListener('click', function(){ startCoverDrawArea(); });
+      el.querySelector('#lcBoxBtn').addEventListener('click', function(){ startCoverBox(); });
+      el.querySelector('#lcLineBtn').addEventListener('click', function(){ startCoverLine(); });
+      el.querySelector('#lcOpacity').addEventListener('input', function(){ landcoverOpacity = this.value / 100; renderLandcoverOverlay(); });
     }
     return el;
   }
