@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 257</div>
+    <div id="buildBadge">BUILD 258</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10229,8 +10229,9 @@
     var bb = lc.bbox, x = Math.floor((lng - bb.w) / (bb.e - bb.w) * lc.cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * lc.rows);
     x = Math.max(0, Math.min(lc.cols - 1, x)); y = Math.max(0, Math.min(lc.rows - 1, y)); return y * lc.cols + x;
   }
-  function fieldCutRoute(entry, stand, coverProp, isAM, beds, mode){
+  function fieldCutRoute(entry, stand, coverProp, isAM, beds, mode, style){
     var lc = coverProp && coverProp.landcover; if (!lc || !lc.grid) return null;
+    var edgeStyle = (style === 'edge');   // 'cut' = slice the open interior; 'edge' = hug the field margin, shorter side around
     var types = ensureTypes(lc), cols = lc.cols, rows = lc.rows, N = cols * rows, cellM = lc.cellM || 6, bb = lc.bbox;
     function isField(c){ return c === 'F' || c === 'R' || c === 'A'; }
     // edge-band mask: a field cell within 2 cells of NON-field (a wood line) = the deer's doorway band → costly
@@ -10252,9 +10253,15 @@
     function pen(k){
       var bp = bedPen ? bedPen[k] : 0;
       if (onTrail[k]) return 0.12 + bp;                                    // on your lane — cheap, any cover
-      var code = types.charAt(k);
-      if (code === 'F' || code === 'R'){ var p = edge[k] ? 1.6 : 0.15; if (isAM) p += 1.2; return p + bp; }   // open field
-      if (code === 'A'){ var pa = edge[k] ? 1.2 : 0.10; if (isAM) pa += 0.8; return pa + bp; }                // pasture
+      var code = types.charAt(k), isFld = (code === 'F' || code === 'R'), isPas = (code === 'A');
+      if (isFld || isPas){
+        // CUT: interior cheap, edge band costly (slice the middle).  EDGE: interior costly, margin cheap (hug the
+        // field boundary and take the shorter side around — the "west edge" line).
+        var interior = edgeStyle ? (isPas ? 3.0 : 3.5) : (isPas ? 0.10 : 0.15);
+        var band     = edgeStyle ? (isPas ? 0.30 : 0.35) : (isPas ? 1.2 : 1.6);
+        var p = edge[k] ? band : interior; if (isAM) p += (isPas ? 0.8 : 1.2);
+        return p + bp;
+      }
       if (code === 'D') return 1.2 + bp;                                   // drainage: a natural lane, thick but passable
       if (code === 'O') return 6.0 + bp;                                   // water
       return OFF_WOODS_PEN + bp;                                           // W/H/P/C/S off-trail: don't bushwhack timber
@@ -10386,18 +10393,25 @@
     // cut is often the CLEANER hunt route, not just the faster one. Compute both, draw one bold + the other faint,
     // let the hunter pick (only he knows if the crop's up) — scent/thermals are the one thing that overrides "take
     // the short one." Falls back to the network stealth/direct pair when there's no distinct cut (no cover grid, etc.).
-    var _cut = (coverProp && coverProp.landcover && coverProp.landcover.grid) ? fieldCutRoute(entry, stand, coverProp, isAM, beds, _wiMode) : null;
+    // Two cover-aware options, BOTH riding your lanes through timber (no bushwhack), computed on the grid so they
+    // don't depend on which field-edge lanes happen to connect: CUT slices the open interior; EDGE-AROUND hugs the
+    // field margin and takes the shorter side around (his "west edge" line).
+    var _hasCoverGrid = !!(coverProp && coverProp.landcover && coverProp.landcover.grid);
+    var _cutR = _hasCoverGrid ? fieldCutRoute(entry, stand, coverProp, isAM, beds, _wiMode, 'cut') : null;
+    var _edgeR = _hasCoverGrid ? fieldCutRoute(entry, stand, coverProp, isAM, beds, _wiMode, 'edge') : null;
     var _cands = [];
-    if (_cut && routesDiffer(_cut.route, plan.route)){
-      _cands = [ { key: 'cut', label: '✂ Cut the field', route: _cut.route, onTrail: false },
-                 { key: 'around', label: '🌲 Around edge', route: plan.route, onTrail: plan.onTrail } ];
-      if (_wiRoutePref !== 'cut' && _wiRoutePref !== 'around') _wiRoutePref = 'cut';   // default: take the short cut (his call); scent notes flag it if the wind's wrong
+    if (_cutR && _edgeR && routesDiffer(_cutR.route, _edgeR.route)){
+      _cands = [ { key: 'cut', label: '✂ Cut the field', route: _cutR.route },
+                 { key: 'around', label: '🌲 Edge around', route: _edgeR.route } ];
+      if (_wiRoutePref !== 'cut' && _wiRoutePref !== 'around') _wiRoutePref = 'cut';   // default: take the short cut (his call); notes/scent flag it if the wind's wrong or the crop's up
     } else if (_wiRoutePref === 'cut' || _wiRoutePref === 'around'){
-      _wiRoutePref = 'stealth';   // no distinct cut on this stand — fall back to the network stealth/direct pair
+      _wiRoutePref = 'stealth';   // cut & edge coincide (no field between) — drop back to the network stealth/direct pair
     }
     var _pick = _cands.filter(function(c){ return c.key === _wiRoutePref; })[0];
-    var chosen = _pick ? _pick.route : ((_wiRoutePref === 'direct' && plan.directRoute) ? plan.directRoute : plan.route);
-    var chosenOnTrail = _pick ? _pick.onTrail : plan.onTrail;
+    var _soloCover = (!_cands.length && _cutR) ? _cutR.route : null;   // a single sensible cover route still beats the raw network line
+    var chosen = _pick ? _pick.route : (_soloCover || ((_wiRoutePref === 'direct' && plan.directRoute) ? plan.directRoute : plan.route));
+    var _coverRoute = !!_pick || !!_soloCover;
+    var chosenOnTrail = _coverRoute ? false : plan.onTrail;
     var _alt = _cands.length ? (_cands.filter(function(c){ return c.key !== _wiRoutePref; })[0] || null) : null;
     drawWalkInRoute({ route: chosen }, entry, stand, true, _alt ? _alt.route : null);
     // --- diagnostic: when it falls back to a straight line, say exactly WHY (the data reality), mode-aware ---
@@ -10440,11 +10454,11 @@
       else { issues.push('• Crosses <b>' + oy + ' of open field</b> — fine for an evening slip-in, exposed at dawn.'); } }
     if (hasCover && bedCover){ if (level === 'go') level = 'caution'; issues.push('⚠️ Threads <b>' + bedCover.label + '</b> (bedding cover) — ease through slow and quiet, or you\'ll bump deer off the bed.'); }
     // which option is drawn, and the crop escape hatch (only YOU know if the crop's standing)
-    if (_pick && _pick.key === 'cut') issues.push('✂ <b>Cutting the field</b> — shortest way, and it holds off the edge band (the deer\'s doorways). <b>If the crop\'s standing, tap 🌲 Around</b> to skirt the west edge instead.');
-    else if (_pick && _pick.key === 'around') issues.push('🌲 <b>Skirting the edge</b> — right call if the crop\'s up or you want to stay in cover, but it\'s longer and runs nearer the field\'s entry trails. Tap <b>✂ Cut the field</b> for the short line.');
-    if (hasCover && level === 'go' && !openM && !bedCover && chosenOnTrail) issues.push('✓ Stays in the timber the whole way — deer won\'t see you coming.');
-    if (!chosenOnTrail && !(_pick && _pick.key === 'cut')) issues.push('• Couldn\'t route on your lanes for <b>' + _modeLbl + '</b> — drew a straight line. ' + (_motor ? 'Motorized modes use only <b>solid</b> (vehicle-ready) lanes — set a drivable lane to Solid, or switch to Walk.' : 'Check your lanes link up (gaps under ~27 yds) or draw the missing bit (✏️).'));
-    if (!beds.length && (chosenOnTrail || (_pick && _pick.key === 'cut'))) issues.push('• No <b>bedding</b> marked yet — routing off cover + fields only. Drop your bedding (🛏, Property Setup step 6) and I\'ll bend <i>around</i> it to keep you off the deer\'s approach.');
+    if (_pick && _pick.key === 'cut') issues.push('✂ <b>Cutting the field</b> — shortest way, and it holds off the edge band (the deer\'s doorways). <b>If the crop\'s standing, tap 🌲 Edge around</b> to hug the margin instead.');
+    else if (_pick && _pick.key === 'around') issues.push('🌲 <b>Edge-around</b> — hugs the field margin and takes the shorter side around (fewer doorways than looping the whole perimeter). Use it when the crop\'s up or you want to stay tight to cover. Tap <b>✂ Cut the field</b> for the short line across.');
+    if (hasCover && level === 'go' && !openM && !bedCover && (chosenOnTrail || _coverRoute)) issues.push('✓ Stays in cover the whole way — deer won\'t see you coming.');
+    if (!chosenOnTrail && !_coverRoute) issues.push('• Couldn\'t route on your lanes for <b>' + _modeLbl + '</b> — drew a straight line. ' + (_motor ? 'Motorized modes use only <b>solid</b> (vehicle-ready) lanes — set a drivable lane to Solid, or switch to Walk.' : 'Check your lanes link up (gaps under ~27 yds) or draw the missing bit (✏️).'));
+    if (!beds.length && (chosenOnTrail || _coverRoute)) issues.push('• No <b>bedding</b> marked yet — routing off cover + fields only. Drop your bedding (🛏, Property Setup step 6) and I\'ll bend <i>around</i> it to keep you off the deer\'s approach.');
     if (!_cands.length && plan.onTrail && plan.hasAlt && _wiRoutePref === 'stealth') issues.unshift('🕶 <b>Stealth route</b> — longer on purpose: it bends around your bedding so you don\'t walk in through the deer. Tap <b>Direct</b> for the short way.');
     var V = { go: { c: '#4CAF50', t: 'GO', s: 'Clean walk in' }, caution: { c: '#E8B04B', t: 'CAUTION', s: 'Doable — mind the notes' }, avoid: { c: '#D94A2E', t: 'RECONSIDER', s: 'This approach risks the hunt' } }[level];
     if (!issues.length) issues.push('✓ Stays clear of your marked bedding and fields, and your scent doesn\'t drift into them on the way.');
@@ -10465,7 +10479,7 @@
       altToggle +
       '<div style="background:#1c2b23;border-radius:11px;padding:12px;margin-bottom:10px;font-size:12.5px;line-height:1.55;">' +
         '🚶 From <b>' + escapeHtml(entry.name) + '</b> → <b>' + escapeHtml(stand.name) + '</b><br>' +
-        '<span style="color:#c7d4cc;">' + feet + ' ft · ' + (_pick ? (_pick.key === 'cut' ? 'cuts the field + your paths' : ('around the edge · ' + escapeHtml(plan.trailName || 'your paths'))) : (plan.onTrail ? ('along ' + escapeHtml(plan.trailName || 'your path')) : 'straight line')) + '</span><br>' +
+        '<span style="color:#c7d4cc;">' + feet + ' ft · ' + (_coverRoute ? (_pick ? (_pick.key === 'cut' ? 'cuts the field + your paths' : 'hugs the field edge + your paths') : 'best line in + your paths') : (plan.onTrail ? ('along ' + escapeHtml(plan.trailName || 'your path')) : 'straight line')) + '</span><br>' +
         '<span style="color:#8aa596;">' + sitLabel + '</span></div>' +
       '<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px;">' +
         issues.map(function(t){ return '<div style="background:#1c2b23;border-radius:9px;padding:9px 11px;font-size:12px;line-height:1.5;color:#dbe7df;">' + t + '</div>'; }).join('') +
