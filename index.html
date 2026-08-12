@@ -1685,6 +1685,7 @@
       <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt Tonight</button>
       <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🌤 Plan Ahead — forecast</button>
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
+      <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
     </div>
 
@@ -1793,7 +1794,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 230</div>
+    <div id="buildBadge">BUILD 231</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8137,6 +8138,7 @@
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _wib = document.getElementById('walkInBtn'); if (_wib) _wib.style.display = activeModule === 'hunting' ? 'block' : 'none';
   }
 
   // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
@@ -9607,6 +9609,134 @@
     _hmRefresh = setInterval(hmRenderBody, 240000);
   }
   var _hmBtn = document.getElementById('huntModeBtn'); if (_hmBtn) _hmBtn.addEventListener('click', showHuntMode);
+
+  // ---------- 🚶 Walk-In / approach planner — the payoff of the property base ----------
+  // Pick a stand; the app picks your closest ENTRY point, routes you in along your Access PATHS when one
+  // connects (else a straight line), draws it on the map, and checks the walk for the two things that blow a
+  // hunt: passing too close to KNOWN bedding, and skirting your FIELDS on a MORNING sit (rising thermal, deer
+  // still out feeding). Then it reads whether your SCENT drifts into that bedding as you walk. Honest by
+  // design: it only knows the bedding/fields YOU marked and the paths YOU drew — the property base feeds it.
+  var _wiBack = null, _wiStand = null, _wiEntry = null, _walkInLayer = null;
+  function walkInStands(){ return sites.filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
+  function walkInEntries(){ return sites.filter(function(s){ return s.type === 'access' && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
+  function walkInBedding(){ return sites.filter(function(s){ return s.type === 'bedding' && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
+  function walkInFeeding(){ return sites.filter(function(s){ return s.type === 'feeding' && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
+  function walkInAccessTrails(){ return (typeof trails !== 'undefined' ? trails : []).filter(function(t){ return t.module === activeModule && t.type === 'access' && t.points && t.points.length >= 2; }); }
+  function nearestVertexIdx(pts, lat, lng){ var bi = 0, bd = Infinity; for (var i = 0; i < pts.length; i++){ var d = distMeters(lat, lng, pts[i].lat, pts[i].lng); if (d < bd){ bd = d; bi = i; } } return bi; }
+  // point→segment distance in meters (local planar approx — fine at farm scale)
+  function segPointDistM(pLat, pLng, aLat, aLng, bLat, bLng){
+    var mLat = 111320, mLng = 111320 * Math.cos((aLat + bLat) / 2 * Math.PI / 180);
+    var bx = (bLng - aLng) * mLng, by = (bLat - aLat) * mLat, px = (pLng - aLng) * mLng, py = (pLat - aLat) * mLat;
+    var L2 = bx * bx + by * by, t = L2 > 0 ? ((px * bx + py * by) / L2) : 0; t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - t * bx, py - t * by);
+  }
+  function routeMeters(route){ var m = 0; for (var i = 1; i < route.length; i++) m += distMeters(route[i-1].lat, route[i-1].lng, route[i].lat, route[i].lng); return m; }
+  function routeMinDistToPin(route, pin){ if (route.length < 2) return distMeters(route[0].lat, route[0].lng, pin.lat, pin.lng); var mn = Infinity; for (var i = 1; i < route.length; i++){ var d = segPointDistM(pin.lat, pin.lng, route[i-1].lat, route[i-1].lng, route[i].lat, route[i].lng); if (d < mn) mn = d; } return mn; }
+  function routeNearestPointTo(route, pin){ var mn = Infinity, best = route[0]; route.forEach(function(p){ var d = distMeters(p.lat, p.lng, pin.lat, pin.lng); if (d < mn){ mn = d; best = p; } }); return best; }
+  // route entry→stand: ride an Access path if one runs near BOTH ends (within ~70m), else a straight line
+  function buildWalkRoute(entry, stand){
+    var best = null;
+    walkInAccessTrails().forEach(function(t){
+      var eIdx = nearestVertexIdx(t.points, entry.lat, entry.lng), sIdx = nearestVertexIdx(t.points, stand.lat, stand.lng);
+      var eD = distMeters(entry.lat, entry.lng, t.points[eIdx].lat, t.points[eIdx].lng), sD = distMeters(stand.lat, stand.lng, t.points[sIdx].lat, t.points[sIdx].lng);
+      if (eD <= 70 && sD <= 70){ var sc = eD + sD; if (!best || sc < best.sc) best = { t: t, eIdx: eIdx, sIdx: sIdx, sc: sc }; }
+    });
+    if (best){ var pts = [], a = best.eIdx, b = best.sIdx, step = a <= b ? 1 : -1; for (var i = a; ; i += step){ pts.push({ lat: best.t.points[i].lat, lng: best.t.points[i].lng }); if (i === b) break; } return { route: [{ lat: entry.lat, lng: entry.lng }].concat(pts, [{ lat: stand.lat, lng: stand.lng }]), onTrail: true, trailName: best.t.name }; }
+    return { route: [{ lat: entry.lat, lng: entry.lng }, { lat: stand.lat, lng: stand.lng }], onTrail: false, trailName: null };
+  }
+  function bestEntryFor(stand){ var es = walkInEntries(); if (!es.length) return null; var best = null; es.forEach(function(e){ var plan = buildWalkRoute(e, stand), m = routeMeters(plan.route), score = m * (plan.onTrail ? 0.85 : 1); if (!best || score < best.score) best = { entry: e, plan: plan, meters: m, score: score }; }); return best; }
+  function clearWalkInRoute(){ if (_walkInLayer){ map.removeLayer(_walkInLayer); _walkInLayer = null; } }
+  function drawWalkInRoute(plan, entry, stand, fit){
+    clearWalkInRoute(); _walkInLayer = L.layerGroup().addTo(map);
+    var lls = plan.route.map(function(p){ return [p.lat, p.lng]; });
+    L.polyline(lls, { color: '#0d1b12', weight: 9, opacity: 0.55, interactive: false }).addTo(_walkInLayer);
+    L.polyline(lls, { color: '#63C6FF', weight: 4.5, opacity: 0.95, dashArray: '2 11', lineCap: 'round', interactive: false }).addTo(_walkInLayer);
+    L.circleMarker([entry.lat, entry.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#2E7DD1', fillOpacity: 1, interactive: false }).addTo(_walkInLayer);
+    L.circleMarker([stand.lat, stand.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#D94A2E', fillOpacity: 1, interactive: false }).addTo(_walkInLayer);
+    if (fit){ try { map.fitBounds(L.polyline(lls).getBounds(), { padding: [70, 70], maxZoom: 17 }); } catch (e) {} }
+  }
+  function wiClose(){ if (_wiBack && _wiBack.parentNode) document.body.removeChild(_wiBack); _wiBack = null; _wiStand = null; _wiEntry = null; clearWalkInRoute(); }
+  async function wiRenderBody(){
+    if (!_wiBack || !_wiStand) return;
+    var body = _wiBack.querySelector('#wiBody'); if (!body) return;
+    var stand = _wiStand;
+    var be = _wiEntry ? { entry: _wiEntry, plan: buildWalkRoute(_wiEntry, stand) } : bestEntryFor(stand);
+    if (!be){ body.innerHTML = '<div style="background:#3a2a1a;border:1px solid #7a5a2a;border-radius:10px;padding:12px;font-size:12.5px;color:#f0dcc0;line-height:1.55;">No <b>parking / entry points</b> on this property yet. Drop one where you actually step in — <b>Property Setup → 🅿 step 3</b>, or <b>+ Add Site → Parking/Access</b> — and the walk-in routes from it.</div>'; return; }
+    var entry = be.entry, plan = be.plan; _wiEntry = entry;
+    drawWalkInRoute(plan, entry, stand, true);
+    var feet = Math.round(routeMeters(plan.route) * 3.28084);
+    var ph = thermalPhase(stand.lat, stand.lng), isAM = ph.up === true, isPM = ph.up === false;
+    var sitLabel = isAM ? '🌅 Morning sit — rising thermal, deer still out in the fields' : (isPM ? '🌇 Evening sit — falling thermal' : '🕛 Midday — thermals flat');
+    var beds = walkInBedding(), feeds = walkInFeeding();
+    var bedWarn = null; beds.forEach(function(b){ var d = routeMinDistToPin(plan.route, b); if (d < 137 && (!bedWarn || d < bedWarn.d)) bedWarn = { d: d, pin: b }; });
+    var feedWarn = null; feeds.forEach(function(f){ var d = routeMinDistToPin(plan.route, f); if (d < 60 && (!feedWarn || d < feedWarn.d)) feedWarn = { d: d, pin: f }; });
+    // scent read at the stand (same physics as Hunt Mode) — then does it drift INTO bedding you pass?
+    var wx = await scentWeather(stand.lat, stand.lng); if (!_wiBack) return;
+    var th = await standThermalPoint(stand.lat, stand.lng, wx ? wx.cloudCoverPct : null); if (!_wiBack) return;
+    var windMph = wx ? wx.windMph : 0, windFrom = (wx && wx.windDirDeg != null) ? wx.windDirDeg : null;
+    var sc = combineScent(th.bearing, th.mph, windFrom, windMph);
+    var scentBedWarn = null;
+    if (!sc.calm){ beds.forEach(function(b){ var d = routeMinDistToPin(plan.route, b); if (d < 200){ var np = routeNearestPointTo(plan.route, b); var toBed = bearingBetween(np.lat, np.lng, b.lat, b.lng); var diff = Math.abs(sc.bearing - toBed) % 360; if (diff > 180) diff = 360 - diff; if (diff < 55 && (!scentBedWarn || d < scentBedWarn.d)) scentBedWarn = { d: d, pin: b }; } }); }
+    // verdict
+    var level = 'go', issues = [];
+    if (scentBedWarn){ level = 'avoid'; issues.push('🚫 Your <b>scent drifts into ' + escapeHtml(scentBedWarn.pin.name) + '</b> (' + ydsLabel(scentBedWarn.d) + ' off your route) as you walk — you\'ll wind the bedding before you\'re even settled.'); }
+    if (bedWarn){ if (level === 'go') level = 'caution'; issues.push('⚠️ Route passes <b>' + ydsLabel(bedWarn.d) + '</b> from bedding (' + escapeHtml(bedWarn.pin.name) + ') — ' + (bedWarn.d < 70 ? 'too tight, you\'ll bump them.' : 'ease through quiet and slow.')); }
+    if (feedWarn && isAM){ if (level === 'go') level = 'caution'; issues.push('⚠️ Skirts your field <b>' + escapeHtml(feedWarn.pin.name) + '</b> (' + ydsLabel(feedWarn.d) + ') on a morning walk — deer feeding there at first light will blow out.'); }
+    else if (feedWarn){ issues.push('• Passes field ' + escapeHtml(feedWarn.pin.name) + ' (' + ydsLabel(feedWarn.d) + ') — fine for an evening slip-in.'); }
+    if (!plan.onTrail) issues.push('• No Access path connects here — this is a straight line. Draw the lane you actually walk (✏️) and it\'ll route on it.');
+    var V = { go: { c: '#4CAF50', t: 'GO', s: 'Clean walk in' }, caution: { c: '#E8B04B', t: 'CAUTION', s: 'Doable — mind the notes' }, avoid: { c: '#D94A2E', t: 'RECONSIDER', s: 'This approach risks the hunt' } }[level];
+    if (!issues.length) issues.push('✓ Stays clear of your marked bedding and fields, and your scent doesn\'t drift into them on the way.');
+    var scentTo = sc.calm ? 'dead calm' : ('drifts ' + scentCompass16(sc.bearing));
+    body.innerHTML =
+      '<div style="background:' + V.c + '1f;border:1px solid ' + V.c + ';border-radius:12px;padding:11px 13px;margin-bottom:11px;">' +
+        '<div style="font-size:16px;font-weight:800;color:' + V.c + ';">' + V.t + '</div>' +
+        '<div style="font-size:12px;color:#cfe0d6;margin-top:1px;">' + V.s + '</div></div>' +
+      '<div style="background:#1c2b23;border-radius:11px;padding:12px;margin-bottom:10px;font-size:12.5px;line-height:1.55;">' +
+        '🚶 From <b>' + escapeHtml(entry.name) + '</b> → <b>' + escapeHtml(stand.name) + '</b><br>' +
+        '<span style="color:#c7d4cc;">' + feet + ' ft · ' + (plan.onTrail ? ('along ' + escapeHtml(plan.trailName || 'your path')) : 'straight line') + '</span><br>' +
+        '<span style="color:#8aa596;">' + sitLabel + '</span></div>' +
+      '<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px;">' +
+        issues.map(function(t){ return '<div style="background:#1c2b23;border-radius:9px;padding:9px 11px;font-size:12px;line-height:1.5;color:#dbe7df;">' + t + '</div>'; }).join('') +
+      '</div>' +
+      '<div style="display:flex;gap:10px;">' +
+        '<div style="flex:1;background:#1c2b23;border-radius:11px;padding:11px;"><div style="font-size:11px;color:#8aa596;">💨 Wind</div><div style="font-size:14px;color:#f2f7f3;">' + (wx ? (wx.windDir + ' ' + windMph + ' mph') : 'offline') + '</div></div>' +
+        '<div style="flex:1;background:#1c2b23;border-radius:11px;padding:11px;"><div style="font-size:11px;color:#8aa596;">🧭 Your scent</div><div style="font-size:14px;color:#f2f7f3;">' + scentTo + '</div></div>' +
+      '</div>';
+  }
+  function showWalkIn(){
+    wiClose();
+    var stands = walkInStands();
+    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100008;background:rgba(6,10,8,.9);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div'); card.style.cssText = 'background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;max-width:460px;width:100%;color:#e8f0ea;box-shadow:0 12px 44px rgba(0,0,0,.6);margin:auto;';
+    _wiBack = back;
+    function close(){ wiClose(); }
+    if (!stands.length){
+      card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="font-weight:800;font-size:17px;">🚶 Walk-In</div><button id="wiClose" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
+        '<div style="font-size:13px;color:#c7d4cc;line-height:1.55;">No hunt spots on this property yet. Drop a <b>Tree Stand</b> (or open a site → <b>🏹 I hunt here</b>), then Walk-In can route you to it.</div>';
+      back.appendChild(card); document.body.appendChild(back);
+      card.querySelector('#wiClose').addEventListener('click', close); back.addEventListener('click', function(e){ if (e.target === back) close(); });
+      return;
+    }
+    _wiStand = stands.slice().sort(function(a, b){ return lastKnownPos ? (distMeters(lastKnownPos.lat, lastKnownPos.lng, a.lat, a.lng) - distMeters(lastKnownPos.lat, lastKnownPos.lng, b.lat, b.lng)) : 0; })[0];
+    _wiEntry = null;
+    var standOpts = stands.map(function(s){ return '<option value="' + escapeHtml(s.id) + '"' + (s.id === _wiStand.id ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>'; }).join('');
+    var entries = walkInEntries();
+    var entrySel = entries.length > 1 ? ('<div style="margin-bottom:10px;"><div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Enter from</div><select id="wiEntrySel" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;"><option value="">Closest (auto)</option>' + entries.map(function(e){ return '<option value="' + escapeHtml(e.id) + '">' + escapeHtml(e.name) + '</option>'; }).join('') + '</select></div>') : '';
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;">' +
+        '<select id="wiStandSel" style="flex:1;min-width:0;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;">' + standOpts + '</select>' +
+        '<button id="wiClose" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button>' +
+      '</div>' + entrySel +
+      '<div id="wiBody"><div style="text-align:center;color:#8aa596;padding:18px;">Plotting your way in…</div></div>' +
+      '<div style="font-size:10.5px;color:#6f8377;margin-top:12px;line-height:1.4;text-align:center;">Routes from the entry points, paths, bedding &amp; fields YOU marked. The more of your ground is in, the sharper this gets.</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    card.querySelector('#wiClose').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('#wiStandSel').addEventListener('change', function(){ var v = this.value; var ns = sites.filter(function(x){ return x.id === v; })[0]; if (ns){ _wiStand = ns; _wiEntry = null; wiRenderBody(); } });
+    var esel = card.querySelector('#wiEntrySel'); if (esel) esel.addEventListener('change', function(){ var v = this.value; _wiEntry = v ? (sites.filter(function(x){ return x.id === v; })[0] || null) : null; wiRenderBody(); });
+    wiRenderBody();
+  }
+  var _wiBtn = document.getElementById('walkInBtn'); if (_wiBtn) _wiBtn.addEventListener('click', showWalkIn);
 
   document.querySelectorAll('.layer-btn[data-layer]').forEach(function(btn){
     btn.addEventListener('click', function(){
