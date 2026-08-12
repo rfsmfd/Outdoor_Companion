@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 242</div>
+    <div id="buildBadge">BUILD 243</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6849,9 +6849,34 @@
     var code = ensureTypes(lc).charAt(y * lc.cols + x), d = COVER_TYPES[code];
     return d ? { code: code, label: d.label, meaning: d.meaning } : null;
   }
-  function clearLandcoverOverlay(){ landcoverOverlays.forEach(function(o){ map.removeLayer(o); }); landcoverOverlays = []; }
+  function clearLandcoverOverlay(){ landcoverOverlays.forEach(function(o){ map.removeLayer(o); }); landcoverOverlays = []; if (coverLabelLayer) coverLabelLayer.clearLayers(); }
+  var coverLabelLayer = null;
+  var COVER_SHORT = { F: 'Field', R: 'Crop field', A: 'Pasture', W: 'Woods', H: 'Hardwood', P: 'Young pine', C: 'Cutover', D: 'Drainage', S: 'Swamp' };
+  // Drop a "✓ Type" pill at the centre of every block the hunter has CLASSIFIED (type differs from the raw auto-read),
+  // so you can sweep the property and see what's done — untouched auto blocks stay unlabelled = still to do.
+  function pushCoverLabels(p, lc, types){
+    var cols = lc.cols, rows = lc.rows, grid = lc.grid, N = cols * rows;
+    var edited = new Uint8Array(N); for (var i = 0; i < N; i++){ edited[i] = (types.charAt(i) !== (COVER_BASE_MAP[grid.charAt(i)] || 'W')) ? 1 : 0; }
+    var seen = new Uint8Array(N), MIN = 28;
+    for (var s = 0; s < N; s++){
+      if (seen[s]) continue; var t = types.charAt(s), stack = [s], count = 0, sx = 0, sy = 0, ed = 0; seen[s] = 1;
+      while (stack.length){ var k = stack.pop(); count++; var x = k % cols, y = (k / cols) | 0; sx += x; sy += y; ed += edited[k];
+        if (x + 1 < cols && !seen[k+1] && types.charAt(k+1) === t){ seen[k+1] = 1; stack.push(k+1); }
+        if (x > 0 && !seen[k-1] && types.charAt(k-1) === t){ seen[k-1] = 1; stack.push(k-1); }
+        if (y + 1 < rows && !seen[k+cols] && types.charAt(k+cols) === t){ seen[k+cols] = 1; stack.push(k+cols); }
+        if (y > 0 && !seen[k-cols] && types.charAt(k-cols) === t){ seen[k-cols] = 1; stack.push(k-cols); }
+      }
+      if (count < MIN || ed / count < 0.5) continue;   // only blocks the hunter actually classified
+      var cx = sx / count, cy = sy / count, d = COVER_TYPES[t];
+      var lat = lc.bbox.n - (lc.bbox.n - lc.bbox.s) * ((cy + 0.5) / rows), lng = lc.bbox.w + (lc.bbox.e - lc.bbox.w) * ((cx + 0.5) / cols);
+      var html = '<div style="transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;background:rgba(15,20,17,.82);color:#fff;font:700 11px sans-serif;padding:2px 7px;border-radius:6px;border:1px solid rgb(' + d.color.join(',') + ');box-shadow:0 1px 4px rgba(0,0,0,.5);">✓ ' + (COVER_SHORT[t] || d.label) + '</div>';
+      coverLabelLayer.addLayer(L.marker([lat, lng], { pane: 'coverLabelPane', interactive: false, icon: L.divIcon({ html: html, iconSize: [0, 0], className: '' }) }));
+    }
+  }
   function renderLandcoverOverlay(){
     if (!map.getPane('landcoverPane')){ map.createPane('landcoverPane'); map.getPane('landcoverPane').style.zIndex = 414; map.getPane('landcoverPane').style.pointerEvents = 'none'; }
+    if (!map.getPane('coverLabelPane')){ map.createPane('coverLabelPane'); map.getPane('coverLabelPane').style.zIndex = 620; map.getPane('coverLabelPane').style.pointerEvents = 'none'; }
+    if (!coverLabelLayer) coverLabelLayer = L.layerGroup().addTo(map);
     clearLandcoverOverlay();
     if (!landcoverVisible) return;
     (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
@@ -6867,6 +6892,7 @@
       ctx.putImageData(id, 0, 0);
       var bb = lc.bbox;
       landcoverOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'landcoverPane', opacity: 0.55, interactive: false }).addTo(map));
+      pushCoverLabels(p, lc, types);
     });
   }
   // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
