@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 253</div>
+    <div id="buildBadge">BUILD 254</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8986,7 +8986,15 @@
     back.appendChild(card); document.body.appendChild(back);
     // 🦌 Bucks-in-play companion panel, docked to the LEFT of Where-to-Hunt (only when you have tagged bucks)
     var _bip = bucksInPlay();
-    if (activePropertyId){ _bip = _bip.filter(function(b){ if (!b.read.has || !b.read.homeSite) return false; var hs = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === b.read.homeSite; })[0]; return hs && hs.propertyId === activePropertyId; }); }
+    if (activePropertyId){
+      var _ap = propsForModule().filter(function(p){ return p.id === activePropertyId; })[0];
+      var _bf = _bip.filter(function(b){
+        var pls = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return photoLinkedToBuck(p, b.profile.id) && p.matchedSiteId; });
+        if (!pls.length) return true;   // no camera fix — can't scope him, so keep him (camera-optional)
+        return pls.some(function(p){ var s = (typeof sites !== 'undefined' ? sites : []).filter(function(x){ return x.id === p.matchedSiteId; })[0]; return s && (s.propertyId === activePropertyId || (_ap && typeof s.lat === 'number' && pointInProperty(s.lat, s.lng, _ap))); });
+      });
+      if (_bf.length) _bip = _bf;   // scope to the farm, but never blank the panel when you have bucks
+    }
     if (_bip.length){
       var bucksEl = document.createElement('div');
       bucksEl.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:14px;width:290px;max-width:92vw;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);order:-1;';
