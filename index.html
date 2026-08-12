@@ -1682,8 +1682,8 @@
       <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
       <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
       <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
-      <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt Tonight</button>
-      <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🌤 Plan Ahead — forecast</button>
+      <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:700;">🗓 Plan a Hunt — when &amp; where</button>
+      <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt</button>
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 247</div>
+    <div id="buildBadge">BUILD 248</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8826,8 +8826,8 @@
         (x.huntable ? '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' : '') +
       '</div>';
     }
-    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;"><div style="font-weight:800;font-size:16px;">🎯 Where to hunt tonight</div><button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
-      '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + now.toDateString() + '</div>' +
+    var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;"><div style="font-weight:800;font-size:16px;">🎯 Where to hunt</div><button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + (plannedHunt ? ('🗓 Planning: <b style="color:#dff0e4;">' + plannedHunt.label + '</b>') : now.toDateString()) + '</div>' +
       '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:12px;font-size:11.5px;line-height:1.6;">' +
         '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
         (per ? ('<br>⭐ Feeding — major <b>' + fmtSolWin(per.major1) + '</b> & <b>' + fmtSolWin(per.major2) + '</b><br><span style="color:#9db0a3;">minor ' + fmtSolWin(per.minor1) + ' & ' + fmtSolWin(per.minor2) + '</span>') : '') +
@@ -8847,7 +8847,8 @@
     Array.prototype.forEach.call(card.querySelectorAll('.ht-spot'), function(el){
       el.addEventListener('click', function(){ var la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng')); close(); try { map.setView([la, ln], 17); } catch (e) {} });
     });
-    if (lat != null && typeof fetchCurrentWeather === 'function'){
+    if (plannedHunt && plannedHunt.wind){ var _hw = document.getElementById('ht-wind'); if (_hw) _hw.textContent = plannedHunt.wind.dir + ' ' + plannedHunt.wind.mph + ' mph'; }
+    else if (lat != null && typeof fetchCurrentWeather === 'function'){
       fetchCurrentWeather(lat, lng).then(function(w){ var el = document.getElementById('ht-wind'); if (el && w) el.textContent = (w.windDirDisplay || w.windDir) + ' ' + w.windMph + ' mph'; }).catch(function(){ var el = document.getElementById('ht-wind'); if (el) el.textContent = '—'; });
     }
     // Per-spot SCENT check — does tonight's wind+thermal blow your scent TOWARD the deer at this stand (a pass,
@@ -8866,7 +8867,7 @@
     (async function fillScentLines(){
       var hs = hunt.filter(function(x){ return x.hasData; });
       if (!hs.length || !back.parentNode || lat == null) return;
-      var wx = await scentWeather(lat, lng); if (!back.parentNode) return;
+      var wx = (plannedHunt && plannedHunt.wind) ? { windMph: plannedHunt.wind.mph, windDirDeg: plannedHunt.wind.deg, cloudCoverPct: plannedHunt.cloud } : await scentWeather(lat, lng); if (!back.parentNode) return;
       var windMph = wx ? wx.windMph : 0, windFrom = (wx && wx.windDirDeg != null) ? wx.windDirDeg : null, cloud = (wx && wx.cloudCoverPct != null) ? wx.cloudCoverPct : 40;
       var OFF = 35, pts = [];
       hs.forEach(function(x){ var s = x.site, dLat = OFF / 111320, dLng = OFF / (111320 * Math.cos(s.lat * Math.PI / 180)); pts.push([s.lng + dLng, s.lat]); pts.push([s.lng - dLng, s.lat]); pts.push([s.lng, s.lat + dLat]); pts.push([s.lng, s.lat - dLat]); });
@@ -8877,7 +8878,7 @@
         var data = await resp.json(); if (data.samples) elev = data.samples.map(function(s){ return (s && s.value != null) ? parseFloat(s.value) : NaN; });
       } catch (e){}
       if (!back.parentNode) return;
-      var ph = thermalPhase(lat, lng);
+      var ph = thermalPhase(lat, lng, huntTimeMs());
       hs.forEach(function(x, i){
         var s = x.site, thMph = 0, thBear = 0;
         if (elev){
@@ -8954,6 +8955,13 @@
   }
   function fcLight(l){ var c = l === 'green' ? '#4CAF50' : (l === 'yellow' ? '#E8B04B' : '#D94A2E'); return '<span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:' + c + ';box-shadow:0 0 5px ' + c + ',0 0 0 1px rgba(0,0,0,.3);vertical-align:middle;"></span>'; }
   function fcDayLabel(ms){ var dt = new Date(ms), t0 = new Date(); t0.setHours(0,0,0,0); var dd = Math.round((new Date(ms).setHours(0,0,0,0) - t0.getTime()) / 86400000); var wd = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']; return dd === 0 ? 'Today' : (dd === 1 ? 'Tomorrow' : wd[dt.getDay()] + ' ' + (dt.getMonth()+1) + '/' + dt.getDate()); }
+  // ---------- Shared "WHEN am I hunting" context — the linchpin of the hunt-planning flow ----------
+  // Set from Plan-a-Hunt (Now, or a forecast sit). Every downstream tool reads this one time: live data when Now,
+  // the forecast at that hour when it's a future sit. plannedHunt = null → treat as Now.
+  var plannedHunt = null;
+  function huntTimeMs(){ return plannedHunt ? plannedHunt.ms : Date.now(); }
+  function planNow(){ plannedHunt = { kind: 'now', ms: Date.now(), label: 'Now (live)', wind: null, cloud: null }; }
+  function planFromSit(sit){ plannedHunt = { kind: sit.kind, ms: sit.timeMs, label: fcDayLabel(sit.timeMs) + ' ' + (sit.kind === 'am' ? 'AM' : 'PM'), wind: { mph: sit.windMph, dir: sit.windDir, deg: sit.windDeg }, cloud: sit.cloudPct }; }
   async function showForecastPanel(){
     var loc = forecastLocation();
     var back = document.createElement('div');
@@ -8961,8 +8969,9 @@
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:560px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
     function close(){ if (back.parentNode) document.body.removeChild(back); }
-    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><div style="font-weight:800;font-size:16px;">🌤 Plan ahead — is it a huntable day?</div><button class="fc-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
-      '<div id="fcBody" style="font-size:12.5px;color:#9db0a3;padding:14px 0;">Reading the forecast…</div>';
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;"><div style="font-weight:800;font-size:16px;">🗓 Plan a Hunt — when are you going?</div><button class="fc-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:11px;color:#9db0a3;margin-bottom:8px;">Pick <b>now</b> or a sit below — the 🚦 says if it\'s worth going, then I\'ll show you <b>where</b>.</div>' +
+      '<div id="fcBody" style="font-size:12.5px;color:#9db0a3;padding:8px 0;">Reading the forecast…</div>';
     back.appendChild(card); document.body.appendChild(back);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('.fc-close').addEventListener('click', close);
@@ -8979,17 +8988,18 @@
     var moon = getMoonPhase(new Date()), html = '';
     if (nextSit){
       var nq = sitQuality(nextSit, null), word = nq.light === 'green' ? 'Good to go' : (nq.light === 'yellow' ? 'Marginal' : 'Tough — sit it out');
-      html += '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:12px;">' +
+      html += '<div id="fcNext" style="background:#1b2822;border:1px solid #3c6d42;border-radius:10px;padding:12px;margin-bottom:12px;cursor:pointer;">' +
         '<div style="font-size:12px;color:#9db0a3;">Next sit — ' + fcDayLabel(nextSit.timeMs) + ' ' + nextSit.label.toLowerCase() + '</div>' +
         '<div style="font-size:18px;font-weight:800;margin:3px 0;">' + fcLight(nq.light) + ' ' + word + '</div>' +
         '<div style="font-size:12px;color:#cfe0d6;">' + nextSit.windDir + ' ' + nextSit.windMph + ' mph · ' + nextSit.tempF + '° · ' + (nq.reason || '') + '</div>' +
         '<div style="font-size:11px;color:#9db0a3;margin-top:4px;">🌙 ' + (moon && moon.name ? moon.name : '') + ' (' + (moon ? moon.illumination : 0) + '% lit)</div>' +
+        '<div style="font-size:11px;color:#7CCB7C;font-weight:700;margin-top:6px;">Plan this sit → where to hunt</div>' +
       '</div>';
     }
-    function sitCell(st, prevTemp){
+    function sitCell(st, prevTemp, di){
       var q = sitQuality(st, prevTemp), tr = st.pressureTrend === 'rising' ? '↑' : (st.pressureTrend === 'falling' ? '↓' : '→');
       var rain = st.precipMm >= 0.2 ? (' · 🌧 ' + (st.precipMm >= 3 ? 'heavy' : 'light')) : '';
-      return '<div style="flex:1;min-width:0;background:#1E2B23;border:1px solid #3c4d42;border-radius:9px;padding:9px;">' +
+      return '<div class="fc-sit" data-di="' + di + '" data-kind="' + st.kind + '" style="flex:1;min-width:0;background:#1E2B23;border:1px solid #3c4d42;border-radius:9px;padding:9px;cursor:pointer;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:11px;color:#9db0a3;">' + (st.kind === 'am' ? '🌅 AM ' : '🌇 PM ') + hbClock(st.timeMs) + '</span>' + fcLight(q.light) + '</div>' +
         '<div style="font-size:13px;color:#f2f7f3;margin-top:3px;">' + st.windDir + ' ' + st.windMph + ' mph</div>' +
         '<div style="font-size:11px;color:#9db0a3;margin-top:2px;">' + st.tempF + '° · ' + tr + ' press · ' + st.thermal + ' thermal' + rain + (st.solunar ? ' · ⭐' : '') + '</div>' +
@@ -8999,10 +9009,14 @@
     for (var di = 0; di < fc.days.length; di++){
       var day = fc.days[di], prev = di > 0 ? fc.days[di-1] : null;
       html += '<div style="font-weight:700;font-size:12px;margin:10px 0 5px;">' + fcDayLabel(day.dateMs) + '</div>' +
-        '<div style="display:flex;gap:8px;">' + sitCell(day.am, prev ? prev.am.tempF : null) + sitCell(day.pm, prev ? prev.pm.tempF : null) + '</div>';
+        '<div style="display:flex;gap:8px;">' + sitCell(day.am, prev ? prev.am.tempF : null, di) + sitCell(day.pm, prev ? prev.pm.tempF : null, di) + '</div>';
     }
-    html += '<div style="font-size:9.5px;color:#6f8377;margin-top:12px;line-height:1.45;">Wind is the first gate, then the front — rising pressure + a temp drop = deer on their feet. Forecast confidence fades a few days out, and wind is a regional read (your stand may differ). The 🚦 is a starting read, not a promise.</div>';
-    body.innerHTML = html;
+    html += '<div style="font-size:9.5px;color:#6f8377;margin-top:12px;line-height:1.45;">Wind is the first gate, then the front — rising pressure + a temp drop = deer on their feet. Forecast confidence fades a few days out, and wind is a regional read (your stand may differ). The 🚦 is a starting read, not a promise. Tap any sit to plan it.</div>';
+    var nowBtn = '<button id="fcNow" style="width:100%;background:#3a2016;border:1px solid #8a5230;color:#ffd9c2;border-radius:10px;padding:11px;font-size:13.5px;font-weight:800;cursor:pointer;margin-bottom:12px;">🔴 Hunting right now → where to hunt</button>';
+    body.innerHTML = nowBtn + html;
+    body.querySelector('#fcNow').addEventListener('click', function(){ planNow(); close(); showHuntTodayPanel(); });
+    var nextEl = body.querySelector('#fcNext'); if (nextEl && nextSit) nextEl.addEventListener('click', function(){ planFromSit(nextSit); close(); showHuntTodayPanel(); });
+    Array.prototype.forEach.call(body.querySelectorAll('.fc-sit'), function(el){ el.addEventListener('click', function(){ var di = +el.getAttribute('data-di'), kind = el.getAttribute('data-kind'), sit = fc.days[di] && fc.days[di][kind]; if (!sit) return; planFromSit(sit); close(); showHuntTodayPanel(); }); });
   }
 
   // ---------- Huntability Ship 3b: front-screen "on their feet" alert ----------
