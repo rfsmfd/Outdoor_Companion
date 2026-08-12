@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 243</div>
+    <div id="buildBadge">BUILD 244</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6783,6 +6783,21 @@
     if (prop.bounds) return { n: prop.bounds.north, s: prop.bounds.south, e: prop.bounds.east, w: prop.bounds.west };
     return null;
   }
+  // NLCD 2021 standard colormap → class. We fetch the styled NLCD raster and nearest-match each pixel's colour.
+  var NLCD_PALETTE = [
+    { c: [71,107,161], k: 'water' }, { c: [222,197,197], k: 'dev' }, { c: [217,146,130], k: 'dev' }, { c: [235,0,0], k: 'dev' }, { c: [171,0,0], k: 'dev' },
+    { c: [179,172,159], k: 'barren' }, { c: [104,171,95], k: 'decid' }, { c: [28,95,44], k: 'evergreen' }, { c: [181,197,143], k: 'mixed' },
+    { c: [204,186,124], k: 'shrub' }, { c: [227,227,194], k: 'grass' }, { c: [220,217,57], k: 'pasture' }, { c: [171,108,40], k: 'crop' },
+    { c: [186,217,235], k: 'wetwood' }, { c: [112,163,186], k: 'wetherb' }
+  ];
+  function nlcdClassOf(r, g, b){ var best = 'barren', bd = Infinity; for (var i = 0; i < NLCD_PALETTE.length; i++){ var p = NLCD_PALETTE[i].c, dd = (r-p[0])*(r-p[0]) + (g-p[1])*(g-p[1]) + (b-p[2])*(b-p[2]); if (dd < bd){ bd = dd; best = NLCD_PALETTE[i].k; } } return best; }
+  // Fuse aerial STRUCTURE (crisp field/woods/cutover edge) with NLCD SEMANTICS (forest type / crop-pasture / wetland).
+  function fuseCoverType(a, n){
+    if (n === 'water') return 'O';
+    if (a === 'w') return n === 'evergreen' ? 'P' : (n === 'decid' || n === 'mixed') ? 'H' : (n === 'wetwood' || n === 'wetherb') ? 'S' : (n === 'shrub') ? 'C' : 'W';
+    if (a === 'f') return n === 'crop' ? 'R' : (n === 'pasture' || n === 'grass') ? 'A' : (n === 'wetwood' || n === 'wetherb') ? 'S' : 'F';
+    return n === 'evergreen' ? 'P' : (n === 'decid' || n === 'mixed') ? 'H' : (n === 'wetwood' || n === 'wetherb') ? 'S' : 'C';
+  }
   async function classifyLandcover(prop, onStatus){
     var bb0 = propBBox(prop); if (!bb0) throw new Error('no-boundary');
     var mPerLat = 111320, mPerLng = 111320 * Math.cos((bb0.n + bb0.s) / 2 * Math.PI / 180);
@@ -6804,19 +6819,31 @@
     var cv = document.createElement('canvas'); cv.width = bm.width; cv.height = bm.height;
     var ctx = cv.getContext('2d'); ctx.drawImage(bm, 0, 0);
     var img = ctx.getImageData(0, 0, bm.width, bm.height).data, W = bm.width, H = bm.height;
-    if (onStatus) onStatus('Reading…');
-    // per-pixel class from color: bright + not-strongly-green = open field; dark = mature timber; between = cutover
+    if (onStatus) onStatus('Reading imagery…');
+    // per-pixel aerial class: bright + not-strongly-green = open; dark = timber; between = cutover
     var raw = new Array(H);
     for (var y = 0; y < H; y++){ raw[y] = new Array(W); for (var x = 0; x < W; x++){ var i = (y * W + x) * 4, R = img[i], G = img[i+1], B = img[i+2]; var L = 0.3 * R + 0.59 * G + 0.11 * B, gd = G - (R + B) / 2; raw[y][x] = (L > 112 && gd < 38) ? 'f' : (L < 95 ? 'w' : 'c'); } }
-    var out = '';   // classify the WHOLE halo (no polygon clip — the surrounding ground is the point); the boundary line still shows where your land is
-    for (var yy = 0; yy < H; yy++){
-      for (var xx = 0; xx < W; xx++){
-        var cnt = { f: 0, w: 0, c: 0 };   // 3x3 majority declutter
-        for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++){ var ny = yy + dy, nx = xx + dx; if (ny < 0 || nx < 0 || ny >= H || nx >= W) continue; cnt[raw[ny][nx]]++; }
-        out += (cnt.f >= cnt.w && cnt.f >= cnt.c) ? 'f' : ((cnt.w >= cnt.c) ? 'w' : 'c');
+    // NLCD forest type / crop-pasture / wetland — fused with the aerial for the finer TYPE (degrades to aerial-only if it fails)
+    var nlcdArr = null, nW = 0, nH = 0;
+    try {
+      if (onStatus) onStatus('Forest & crop data…');
+      var nurl = 'https://www.mrlc.gov/geoserver/mrlc_display/wms?service=WMS&version=1.1.1&request=GetMap&layers=NLCD_2021_Land_Cover_L48&styles=&srs=EPSG:4326&bbox=' + [bb.w, bb.s, bb.e, bb.n].join(',') + '&width=' + cols + '&height=' + rows + '&format=image/png';
+      var nr = await fetch(nurl);
+      if (nr.ok){ var nbm = await createImageBitmap(await nr.blob()); var ncv = document.createElement('canvas'); ncv.width = nbm.width; ncv.height = nbm.height; var nctx = ncv.getContext('2d'); nctx.drawImage(nbm, 0, 0); nlcdArr = nctx.getImageData(0, 0, nbm.width, nbm.height).data; nW = nbm.width; nH = nbm.height; }
+    } catch (e){ console.warn('Outdoor Companion: NLCD unavailable, aerial-only', e); }
+    function nlcdAt(x, y){ if (!nlcdArr) return null; var nx = Math.min(nW - 1, Math.floor(x / W * nW)), ny = Math.min(nH - 1, Math.floor(y / H * nH)), i = (ny * nW + nx) * 4; return nlcdClassOf(nlcdArr[i], nlcdArr[i+1], nlcdArr[i+2]); }
+    if (onStatus) onStatus('Fusing…');
+    var fused = new Array(H);
+    for (var fy = 0; fy < H; fy++){ fused[fy] = new Array(W); for (var fx = 0; fx < W; fx++){ var nn = nlcdAt(fx, fy); fused[fy][fx] = nn ? fuseCoverType(raw[fy][fx], nn) : (({ f: 'F', w: 'W', c: 'C' })[raw[fy][fx]] || 'W'); } }
+    // 3x3 majority declutter → aerial base grid (out, kept for re-derive) + fused hunting-type grid (typ)
+    var out = '', typ = '';
+    for (var yy = 0; yy < H; yy++){ for (var xx = 0; xx < W; xx++){
+        var cA = { f: 0, w: 0, c: 0 }, cF = {};
+        for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++){ var ny2 = yy + dy, nx2 = xx + dx; if (ny2 < 0 || nx2 < 0 || ny2 >= H || nx2 >= W) continue; cA[raw[ny2][nx2]]++; var fv = fused[ny2][nx2]; cF[fv] = (cF[fv] || 0) + 1; }
+        out += (cA.f >= cA.w && cA.f >= cA.c) ? 'f' : ((cA.w >= cA.c) ? 'w' : 'c');
+        var bk = 'W', bn = -1; for (var kk in cF){ if (cF[kk] > bn){ bn = cF[kk]; bk = kk; } } typ += bk;
       } }
-    var typ = ''; for (var ti = 0; ti < out.length; ti++){ typ += ({ f: 'F', w: 'W', c: 'C' })[out.charAt(ti)] || 'W'; }
-    prop.landcover = { bbox: bb, cols: W, rows: H, grid: out, types: typ, cellM: CELL, createdAt: Date.now(), v: 2 };
+    prop.landcover = { bbox: bb, cols: W, rows: H, grid: out, types: typ, confirmed: new Array(W * H + 1).join('0'), cellM: CELL, createdAt: Date.now(), v: 3 };
     try { await saveProperty(prop); } catch (e) { console.error('Outdoor Companion: failed to save landcover', e); }
     return prop.landcover;
   }
@@ -6831,7 +6858,8 @@
     P: { label: 'Young pine',            color: [150, 80, 255], meaning: 'bedding' },
     C: { label: 'Cutover / clearcut',    color: [255, 216, 0],  meaning: 'thick bedding' },
     D: { label: 'Drainage / creek',      color: [0, 225, 255],  meaning: 'travel + bed edge' },
-    S: { label: 'Swamp / wetland',       color: [140, 100, 70], meaning: 'bed / travel / feed' }
+    S: { label: 'Swamp / wetland',       color: [140, 100, 70], meaning: 'bed / travel / feed' },
+    O: { label: 'Water',                 color: [70, 150, 230], meaning: 'edge / travel' }
   };
   var COVER_BASE_MAP = { f: 'F', w: 'W', c: 'C' };
   // The editable TYPE grid (one char/cell) — hunter's read; auto-initialised from the aerial base grid. His edits win.
@@ -6851,26 +6879,28 @@
   }
   function clearLandcoverOverlay(){ landcoverOverlays.forEach(function(o){ map.removeLayer(o); }); landcoverOverlays = []; if (coverLabelLayer) coverLabelLayer.clearLayers(); }
   var coverLabelLayer = null;
-  var COVER_SHORT = { F: 'Field', R: 'Crop field', A: 'Pasture', W: 'Woods', H: 'Hardwood', P: 'Young pine', C: 'Cutover', D: 'Drainage', S: 'Swamp' };
-  // Drop a "✓ Type" pill at the centre of every block the hunter has CLASSIFIED (type differs from the raw auto-read),
-  // so you can sweep the property and see what's done — untouched auto blocks stay unlabelled = still to do.
+  var COVER_SHORT = { F: 'Field', R: 'Crop field', A: 'Pasture', W: 'Woods', H: 'Hardwood', P: 'Young pine', C: 'Cutover', D: 'Drainage', S: 'Swamp', O: 'Water' };
+  // Pill at the centre of every sizeable block: the app's guess (dim) until you tap it to CONFIRM (solid ✓). So you
+  // can sweep the property — dim labels are still-to-review, ✓ labels are done. Capped so it never turns to soup.
   function pushCoverLabels(p, lc, types){
-    var cols = lc.cols, rows = lc.rows, grid = lc.grid, N = cols * rows;
-    var edited = new Uint8Array(N); for (var i = 0; i < N; i++){ edited[i] = (types.charAt(i) !== (COVER_BASE_MAP[grid.charAt(i)] || 'W')) ? 1 : 0; }
-    var seen = new Uint8Array(N), MIN = 28;
-    for (var s = 0; s < N; s++){
-      if (seen[s]) continue; var t = types.charAt(s), stack = [s], count = 0, sx = 0, sy = 0, ed = 0; seen[s] = 1;
-      while (stack.length){ var k = stack.pop(); count++; var x = k % cols, y = (k / cols) | 0; sx += x; sy += y; ed += edited[k];
+    var cols = lc.cols, rows = lc.rows, N = cols * rows, conf = ensureConfirmed(lc);
+    var seen = new Uint8Array(N), MIN = 45, made = 0, CAP = 80;
+    for (var s = 0; s < N && made < CAP; s++){
+      if (seen[s]) continue; var t = types.charAt(s), stack = [s], count = 0, sx = 0, sy = 0, cf = 0; seen[s] = 1;
+      while (stack.length){ var k = stack.pop(); count++; var x = k % cols, y = (k / cols) | 0; sx += x; sy += y; if (conf.charAt(k) === '1') cf++;
         if (x + 1 < cols && !seen[k+1] && types.charAt(k+1) === t){ seen[k+1] = 1; stack.push(k+1); }
         if (x > 0 && !seen[k-1] && types.charAt(k-1) === t){ seen[k-1] = 1; stack.push(k-1); }
         if (y + 1 < rows && !seen[k+cols] && types.charAt(k+cols) === t){ seen[k+cols] = 1; stack.push(k+cols); }
         if (y > 0 && !seen[k-cols] && types.charAt(k-cols) === t){ seen[k-cols] = 1; stack.push(k-cols); }
       }
-      if (count < MIN || ed / count < 0.5) continue;   // only blocks the hunter actually classified
-      var cx = sx / count, cy = sy / count, d = COVER_TYPES[t];
+      if (count < MIN) continue;
+      var d = COVER_TYPES[t]; if (!d) continue;
+      var confirmed = cf / count >= 0.5, cx = sx / count, cy = sy / count;
       var lat = lc.bbox.n - (lc.bbox.n - lc.bbox.s) * ((cy + 0.5) / rows), lng = lc.bbox.w + (lc.bbox.e - lc.bbox.w) * ((cx + 0.5) / cols);
-      var html = '<div style="transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;background:rgba(15,20,17,.82);color:#fff;font:700 11px sans-serif;padding:2px 7px;border-radius:6px;border:1px solid rgb(' + d.color.join(',') + ');box-shadow:0 1px 4px rgba(0,0,0,.5);">✓ ' + (COVER_SHORT[t] || d.label) + '</div>';
+      var op = confirmed ? '0.9' : '0.5', pre = confirmed ? '✓ ' : '';
+      var html = '<div style="transform:translate(-50%,-50%);display:inline-block;white-space:nowrap;background:rgba(15,20,17,' + op + ');color:#fff;font:700 11px sans-serif;padding:2px 7px;border-radius:6px;border:1px solid rgb(' + d.color.join(',') + ');box-shadow:0 1px 4px rgba(0,0,0,.5);">' + pre + (COVER_SHORT[t] || d.label) + '</div>';
       coverLabelLayer.addLayer(L.marker([lat, lng], { pane: 'coverLabelPane', interactive: false, icon: L.divIcon({ html: html, iconSize: [0, 0], className: '' }) }));
+      made++;
     }
   }
   function renderLandcoverOverlay(){
@@ -6913,7 +6943,8 @@
     return out;
   }
   function acresOf(lc, n){ return n * (lc.cellM * lc.cellM) / 4046.86; }
-  function applyTypeToCells(prop, cells, code){ var lc = prop.landcover, arr = ensureTypes(lc).split(''); cells.forEach(function(k){ arr[k] = code; }); lc.types = arr.join(''); saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: save cover edit failed', e); }); renderLandcoverOverlay(); }
+  function ensureConfirmed(lc){ if (!lc.confirmed || lc.confirmed.length !== lc.cols * lc.rows) lc.confirmed = new Array(lc.cols * lc.rows + 1).join('0'); return lc.confirmed; }
+  function applyTypeToCells(prop, cells, code){ var lc = prop.landcover, arr = ensureTypes(lc).split(''), conf = ensureConfirmed(lc).split(''); cells.forEach(function(k){ arr[k] = code; conf[k] = '1'; }); lc.types = arr.join(''); lc.confirmed = conf.join(''); saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: save cover edit failed', e); }); renderLandcoverOverlay(); }
   function pickCoverType(cb, ctx){
     var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100050;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;';
     var card = document.createElement('div'); card.style.cssText = 'background:#1b2822;border:1px solid #35443a;border-radius:14px;padding:14px;max-width:330px;width:100%;max-height:80vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);';
@@ -6970,7 +7001,7 @@
       el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px;"><b style="font-size:11px;">🌲 Cover <span style="color:#8aa596;font-weight:400;">+½mi</span></b>' +
         '<span style="white-space:nowrap;"><button id="lcDrawBtn" style="display:none;font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;margin-right:4px;">▱ Draw</button>' +
         '<button id="lcEditBtn" style="font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c4d42;background:transparent;color:#cfe0d6;cursor:pointer;">✏️ Edit</button></span></div>' +
-        ['F','W','C','H','P','D','S','R','A'].map(sw).join('');
+        ['R','A','F','H','P','W','C','D','S','O'].map(sw).join('');
       document.body.appendChild(el);
       el.querySelector('#lcEditBtn').addEventListener('click', function(){ setCoverEditMode(!coverEditMode); });
       el.querySelector('#lcDrawBtn').addEventListener('click', function(){ startCoverDrawArea(); });
@@ -7064,7 +7095,7 @@
       { done: st.boundary, icon:'🗺', title:'1. Draw the boundary', sub: st.boundary ? 'Boundary set' : 'So the app knows what\'s yours', btn: st.boundary ? 'Redraw' : 'Draw', act:'boundary',
         help:'Tap <b>Draw</b> — the map flies to your farm with the parcel lines showing. Click each <b>corner</b> (follow the parcel line where it\'s right, cut your own where it\'s wrong), then click your <b>first point</b> to close it. If a line\'s off, just Redraw — it\'s editable forever.' },
       { done: !!(prop.landcover && prop.landcover.grid), icon:'🌲', title:'2. Scan field vs woods', sub: (prop.landcover && prop.landcover.grid) ? 'Cover mapped — look it over' : 'Auto-read from the aerial', btn: (prop.landcover && prop.landcover.grid) ? 'Rescan' : 'Scan', act:'landcover',
-        help:'Tap <b>Scan</b> and the app reads inside your boundary off the aerial and paints it in bold colors so it stands out from the ground: <span style="color:#5b9bff;">blue = woods</span>, <span style="color:#f06ac8;">pink = field</span>, <span style="color:#ffe04d;">yellow = cutover/scrub</span>. <b>Look it over</b> — it\'s a good read, not perfect (cutovers are the trickiest). If a block\'s wrong, redraw the boundary tighter or just <b>Rescan</b>. It also reads about a <b>½ mile past your line</b> — the neighbor\'s cutovers, fields and cover shape where deer bed and feed, so it matters even though your routes stay on your ground. This is what lets the Walk-In planner know where the open ground and wood lines are — so it can route you through cover to a stand <b>even before you\'ve marked every bedding area</b>. Re-run it anytime the ground changes (timber cut, fields rotated). Needs the boundary drawn first.' },
+        help:'Tap <b>Scan</b> — the app reads your ground (and ~½ mile around it) off the <b>aerial</b> for crisp field/woods edges, then fuses <b>national forest &amp; crop data (NLCD)</b> to name the type: it splits your timber into <b>hardwood / young pine / swamp</b> and your open ground into <b>crop vs pasture</b>. Toggle <b>🌲 Cover</b> to see it — every block gets a <b>dim guess label</b>. Tap <b>✏️ Edit</b>, then tap a block to <b>confirm it (✓)</b> or pick the right type; use <b>▱ Draw</b> for anything the auto-read lumped together (carving young pine out of hardwood, marking a drainage). Honest: NLCD is 30 m and a few years old, so edges are blocky and a fresh cut may read wrong — your eye is the final word. Re-run anytime the ground changes. Needs the boundary drawn first.' },
       { done: st.stands>0, icon:'📥', title:'3. Import / add stands & cameras', sub: st.stands>0 ? (st.stands+' placed') : 'Bring in what you already have', btn:'Import', act:'import',
         help:'Tap <b>Import</b> → pick a file exported from another app: <b>KML, KMZ, GPX, GeoJSON, or CSV</b> (onX, HuntStand, Google Earth, Garmin). HuntStand has no exporter — use the ChatGPT-built browser script to pull your stands to a CSV first (ask me if you need it again). Then pick the type and Import selected.<br>No file? Add them by hand: <b>+ Add Site → Tree Stand / Trail Camera</b>.' },
       { done: st.entries>0, icon:'🅿', title:'4. Parking / entry points', sub: st.entries>0 ? (st.entries+' placed') : 'Where you start — powers walk-in routing', btn:'Add', act:'entry',
@@ -7110,7 +7141,7 @@
           classifyLandcover(prop, function(msg){ b.textContent = msg; }).then(function(){
             setLandcoverVisible(true); close();
             if (typeof prop.centerLat === 'number'){ try { map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15)); } catch (e) {} }
-            showToast('Land cover read (your land + ½ mi around). Toggle it with 🌲 Cover, then tap ✏️ Edit to fix a misread or label your pine / hardwood / drainage / swamp blocks — the type sets how deer use it.');
+            showToast('Land cover read — aerial + NLCD forest/crop data (your land + ½ mi). Toggle 🌲 Cover: dim labels = the app\'s guess, tap ✏️ Edit then a block to confirm (✓) or fix it. The type sets how deer use it.');
           }).catch(function(err){ b.disabled = false; b.textContent = 'Retry'; console.error('Outdoor Companion: landcover scan failed', err); showToast(err && err.message === 'no-boundary' ? 'Draw the boundary first.' : 'Couldn\'t read the imagery — check your connection and try again.'); });
         }
         else if (act === 'import') launch(function(){ activePropertyId = prop.id; var ps = document.getElementById('propertySelect'); if (ps) ps.value = prop.id; document.getElementById('importWaypointsBtn').click(); });
