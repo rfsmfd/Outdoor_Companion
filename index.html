@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 249</div>
+    <div id="buildBadge">BUILD 250</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8790,6 +8790,44 @@
     out.sort(function(a, b){ var as = a.hasData ? a.score : -1000, bs = b.hasData ? b.score : -1000; return bs - as; });
     return out;
   }
+  // 🦌 Bucks in play — your tagged bucks ranked MOST KILLABLE → least (heating jumps the queue), from cameras +
+  // sightings. Each carries a photo, the camera he's showing on, and his window. Opens BESIDE Where-to-Hunt.
+  function bucksInPlay(){
+    if (typeof buckProfiles === 'undefined' || !buckProfiles.length) return [];
+    var out = [];
+    buckProfiles.forEach(function(profile){
+      var photos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return photoLinkedToBuck(p, profile.id); });
+      var read = huntabilityRead(photos, huntRecentDays);
+      var pct = read.has ? (read.recentUsable ? read.recent.pct : read.base.pct) : -1;
+      var score = read.has ? (pct + (read.state === 'heating' ? 40 : read.state === 'cooling' ? -8 : read.state === 'quiet' ? -25 : 0)) : -100;
+      var thumb = '', latest = 0; photos.forEach(function(p){ if (p.timestamp && p.timestamp >= latest){ latest = p.timestamp; thumb = p.thumb || p.downloadURL || thumb; } });
+      if (!thumb && photos.length) thumb = photos[0].thumb || photos[0].downloadURL || '';
+      out.push({ profile: profile, read: read, thumb: thumb, score: score, pct: pct });
+    });
+    out.sort(function(a, b){ return b.score - a.score; });
+    return out;
+  }
+  function bucksInPlayInnerHtml(list){
+    var rows = list.map(function(b){
+      var r = b.read, tone = r.has ? r.tone : '#7f8c86', verdict = r.has ? HB_VERDICT[r.state] : '— no reads';
+      var cam = (r.has && r.homeSite) ? siteNameById(r.homeSite, '') : '';
+      var win = (r.has && r.windowText) ? (bucketLabel(r.useBest) + ' · ' + r.windowText) : '';
+      var dayline = r.has ? (b.pct + '% daylight' + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '')) : 'no camera data yet — goes on sightings';
+      var img = b.thumb ? ('<div style="width:46px;height:46px;border-radius:7px;flex:0 0 auto;background:#000;background-image:url(' + JSON.stringify(b.thumb) + ');background-size:cover;background-position:center;"></div>') : '<div style="width:46px;height:46px;border-radius:7px;flex:0 0 auto;background:#2a3a30;display:flex;align-items:center;justify-content:center;font-size:20px;">🦌</div>';
+      return '<div class="bp-buck" data-sid="' + (r.has && r.homeSite ? escapeHtml(r.homeSite) : '') + '" data-bname="' + escapeHtml(b.profile.name) + '" style="display:flex;gap:9px;align-items:center;border:1px solid #3c4d42;border-radius:9px;padding:8px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
+        img +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline;"><span style="font-weight:700;font-size:12.5px;">' + escapeHtml(b.profile.name) + '</span><span style="font-size:10px;font-weight:800;color:' + tone + ';white-space:nowrap;">' + verdict + '</span></div>' +
+          '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">' + dayline + '</div>' +
+          (cam ? '<div style="font-size:10px;color:#E8B04B;margin-top:1px;">📷 ' + escapeHtml(cam) + '</div>' : '') +
+          (win ? '<div style="font-size:10px;color:#cfe0d6;margin-top:1px;">🌅 ' + win + '</div>' : '') +
+        '</div></div>';
+    }).join('');
+    return '<div style="font-weight:800;font-size:15px;margin-bottom:2px;">🦌 Bucks in play</div>' +
+      '<div style="font-size:10.5px;color:#9db0a3;margin-bottom:9px;">Most killable → least, from your cameras + sightings.</div>' +
+      rows +
+      '<div style="font-size:9px;color:#6f8377;margin-top:4px;line-height:1.4;">Tap a buck → the map flies to where he\'s showing. Killability = recent daylight movement; 🔥 heating jumps the line.</div>';
+  }
   function showHuntTodayPanel(){
     var spots = huntTonightSpots(), now = new Date(), lat = null, lng = null;
     if (spots.length){ lat = spots[0].site.lat; lng = spots[0].site.lng; }
@@ -8798,9 +8836,9 @@
     var moon = getMoonPhase(now);
     var hunt = spots.filter(function(x){ return x.huntable; }), obs = spots.filter(function(x){ return !x.huntable; });
     var back = document.createElement('div');
-    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;font-family:inherit;';
+    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;gap:14px;flex-wrap:wrap;padding:18px;overflow:auto;font-family:inherit;';
     var card = document.createElement('div');
-    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:520px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;width:520px;max-width:92vw;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
     function close(){ if (back.parentNode) document.body.removeChild(back); }
     function spotCard(x, rank){
       if (!x.hasData || !x.read){
@@ -8845,6 +8883,21 @@
     html += '<div style="font-size:9.5px;color:#6f8377;margin-top:10px;line-height:1.45;">Ranks by your own daylight deer activity + recency + tonight\'s solunar. The 💨 line reads tonight\'s wind + thermals at each stand — <b>a spot where your scent blows toward the deer is a pass no matter how hot it is,</b> so let the wind override the order.</div>';
     card.innerHTML = html;
     back.appendChild(card); document.body.appendChild(back);
+    // 🦌 Bucks-in-play companion panel, docked to the LEFT of Where-to-Hunt (only when you have tagged bucks)
+    var _bip = bucksInPlay();
+    if (_bip.length){
+      var bucksEl = document.createElement('div');
+      bucksEl.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:14px;width:290px;max-width:92vw;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);order:-1;';
+      bucksEl.innerHTML = bucksInPlayInnerHtml(_bip);
+      back.insertBefore(bucksEl, card);
+      Array.prototype.forEach.call(bucksEl.querySelectorAll('.bp-buck'), function(el){
+        el.addEventListener('click', function(){ var sid = el.getAttribute('data-sid'), bn = el.getAttribute('data-bname');
+          var s = sid ? (typeof sites !== 'undefined' ? sites : []).filter(function(x){ return x.id === sid; })[0] : null;
+          if (s && typeof s.lat === 'number'){ close(); try { map.setView([s.lat, s.lng], 17); } catch (e) {} flashSiteRing(s.lat, s.lng); showToast('🦌 ' + bn + ' — showing on ' + siteNameById(sid, 'this camera') + '. Pick the stand that covers it with the right wind.'); }
+          else { showToast('🦌 ' + bn + ' — no camera fix yet; go on your sightings & sign.'); }
+        });
+      });
+    }
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('.ht-close').addEventListener('click', close);
     var _htBack = card.querySelector('.ht-back'); if (_htBack) _htBack.addEventListener('click', function(){ close(); showForecastPanel(); });
