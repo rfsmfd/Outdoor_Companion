@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 255</div>
+    <div id="buildBadge">BUILD 256</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10207,6 +10207,63 @@
   // Per-cover routing cost (added to the stealth edge penalty): timber is free, open ground costs (double at dawn),
   // bedding cover (pine/cutover/swamp) and water are dear. This is how the wood lines start driving the route.
   var COVER_ROUTE_PEN = { F: 1.3, R: 1.3, A: 0.9, W: 0, H: 0.5, P: 2.2, C: 2.2, S: 3.0, D: 0.7, O: 6.0 };
+  // Ramer–Douglas–Peucker: straighten a grid-stair path into clean legs (epsM = how far a point may sit off the line).
+  function rdpSimplify(pts, epsM){
+    if (pts.length < 3) return pts;
+    var keep = new Array(pts.length); keep[0] = keep[pts.length - 1] = true;
+    (function rec(s, e){ var mx = 0, mi = -1; for (var i = s + 1; i < e; i++){ var d = segPointDistM(pts[i].lat, pts[i].lng, pts[s].lat, pts[s].lng, pts[e].lat, pts[e].lng); if (d > mx){ mx = d; mi = i; } } if (mx > epsM && mi > 0){ keep[mi] = true; rec(s, mi); rec(mi, e); } })(0, pts.length - 1);
+    var out = []; for (var i = 0; i < pts.length; i++) if (keep[i]) out.push(pts[i]); return out;
+  }
+  // ---- Off-trail, cover-aware FIELD-CUT route (A* over the land-cover grid) ----
+  // The founder's hunting model, baked in: a field's EDGE band is the deer's DOORWAY (every trail funnels in there),
+  // so skirting the whole perimeter lays scent across every entry point — worse than one clean line across the dead-
+  // zone middle. So here the field INTERIOR is cheap, the edge band is COSTLY, bedding pine/cutover/swamp is avoided,
+  // and timber is moderate. Afternoon walk-in (deer bedded) it slices straight through; morning it weights back into
+  // cover (deer still out feeding = skyline risk). Only runs when the property has a scanned cover grid.
+  // CUT_PEN: field types carry [interior, edge-band] penalties; the rest are single values.
+  var CUT_PEN = { F: [0.15, 1.6], R: [0.15, 1.6], A: [0.10, 1.2], W: 0.55, H: 0.7, P: 2.4, C: 2.4, D: 0.9, S: 3.0, O: 6.0 };
+  function _cutClampCell(lc, lat, lng){
+    var bb = lc.bbox, x = Math.floor((lng - bb.w) / (bb.e - bb.w) * lc.cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * lc.rows);
+    x = Math.max(0, Math.min(lc.cols - 1, x)); y = Math.max(0, Math.min(lc.rows - 1, y)); return y * lc.cols + x;
+  }
+  function fieldCutRoute(entry, stand, coverProp, isAM, beds){
+    var lc = coverProp && coverProp.landcover; if (!lc || !lc.grid) return null;
+    var types = ensureTypes(lc), cols = lc.cols, rows = lc.rows, N = cols * rows, cellM = lc.cellM || 6;
+    function isField(c){ return c === 'F' || c === 'R' || c === 'A'; }
+    // edge-band mask: a field cell within 2 cells of NON-field (a wood line) = the deer's doorway band → costly
+    var edge = new Uint8Array(N);
+    for (var y = 0; y < rows; y++) for (var x = 0; x < cols; x++){ var k = y * cols + x; if (!isField(types.charAt(k))) continue;
+      var near = false; for (var dy = -2; dy <= 2 && !near; dy++) for (var dx = -2; dx <= 2; dx++){ var nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue; if (!isField(types.charAt(ny * cols + nx))){ near = true; break; } } edge[k] = near ? 1 : 0; }
+    // bedding influence stamped into the grid so the cut also bends away from marked beds
+    var bedPen = null;
+    if (beds && beds.length){ bedPen = new Float64Array(N);
+      beds.forEach(function(bd){ var bc = _cutClampCell(lc, bd.lat, bd.lng), bx = bc % cols, by = (bc / cols) | 0, R = Math.ceil(185 / cellM);
+        for (var yy = Math.max(0, by - R); yy <= Math.min(rows - 1, by + R); yy++) for (var xx = Math.max(0, bx - R); xx <= Math.min(cols - 1, bx + R); xx++){ var dd = Math.hypot(xx - bx, yy - by) * cellM; if (dd < 185){ var add = 6 * (185 - dd) / 185, kk = yy * cols + xx; if (add > bedPen[kk]) bedPen[kk] = add; } } }); }
+    function pen(k){ var code = types.charAt(k), v = CUT_PEN[code], p;
+      if (v == null) p = 0.6; else if (typeof v === 'number') p = v; else { p = edge[k] ? v[1] : v[0]; if (isAM) p += (code === 'A' ? 0.8 : 1.2); }
+      if (bedPen) p += bedPen[k]; return p; }
+    var start = _cutClampCell(lc, entry.lat, entry.lng), goal = _cutClampCell(lc, stand.lat, stand.lng);
+    if (start === goal) return null;
+    var gx = goal % cols, gy = (goal / cols) | 0;
+    function cellLL(k){ var x = k % cols, y = (k / cols) | 0; return { lat: lc.bbox.n - (lc.bbox.n - lc.bbox.s) * ((y + 0.5) / rows), lng: lc.bbox.w + (lc.bbox.e - lc.bbox.w) * ((x + 0.5) / cols) }; }
+    var g = new Float64Array(N), prev = new Int32Array(N), closed = new Uint8Array(N);
+    for (var i = 0; i < N; i++){ g[i] = Infinity; prev[i] = -1; }
+    g[start] = 0;
+    var heap = [];   // binary min-heap of [f, cell]
+    function hpush(f, c){ heap.push([f, c]); var i = heap.length - 1; while (i > 0){ var p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; var t = heap[p]; heap[p] = heap[i]; heap[i] = t; i = p; } }
+    function hpop(){ var top = heap[0], last = heap.pop(); if (heap.length){ heap[0] = last; var i = 0, n = heap.length; while (true){ var l = 2 * i + 1, r = l + 1, s = i; if (l < n && heap[l][0] < heap[s][0]) s = l; if (r < n && heap[r][0] < heap[s][0]) s = r; if (s === i) break; var t = heap[s]; heap[s] = heap[i]; heap[i] = t; i = s; } } return top; }
+    hpush(0, start);
+    var found = false;
+    while (heap.length){ var c = hpop()[1]; if (closed[c]) continue; closed[c] = 1; if (c === goal){ found = true; break; }
+      var cx = c % cols, cy = (c / cols) | 0, pc = pen(c);
+      for (var dy2 = -1; dy2 <= 1; dy2++) for (var dx2 = -1; dx2 <= 1; dx2++){ if (!dx2 && !dy2) continue; var nx2 = cx + dx2, ny2 = cy + dy2; if (nx2 < 0 || ny2 < 0 || nx2 >= cols || ny2 >= rows) continue; var nc = ny2 * cols + nx2; if (closed[nc]) continue;
+        var dist = cellM * ((dx2 && dy2) ? 1.41421 : 1), ng = g[c] + dist * (1 + (pc + pen(nc)) / 2);
+        if (ng < g[nc]){ g[nc] = ng; prev[nc] = c; hpush(ng + cellM * Math.hypot(nx2 - gx, ny2 - gy), nc); } } }
+    if (!found) return null;
+    var path = [], k2 = goal; while (k2 !== -1){ path.unshift(k2); k2 = prev[k2]; }
+    var pts = [{ lat: entry.lat, lng: entry.lng }]; for (var pi = 0; pi < path.length; pi++) pts.push(cellLL(path[pi])); pts.push({ lat: stand.lat, lng: stand.lng });
+    return { route: rdpSimplify(pts, cellM * 1.4), cost: g[goal] };
+  }
   function routeOnSegs(segs, entry, stand, beds, coverProp, isAM){
     if (!segs.length) return { none: true, noPaths: true };
     function attach(p){ var best = null; segs.forEach(function(s){ var pr = projOnSeg(p, s.a, s.b); if (!best || pr.d < best.pr.d) best = { s: s, pr: pr }; }); return best; }
@@ -10281,14 +10338,20 @@
     return best;
   }
   function clearWalkInRoute(){ if (_walkInLayer){ map.removeLayer(_walkInLayer); _walkInLayer = null; } }
-  function drawWalkInRoute(plan, entry, stand, fit){
+  function drawWalkInRoute(plan, entry, stand, fit, altRoute){
     clearWalkInRoute(); _walkInLayer = L.layerGroup().addTo(map);
     var lls = plan.route.map(function(p){ return [p.lat, p.lng]; });
+    var alls = null;
+    // the OTHER option, drawn faint beneath — so you see both scenarios at once and pick (founder's spec)
+    if (altRoute && altRoute.length > 1){ alls = altRoute.map(function(p){ return [p.lat, p.lng]; });
+      L.polyline(alls, { color: '#0d1b12', weight: 6, opacity: 0.3, interactive: false }).addTo(_walkInLayer);
+      L.polyline(alls, { color: '#a7bdaf', weight: 2.5, opacity: 0.72, dashArray: '2 9', lineCap: 'round', interactive: false }).addTo(_walkInLayer);
+    }
     L.polyline(lls, { color: '#0d1b12', weight: 9, opacity: 0.55, interactive: false }).addTo(_walkInLayer);
     L.polyline(lls, { color: '#63C6FF', weight: 4.5, opacity: 0.95, dashArray: '2 11', lineCap: 'round', interactive: false }).addTo(_walkInLayer);
     L.circleMarker([entry.lat, entry.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#2E7DD1', fillOpacity: 1, interactive: false }).addTo(_walkInLayer);
     L.circleMarker([stand.lat, stand.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#D94A2E', fillOpacity: 1, interactive: false }).addTo(_walkInLayer);
-    if (fit){ try { var padL = Math.min(360, Math.round((window.innerWidth || 800) * 0.55)); map.fitBounds(L.polyline(lls).getBounds(), { paddingTopLeft: [padL, 40], paddingBottomRight: [40, 40], maxZoom: 17 }); } catch (e) {} }
+    if (fit){ try { var padL = Math.min(360, Math.round((window.innerWidth || 800) * 0.55)); map.fitBounds(L.polyline(alls ? lls.concat(alls) : lls).getBounds(), { paddingTopLeft: [padL, 40], paddingBottomRight: [40, 40], maxZoom: 17 }); } catch (e) {} }
   }
   function wiClose(){ if (_wiBack && _wiBack.parentNode) document.body.removeChild(_wiBack); _wiBack = null; _wiStand = null; _wiEntry = null; clearWalkInRoute(); }
   async function wiRenderBody(){
@@ -10301,8 +10364,25 @@
     var be = _wiEntry ? { entry: _wiEntry, plan: buildWalkRoute(_wiEntry, stand, _wiMode, beds, coverProp, isAM) } : bestEntryFor(stand, _wiMode, beds, coverProp, isAM);
     if (!be){ body.innerHTML = '<div style="background:#3a2a1a;border:1px solid #7a5a2a;border-radius:10px;padding:12px;font-size:12.5px;color:#f0dcc0;line-height:1.55;">No <b>parking / entry points</b> on this property yet. Drop one where you actually step in — <b>Property Setup → 🅿 step 3</b>, or <b>+ Add Site → Parking/Access</b> — and the walk-in routes from it.</div>'; return; }
     var entry = be.entry, plan = be.plan; _wiEntry = entry;
-    var chosen = (_wiRoutePref === 'direct' && plan.directRoute) ? plan.directRoute : plan.route;   // which of the two routes is drawn/analyzed
-    drawWalkInRoute({ route: chosen }, entry, stand, true);
+    // ---- Route options: the off-trail FIELD-CUT (short line across the open interior) vs AROUND the edge (network) ----
+    // Founder's model: a field's EDGE is the deer's doorway (scent-costly), the middle is a dead zone. So the short
+    // cut is often the CLEANER hunt route, not just the faster one. Compute both, draw one bold + the other faint,
+    // let the hunter pick (only he knows if the crop's up) — scent/thermals are the one thing that overrides "take
+    // the short one." Falls back to the network stealth/direct pair when there's no distinct cut (no cover grid, etc.).
+    var _cut = (coverProp && coverProp.landcover && coverProp.landcover.grid) ? fieldCutRoute(entry, stand, coverProp, isAM, beds) : null;
+    var _cands = [];
+    if (_cut && routesDiffer(_cut.route, plan.route)){
+      _cands = [ { key: 'cut', label: '✂ Cut the field', route: _cut.route, onTrail: false },
+                 { key: 'around', label: '🌲 Around edge', route: plan.route, onTrail: plan.onTrail } ];
+      if (_wiRoutePref !== 'cut' && _wiRoutePref !== 'around') _wiRoutePref = 'cut';   // default: take the short cut (his call); scent notes flag it if the wind's wrong
+    } else if (_wiRoutePref === 'cut' || _wiRoutePref === 'around'){
+      _wiRoutePref = 'stealth';   // no distinct cut on this stand — fall back to the network stealth/direct pair
+    }
+    var _pick = _cands.filter(function(c){ return c.key === _wiRoutePref; })[0];
+    var chosen = _pick ? _pick.route : ((_wiRoutePref === 'direct' && plan.directRoute) ? plan.directRoute : plan.route);
+    var chosenOnTrail = _pick ? _pick.onTrail : plan.onTrail;
+    var _alt = _cands.length ? (_cands.filter(function(c){ return c.key !== _wiRoutePref; })[0] || null) : null;
+    drawWalkInRoute({ route: chosen }, entry, stand, true, _alt ? _alt.route : null);
     // --- diagnostic: when it falls back to a straight line, say exactly WHY (the data reality), mode-aware ---
     var _modeLbl = (WALK_MODES[_wiMode] ? WALK_MODES[_wiMode].label : _wiMode), _motor = !!(WALK_MODES[_wiMode] && WALK_MODES[_wiMode].motor);
     var _paths = walkInPaths(_wiMode), _allN = walkInPaths('walk').length, _verts = [];
@@ -10337,16 +10417,25 @@
     if (feedWarn && isAM){ if (level === 'go') level = 'caution'; issues.push('⚠️ Skirts your field <b>' + escapeHtml(feedWarn.pin.name) + '</b> (' + ydsLabel(feedWarn.d) + ') on a morning walk — deer feeding there at first light will blow out.'); }
     else if (feedWarn){ issues.push('• Passes field ' + escapeHtml(feedWarn.pin.name) + ' (' + ydsLabel(feedWarn.d) + ') — fine for an evening slip-in.'); }
     // cover-driven (no pins needed) — from the field/woods scan
-    if (hasCover && openM > 25){ var oy = ydsLabel(openM); if (isAM){ level = (level === 'avoid') ? 'avoid' : 'caution'; issues.push('⚠️ Crosses <b>' + oy + ' of open field</b> on a morning walk-in — deer out feeding at first light will pick you off. Look for a timber edge, or hunt it in the evening.'); } else { issues.push('• Crosses <b>' + oy + ' of open field</b> — fine for an evening slip-in, exposed at dawn.'); } }
+    if (hasCover && openM > 25){ var oy = ydsLabel(openM);
+      if (isAM){ level = (level === 'avoid') ? 'avoid' : 'caution'; issues.push('⚠️ Crosses <b>' + oy + ' of open field</b> on a morning walk-in — deer out feeding at first light will pick you off. Look for a timber edge, or hunt it in the evening.'); }
+      else if (_pick && _pick.key === 'cut'){ issues.push('✂ Cuts <b>' + oy + ' of open field</b> down the middle — deer are bedded now, so the interior is a dead zone; one line here beats smearing scent along every field edge. Skyline\'s low on an afternoon slip-in.'); }
+      else { issues.push('• Crosses <b>' + oy + ' of open field</b> — fine for an evening slip-in, exposed at dawn.'); } }
     if (hasCover && bedCover){ if (level === 'go') level = 'caution'; issues.push('⚠️ Threads <b>' + bedCover.label + '</b> (bedding cover) — ease through slow and quiet, or you\'ll bump deer off the bed.'); }
-    if (hasCover && level === 'go' && !openM && !bedCover && plan.onTrail) issues.push('✓ Stays in the timber the whole way — deer won\'t see you coming.');
-    if (!plan.onTrail) issues.push('• Couldn\'t route on your lanes for <b>' + _modeLbl + '</b> — drew a straight line. ' + (_motor ? 'Motorized modes use only <b>solid</b> (vehicle-ready) lanes — set a drivable lane to Solid, or switch to Walk.' : 'Check your lanes link up (gaps under ~27 yds) or draw the missing bit (✏️).'));
-    if (plan.onTrail && !beds.length) issues.push('• No <b>bedding</b> marked yet — this is shortest-distance only. Drop your bedding (🛏, Property Setup step 6) and I\'ll route <i>around</i> it to keep you off the deer\'s approach.');
-    if (plan.onTrail && plan.hasAlt && _wiRoutePref === 'stealth') issues.unshift('🕶 <b>Stealth route</b> — longer on purpose: it bends around your bedding so you don\'t walk in through the deer. Tap <b>Direct</b> for the short way.');
+    // which option is drawn, and the crop escape hatch (only YOU know if the crop's standing)
+    if (_pick && _pick.key === 'cut') issues.push('✂ <b>Cutting the field</b> — shortest way, and it holds off the edge band (the deer\'s doorways). <b>If the crop\'s standing, tap 🌲 Around</b> to skirt the west edge instead.');
+    else if (_pick && _pick.key === 'around') issues.push('🌲 <b>Skirting the edge</b> — right call if the crop\'s up or you want to stay in cover, but it\'s longer and runs nearer the field\'s entry trails. Tap <b>✂ Cut the field</b> for the short line.');
+    if (hasCover && level === 'go' && !openM && !bedCover && chosenOnTrail) issues.push('✓ Stays in the timber the whole way — deer won\'t see you coming.');
+    if (!chosenOnTrail && !(_pick && _pick.key === 'cut')) issues.push('• Couldn\'t route on your lanes for <b>' + _modeLbl + '</b> — drew a straight line. ' + (_motor ? 'Motorized modes use only <b>solid</b> (vehicle-ready) lanes — set a drivable lane to Solid, or switch to Walk.' : 'Check your lanes link up (gaps under ~27 yds) or draw the missing bit (✏️).'));
+    if (!beds.length && (chosenOnTrail || (_pick && _pick.key === 'cut'))) issues.push('• No <b>bedding</b> marked yet — routing off cover + fields only. Drop your bedding (🛏, Property Setup step 6) and I\'ll bend <i>around</i> it to keep you off the deer\'s approach.');
+    if (!_cands.length && plan.onTrail && plan.hasAlt && _wiRoutePref === 'stealth') issues.unshift('🕶 <b>Stealth route</b> — longer on purpose: it bends around your bedding so you don\'t walk in through the deer. Tap <b>Direct</b> for the short way.');
     var V = { go: { c: '#4CAF50', t: 'GO', s: 'Clean walk in' }, caution: { c: '#E8B04B', t: 'CAUTION', s: 'Doable — mind the notes' }, avoid: { c: '#D94A2E', t: 'RECONSIDER', s: 'This approach risks the hunt' } }[level];
     if (!issues.length) issues.push('✓ Stays clear of your marked bedding and fields, and your scent doesn\'t drift into them on the way.');
     var altToggle = '';
-    if (plan.onTrail && plan.hasAlt){
+    if (_cands.length){   // the field-cut vs around-the-edge pair — both drawn, tap to choose (bold = chosen, faint = the other)
+      var _pchipC = function(c){ var on = (_wiRoutePref === c.key), ft = Math.round(routeMeters(c.route) * 3.28084); return '<button class="wi-pref" data-pref="' + c.key + '" style="flex:1;padding:8px 6px;border-radius:9px;border:1px solid ' + (on ? '#63C6FF' : '#3c4d42') + ';background:' + (on ? '#22323b' : '#1c2b23') + ';color:#e8f0ea;cursor:pointer;font-size:11.5px;line-height:1.3;">' + c.label + '<br><span style="color:#9db0a3;">' + ft + ' ft</span></button>'; };
+      altToggle = '<div style="display:flex;gap:8px;margin-bottom:11px;">' + _cands.map(_pchipC).join('') + '</div>';
+    } else if (plan.onTrail && plan.hasAlt){
       var _sF = Math.round(routeMeters(plan.stealthRoute) * 3.28084), _dF = Math.round(routeMeters(plan.directRoute) * 3.28084);
       var _pchip = function(pref, label, ft){ var on = (_wiRoutePref === pref); return '<button class="wi-pref" data-pref="' + pref + '" style="flex:1;padding:8px 6px;border-radius:9px;border:1px solid ' + (on ? '#63C6FF' : '#3c4d42') + ';background:' + (on ? '#22323b' : '#1c2b23') + ';color:#e8f0ea;cursor:pointer;font-size:11.5px;line-height:1.3;">' + label + '<br><span style="color:#9db0a3;">' + ft + ' ft</span></button>'; };
       altToggle = '<div style="display:flex;gap:8px;margin-bottom:11px;">' + _pchip('stealth', '🕶 Stealth', _sF) + _pchip('direct', '➡ Direct', _dF) + '</div>';
@@ -10359,7 +10448,7 @@
       altToggle +
       '<div style="background:#1c2b23;border-radius:11px;padding:12px;margin-bottom:10px;font-size:12.5px;line-height:1.55;">' +
         '🚶 From <b>' + escapeHtml(entry.name) + '</b> → <b>' + escapeHtml(stand.name) + '</b><br>' +
-        '<span style="color:#c7d4cc;">' + feet + ' ft · ' + (plan.onTrail ? ('along ' + escapeHtml(plan.trailName || 'your path')) : 'straight line') + '</span><br>' +
+        '<span style="color:#c7d4cc;">' + feet + ' ft · ' + (_pick ? (_pick.key === 'cut' ? 'across the field · off your lanes' : ('around the edge · ' + escapeHtml(plan.trailName || 'your paths'))) : (plan.onTrail ? ('along ' + escapeHtml(plan.trailName || 'your path')) : 'straight line')) + '</span><br>' +
         '<span style="color:#8aa596;">' + sitLabel + '</span></div>' +
       '<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px;">' +
         issues.map(function(t){ return '<div style="background:#1c2b23;border-radius:9px;padding:9px 11px;font-size:12px;line-height:1.5;color:#dbe7df;">' + t + '</div>'; }).join('') +
