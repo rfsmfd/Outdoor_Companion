@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 259</div>
+    <div id="buildBadge">BUILD 260</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8806,16 +8806,100 @@
     return '';
   }
   // Stand-selected commit prompt — the "you picked it, here's the next step" hand-off to the Walk-In planner.
+  // ---------- 🌦 SIT CHECK — the spot-checker before you commit ----------
+  // Founder's ask: after the stand is picked, lay the sit out HOUR BY HOUR — wind shifts, thermal flips, barometric
+  // trend, temp and rain timing — a full forecast for THIS sit window so he can sanity-check it before walking in.
+  // Reuses the forecast (Open-Meteo hourly) + the thermal engine; the money column is where YOUR scent drifts each hour.
   function showSitCommit(site){
     var old = document.getElementById('sitCommit'); if (old) old.remove();
     var propNm = propertyNameForSite(site);
     var el = document.createElement('div'); el.id = 'sitCommit';
-    el.style.cssText = 'position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:100010;background:#14201a;border:1px solid #2c3f34;border-radius:14px;padding:13px 15px;color:#e8f0ea;box-shadow:0 10px 34px rgba(0,0,0,.55);font-family:inherit;max-width:92vw;';
-    el.innerHTML = '<div style="font-weight:800;font-size:14px;">📍 ' + escapeHtml(site.name) + '</div>' + (propNm ? '<div style="font-size:11px;color:#9db0a3;margin-top:1px;">' + escapeHtml(propNm) + '</div>' : '') +
-      '<div style="display:flex;gap:8px;margin-top:10px;"><button id="sitWalk" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:9px 12px;font-size:13px;font-weight:700;cursor:pointer;">🚶 Walk me in →</button><button id="sitX" style="background:transparent;border:1px solid #3c4d42;color:#9db0a3;border-radius:9px;padding:9px 11px;cursor:pointer;">✕</button></div>';
+    el.style.cssText = 'position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:100010;background:#14201a;border:1px solid #2c3f34;border-radius:14px;padding:14px 15px;color:#e8f0ea;box-shadow:0 10px 34px rgba(0,0,0,.55);font-family:inherit;width:min(470px,94vw);max-height:76vh;overflow:auto;';
+    var sitLbl = (typeof plannedHunt !== 'undefined' && plannedHunt) ? plannedHunt.label : 'Now (live)';
+    el.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">' +
+        '<div><div style="font-weight:800;font-size:15px;">📍 ' + escapeHtml(site.name) + '</div>' +
+          (propNm ? '<div style="font-size:11px;color:#9db0a3;margin-top:1px;">' + escapeHtml(propNm) + '</div>' : '') +
+          '<div style="font-size:11px;color:#8aa596;margin-top:2px;">🗓 ' + escapeHtml(sitLbl) + '</div></div>' +
+        '<button id="sitX" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button>' +
+      '</div>' +
+      '<div id="sitCheckBody" style="margin-top:11px;"><div style="text-align:center;color:#8aa596;padding:14px;font-size:12px;">Reading the sit forecast…</div></div>' +
+      '<button id="sitWalk" style="width:100%;margin-top:11px;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:11px 12px;font-size:13px;font-weight:700;cursor:pointer;">🚶 Walk me in →</button>';
     document.body.appendChild(el);
     el.querySelector('#sitWalk').addEventListener('click', function(){ el.remove(); _wiPreStand = site; showWalkIn(); });
     el.querySelector('#sitX').addEventListener('click', function(){ el.remove(); });
+    renderSitCheck(site, el).catch(function(e){ console.warn('Outdoor Companion: sit check failed', e); var b = el.querySelector('#sitCheckBody'); if (b) b.innerHTML = '<div style="font-size:12px;color:#c7d4cc;line-height:1.5;">Forecast unavailable (offline?) — the walk-in still works.</div>'; });
+  }
+  async function renderSitCheck(site, el){
+    var body = el.querySelector('#sitCheckBody'); if (!body) return;
+    var lat = site.lat, lng = site.lng, H = 3600000;
+    if (typeof lat !== 'number' || typeof SunCalc === 'undefined'){ body.innerHTML = '<div style="font-size:12px;color:#c7d4cc;">No location on this stand — can\'t forecast the sit.</div>'; return; }
+    await ensureForecast(lat, lng); if (!el.parentNode) return;
+    var base = (typeof huntTimeMs === 'function') ? huntTimeMs() : Date.now();
+    var baseCloud = (forecastAt(base) || {}).cloudCoverPct;
+    var thNow = await standThermalPoint(lat, lng, baseCloud); if (!el.parentNode) return;
+    var slopeDeg = thNow.slopeDeg || 0;
+    // canonical downhill bearing from the one gradient read; flip per hour by time of day (no extra fetches)
+    var downhill = (thNow.phase && thNow.phase.up === true) ? (thNow.bearing + 180) % 360 : thNow.bearing;
+    function thermalForHour(ms, cloudPct){
+      var ph = thermalPhase(lat, lng, ms), slopeF = Math.min(1, slopeDeg / 6);
+      var phaseF = ph.up === null ? 0.25 : (ph.label.indexOf('Night') >= 0 ? 0.6 : 1.0), skyF = 1 - 0.6 * ((cloudPct == null ? 40 : cloudPct) / 100);
+      return { mph: slopeF * phaseF * skyF * 6, bearing: ph.up === true ? (downhill + 180) % 360 : downhill, up: ph.up, label: ph.label };
+    }
+    // the sit window, from the sit's date + kind
+    var t = SunCalc.getTimes(new Date(base), lat, lng), sr = t.sunrise.getTime(), ss = t.sunset.getTime();
+    var legalStart = sr - 1800000, legalEnd = ss + 1800000;
+    var kind = (typeof plannedHunt !== 'undefined' && plannedHunt) ? plannedHunt.kind : 'now', start, end;
+    if (kind === 'am'){ start = legalStart; end = sr + 3.5 * H; }
+    else if (kind === 'pm'){ start = ss - 3 * H; end = legalEnd; }
+    else { if (base < sr + 2.5 * H){ start = Math.max(base, legalStart); end = sr + 3.5 * H; }
+      else if (base > legalEnd){ var t2 = SunCalc.getTimes(new Date(base + 86400000), lat, lng); ss = t2.sunset.getTime(); legalEnd = ss + 1800000; sr = t2.sunrise.getTime(); start = ss - 3 * H; end = legalEnd; }
+      else { start = Math.max(base, ss - 3 * H); end = legalEnd; } }
+    // hourly samples across the window (cap ~7 rows)
+    var hours = [], firstHr = Math.ceil(start / H) * H; if (firstHr - start > H * 0.5) firstHr -= H;
+    for (var ms = firstHr; ms <= end + 1000; ms += H){ if (ms < start - H * 0.5) continue; hours.push(ms); if (hours.length >= 7) break; }
+    if (!hours.length) hours = [start];
+    var rows = '', flipHr = null, prevUp = null;
+    hours.forEach(function(ms){
+      var f = forecastAt(ms) || {}, th = thermalForHour(ms, f.cloudCoverPct), sc = combineScent(th.bearing, th.mph, f.windDirDeg, f.windMph);
+      var thTxt = th.up === true ? '↑ rise' : (th.up === false ? '↓ fall' : (th.up === null ? '– flat' : '↓ pool'));
+      if (prevUp != null && th.up != null && th.up !== prevUp && flipHr === null) flipHr = ms; if (th.up != null) prevUp = th.up;
+      var scTxt = sc.calm ? 'calm' : ('→ ' + scentCompass16(sc.bearing));
+      var rain = (f.precipProb != null) ? f.precipProb : null, rainWet = (rain != null && rain >= 25);
+      var rainTxt = rain == null ? '—' : (rainWet ? '🌧 ' + rain + '%' : rain + '%');
+      var isDusk = (ms <= ss && ms + H > ss), isDawn = (ms <= sr && ms + H > sr), isLast = (ms <= legalEnd && ms + H > legalEnd && kind !== 'am');
+      var mark = isLast ? ' 🌆' : (isDusk ? ' 🌇' : (isDawn ? ' 🌅' : ''));
+      rows += '<tr style="' + ((isDusk || isDawn || isLast) ? 'background:#20302a;' : '') + '">' +
+        '<td style="padding:5px 5px;font-weight:700;white-space:nowrap;">' + hmClock(ms) + mark + '</td>' +
+        '<td style="padding:5px 5px;white-space:nowrap;">' + (f.windDir || '—') + (f.windMph != null ? ' ' + f.windMph : '') + '</td>' +
+        '<td style="padding:5px 5px;white-space:nowrap;color:' + (th.up === false ? '#5FB0C9' : th.up === true ? '#E8B04B' : '#9db0a3') + ';">' + thTxt + '</td>' +
+        '<td style="padding:5px 5px;white-space:nowrap;font-weight:700;color:#e6f1ea;">' + scTxt + '</td>' +
+        '<td style="padding:5px 5px;white-space:nowrap;">' + (f.tempF != null ? f.tempF + '°' : '—') + '</td>' +
+        '<td style="padding:5px 5px;white-space:nowrap;color:' + (rainWet ? '#7fb3e0' : '#9db0a3') + ';">' + rainTxt + '</td>' +
+      '</tr>';
+    });
+    // takeaways
+    var f0 = forecastAt(hours[0]) || {}, f1 = forecastAt(hours[hours.length - 1]) || {}, sum = [];
+    if (f0.windDir && f1.windDir){
+      if (f0.windDir === f1.windDir) sum.push('Wind holds <b>' + f0.windDir + '</b> (' + f0.windMph + '–' + f1.windMph + ' mph) — your scent read stays put.');
+      else sum.push('Wind shifts <b>' + f0.windDir + ' → ' + f1.windDir + '</b> through the sit — your scent swings with it, re-check the entry.');
+    }
+    if (flipHr) sum.push('Thermal flips <b>' + (thermalForHour(flipHr).up === false ? 'down (draining to the lows)' : 'up') + '</b> around <b>' + hmClock(flipHr) + '</b>.');
+    if (f0.pressureHpa != null && f1.pressureHpa != null){ var dp = f1.pressureHpa - f0.pressureHpa;
+      if (dp > 1.2) sum.push('Barometer <b>rising</b> — settling weather, deer up and moving.');
+      else if (dp < -1.2) sum.push('Barometer <b>falling</b> — a front\'s coming; movement often spikes just ahead of it.');
+      else sum.push('Barometer <b>steady</b>.'); }
+    var rainHr = null; hours.forEach(function(ms){ var f = forecastAt(ms); if (rainHr === null && f && f.precipProb != null && f.precipProb >= 40) rainHr = ms; });
+    if (rainHr) sum.push('🌧 <b>Rain likely by ' + hmClock(rainHr) + '</b> — plan to be settled (or out) before it moves in.');
+    sum.push('Last legal light <b>' + hmClock(legalEnd) + '</b>.');
+    body.innerHTML =
+      '<div style="font-weight:800;font-size:13px;margin-bottom:6px;">🌦 Sit check — hour by hour</div>' +
+      '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11.5px;color:#dbe7df;">' +
+        '<tr style="color:#8aa596;font-size:10px;text-align:left;"><th style="padding:3px 5px;font-weight:600;">Time</th><th style="padding:3px 5px;font-weight:600;">💨 Wind</th><th style="padding:3px 5px;font-weight:600;">🌡 Therm</th><th style="padding:3px 5px;font-weight:600;">🧭 Scent</th><th style="padding:3px 5px;font-weight:600;">Temp</th><th style="padding:3px 5px;font-weight:600;">Rain</th></tr>' +
+        rows +
+      '</table></div>' +
+      '<div style="font-size:9.5px;color:#6f8377;margin-top:5px;">🧭 Scent = where YOUR wind carries — wind + thermal combined at the stand.</div>' +
+      '<div style="font-size:11.5px;color:#c7d4cc;line-height:1.55;margin-top:9px;background:#1c2b23;border-radius:9px;padding:10px 11px;">' + sum.map(function(s){ return '• ' + s; }).join('<br>') + '</div>';
   }
   // 🦌 Bucks in play — your tagged bucks ranked MOST KILLABLE → least (heating jumps the queue), from cameras +
   // sightings. Each carries a photo, the camera he's showing on, and his window. Opens BESIDE Where-to-Hunt.
@@ -9981,11 +10065,13 @@
     if (_fc && Date.now() - _fc.at < 1800000 && distMeters(lat, lng, _fc.lat, _fc.lng) < 20000) return _fc;
     try {
       var url = 'https://api.open-meteo.com/v1/forecast?latitude=' + lat + '&longitude=' + lng +
-        '&hourly=wind_speed_10m,wind_direction_10m,cloud_cover&wind_speed_unit=mph&forecast_days=3&timezone=auto';
+        '&hourly=wind_speed_10m,wind_direction_10m,cloud_cover,temperature_2m,precipitation_probability,precipitation,surface_pressure' +
+        '&wind_speed_unit=mph&temperature_unit=fahrenheit&precipitation_unit=inch&forecast_days=3&timezone=auto';
       var res = await fetch(url); if (!res.ok) return _fc;
       var d = await res.json(); if (!d.hourly || !d.hourly.time) return _fc;
       _fc = { lat: lat, lng: lng, at: Date.now(), times: d.hourly.time.map(function(t){ return new Date(t).getTime(); }),
-              spd: d.hourly.wind_speed_10m, dir: d.hourly.wind_direction_10m, cloud: d.hourly.cloud_cover };
+              spd: d.hourly.wind_speed_10m, dir: d.hourly.wind_direction_10m, cloud: d.hourly.cloud_cover,
+              temp: d.hourly.temperature_2m, pprob: d.hourly.precipitation_probability, precip: d.hourly.precipitation, press: d.hourly.surface_pressure };
     } catch (e){}
     return _fc;
   }
@@ -9994,7 +10080,11 @@
     var best = 0, bd = Infinity;
     for (var i = 0; i < _fc.times.length; i++){ var dd = Math.abs(_fc.times[i] - ms); if (dd < bd){ bd = dd; best = i; } }
     var deg = _fc.dir[best];
-    return { windMph: Math.round(_fc.spd[best]), windDirDeg: deg, windDir: degreesToCompass(deg), cloudCoverPct: Math.round(_fc.cloud[best]) };
+    return { windMph: Math.round(_fc.spd[best]), windDirDeg: deg, windDir: degreesToCompass(deg), cloudCoverPct: Math.round(_fc.cloud[best]),
+             tempF: (_fc.temp && _fc.temp[best] != null) ? Math.round(_fc.temp[best]) : null,
+             precipProb: (_fc.pprob && _fc.pprob[best] != null) ? Math.round(_fc.pprob[best]) : null,
+             precipIn: (_fc.precip && _fc.precip[best] != null) ? _fc.precip[best] : null,
+             pressureHpa: (_fc.press && _fc.press[best] != null) ? _fc.press[best] : null };
   }
   function updateProjLabel(){
     var el = document.getElementById('projTimeLabel'); if (!el) return;
