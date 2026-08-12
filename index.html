@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 254</div>
+    <div id="buildBadge">BUILD 255</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8799,7 +8799,12 @@
     out.sort(function(a, b){ var as = a.hasData ? a.score : -1000, bs = b.hasData ? b.score : -1000; return bs - as; });
     return out;
   }
-  function propertyNameForSite(s){ if (!s || !s.propertyId || typeof properties === 'undefined') return ''; var p = properties.filter(function(x){ return x.id === s.propertyId; })[0]; return p ? p.name : ''; }
+  function propertyNameForSite(s){
+    if (!s || typeof properties === 'undefined') return '';
+    if (s.propertyId){ var p = properties.filter(function(x){ return x.id === s.propertyId; })[0]; if (p) return p.name; }
+    if (typeof s.lat === 'number'){ var byLoc = properties.filter(function(x){ return (!x.module || x.module === activeModule) && pointInProperty(s.lat, s.lng, x); })[0]; if (byLoc) return byLoc.name; }   // fall back to whose boundary it's inside
+    return '';
+  }
   // Stand-selected commit prompt — the "you picked it, here's the next step" hand-off to the Walk-In planner.
   function showSitCommit(site){
     var old = document.getElementById('sitCommit'); if (old) old.remove();
@@ -8986,15 +8991,8 @@
     back.appendChild(card); document.body.appendChild(back);
     // 🦌 Bucks-in-play companion panel, docked to the LEFT of Where-to-Hunt (only when you have tagged bucks)
     var _bip = bucksInPlay();
-    if (activePropertyId){
-      var _ap = propsForModule().filter(function(p){ return p.id === activePropertyId; })[0];
-      var _bf = _bip.filter(function(b){
-        var pls = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return photoLinkedToBuck(p, b.profile.id) && p.matchedSiteId; });
-        if (!pls.length) return true;   // no camera fix — can't scope him, so keep him (camera-optional)
-        return pls.some(function(p){ var s = (typeof sites !== 'undefined' ? sites : []).filter(function(x){ return x.id === p.matchedSiteId; })[0]; return s && (s.propertyId === activePropertyId || (_ap && typeof s.lat === 'number' && pointInProperty(s.lat, s.lng, _ap))); });
-      });
-      if (_bf.length) _bip = _bf;   // scope to the farm, but never blank the panel when you have bucks
-    }
+    // Bucks panel shows ALL your bucks (ranked, each labeled with its farm) — cross-property by design so you can
+    // weigh a hot buck on another farm. Camera/buck attribution is too spotty to safely scope, and you want to see them all.
     if (_bip.length){
       var bucksEl = document.createElement('div');
       bucksEl.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:14px;width:290px;max-width:92vw;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);order:-1;';
