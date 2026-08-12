@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 250</div>
+    <div id="buildBadge">BUILD 251</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8808,16 +8808,17 @@
     return out;
   }
   function bucksInPlayInnerHtml(list){
-    var rows = list.map(function(b){
+    var rows = list.map(function(b, i){
       var r = b.read, tone = r.has ? r.tone : '#7f8c86', verdict = r.has ? HB_VERDICT[r.state] : '— no reads';
       var cam = (r.has && r.homeSite) ? siteNameById(r.homeSite, '') : '';
       var win = (r.has && r.windowText) ? (bucketLabel(r.useBest) + ' · ' + r.windowText) : '';
       var dayline = r.has ? (b.pct + '% daylight' + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '')) : 'no camera data yet — goes on sightings';
-      var img = b.thumb ? ('<div style="width:46px;height:46px;border-radius:7px;flex:0 0 auto;background:#000;background-image:url(' + JSON.stringify(b.thumb) + ');background-size:cover;background-position:center;"></div>') : '<div style="width:46px;height:46px;border-radius:7px;flex:0 0 auto;background:#2a3a30;display:flex;align-items:center;justify-content:center;font-size:20px;">🦌</div>';
+      // real <img> (like the rest of the app) with a 🦌 fallback showing through if it fails to load
+      var img = '<div style="width:46px;height:46px;border-radius:7px;flex:0 0 auto;background:#2a3a30;display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden;">' + (b.thumb ? '<img src="' + escapeHtml(b.thumb) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">' : '🦌') + '</div>';
       return '<div class="bp-buck" data-sid="' + (r.has && r.homeSite ? escapeHtml(r.homeSite) : '') + '" data-bname="' + escapeHtml(b.profile.name) + '" style="display:flex;gap:9px;align-items:center;border:1px solid #3c4d42;border-radius:9px;padding:8px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
         img +
         '<div style="flex:1;min-width:0;">' +
-          '<div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline;"><span style="font-weight:700;font-size:12.5px;">' + escapeHtml(b.profile.name) + '</span><span style="font-size:10px;font-weight:800;color:' + tone + ';white-space:nowrap;">' + verdict + '</span></div>' +
+          '<div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline;"><span style="font-weight:700;font-size:12.5px;"><span style="color:#9db0a3;font-weight:800;">#' + (i + 1) + '</span> ' + escapeHtml(b.profile.name) + '</span><span style="font-size:10px;font-weight:800;color:' + tone + ';white-space:nowrap;">' + verdict + '</span></div>' +
           '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">' + dayline + '</div>' +
           (cam ? '<div style="font-size:10px;color:#E8B04B;margin-top:1px;">📷 ' + escapeHtml(cam) + '</div>' : '') +
           (win ? '<div style="font-size:10px;color:#cfe0d6;margin-top:1px;">🌅 ' + win + '</div>' : '') +
@@ -8828,13 +8829,25 @@
       rows +
       '<div style="font-size:9px;color:#6f8377;margin-top:4px;line-height:1.4;">Tap a buck → the map flies to where he\'s showing. Killability = recent daylight movement; 🔥 heating jumps the line.</div>';
   }
-  function showHuntTodayPanel(){
+  async function showHuntTodayPanel(){
     var spots = huntTonightSpots(), now = new Date(), lat = null, lng = null;
     if (spots.length){ lat = spots[0].site.lat; lng = spots[0].site.lng; }
     else { try { var c = map.getCenter(); lat = c.lat; lng = c.lng; } catch (e) {} }
     var per = (lat != null) ? getSolunarPeriodsForDay(now, lat, lng) : null;
     var moon = getMoonPhase(now);
     var hunt = spots.filter(function(x){ return x.huntable; }), obs = spots.filter(function(x){ return !x.huntable; });
+    // Rank by CONDITIONS + activity: fold how the planned wind sits (does your scent blow toward or away the deer)
+    // into each hunt spot's score, then re-sort. Wind is the master factor; the thermal-refined stoplight still
+    // fills per-spot below. Planned sit → wind is known instantly; "Now" → one quick live-wind read.
+    var _wind = (plannedHunt && plannedHunt.wind && plannedHunt.wind.deg != null) ? { deg: plannedHunt.wind.deg, mph: plannedHunt.wind.mph } : null;
+    if (!_wind && lat != null){ try { var _wq = await scentWeather(lat, lng); if (_wq && _wq.windDirDeg != null) _wind = { deg: _wq.windDirDeg, mph: _wq.windMph }; } catch (e) {} }
+    if (_wind && _wind.mph > 2){
+      var _scentTo = (_wind.deg + 180) % 360;
+      hunt.forEach(function(x){ if (!x.hasData) return;
+        var dd = (x.borrow && x.borrow.length && x.borrow[0].lat != null) ? bearingBetween(x.site.lat, x.site.lng, x.borrow[0].lat, x.borrow[0].lng) : null;
+        if (dd != null){ var df = Math.abs(_scentTo - dd) % 360; if (df > 180) df = 360 - df; x.score += (df > 120 ? 16 : (df < 60 ? -28 : 2)); } });
+      hunt.sort(function(a, b){ return (b.hasData ? b.score : -1000) - (a.hasData ? a.score : -1000); });
+    }
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;gap:14px;flex-wrap:wrap;padding:18px;overflow:auto;font-family:inherit;';
     var card = document.createElement('div');
