@@ -942,6 +942,12 @@
      fired from inside one of those dialogs rendered BEHIND it — its buttons unclickable, the await never
      resolved, and the app looked locked up. Keep it top-most so a confirm is always reachable. */
   #genericConfirmModalBackdrop{ z-index:100060; }
+  /* Manage Trails opens as a non-covering bottom-right sheet so the map stays LIVE behind it. That's what
+     lets a trail highlight in sync whether you pick it on the map or tap it in the list (two-way selection). */
+  #manageTrailsModalBackdrop.show{ display:block; background:transparent; pointer-events:none; }
+  #manageTrailsModalBackdrop .oc-modal{ pointer-events:auto; position:fixed; right:12px; bottom:12px; top:auto; width:340px; max-width:92vw; max-height:48vh; box-shadow:0 10px 34px rgba(0,0,0,0.5); }
+  #trailsList .history-row{ cursor:pointer; border-radius:6px; }
+  #trailsList .history-row.sel{ outline:2px solid #FFD24A; outline-offset:-2px; background:rgba(255,210,74,0.12); }
   .oc-modal{
     background:var(--panel);
     border:1px solid var(--line);
@@ -1787,7 +1793,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 229</div>
+    <div id="buildBadge">BUILD 230</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2958,6 +2964,7 @@
       color: trail.color, weight: 4, opacity: 0.85, dashArray: lineStyleToDashArray(trail.lineStyle)
     }).addTo(map);
     poly.bindPopup('<strong>' + escapeHtml(trail.name) + '</strong><br>' + trailTypeLabel(trail.type) + ' · ' + trailLenLabel(trail));
+    poly.on('click', function(){ selectTrail(trail.id, 'map'); });   // tap the line on the map → highlights it + its row in the list
     savedTrailPolylines[trail.id] = poly;
   }
 
@@ -2967,20 +2974,44 @@
     trails.forEach(function(trail){ renderSavedTrailOnMap(trail); });
   }
 
-  // Highlight a trail on the map so it's unmistakable which one you're about to edit or delete: a white
-  // casing under the colored line, brought to the front, and the map framed to it. Added because deleting/
-  // editing gave no visual cue for which trail was selected — you couldn't tell what you were removing.
+  // ---------- Two-way trail selection (map <-> list) ----------
+  // ONE selected trail, reflected in BOTH places: pick it on the map and its row lights up in the list;
+  // tap its row and it lights up on the map. The highlight is a white casing under the colored line
+  // (brought to front, map framed to it when selected from the list), plus a 'sel' outline on the row.
   var _trailHighlight = null;
+  var selectedTrailId = null;
   function clearTrailHighlight(){ if (_trailHighlight){ map.removeLayer(_trailHighlight); _trailHighlight = null; } }
-  function highlightTrail(id){
+  function highlightTrail(id, opts){
+    opts = opts || {};
     clearTrailHighlight();
     var trail = trails.filter(function(t){ return t.id === id; })[0];
     if (!trail || !trail.points || trail.points.length < 2) return;
     var lls = trail.points.map(function(p){ return [p.lat, p.lng]; });
-    _trailHighlight = L.polyline(lls, { color: '#FFFFFF', weight: 11, opacity: 0.95, dashArray: null }).addTo(map);
+    // interactive:false so the casing never swallows a click meant for another trail or the map beneath it
+    _trailHighlight = L.polyline(lls, { color: '#FFFFFF', weight: 11, opacity: 0.95, interactive: false }).addTo(map);
     _trailHighlight.bringToFront();
     var poly = savedTrailPolylines[id]; if (poly){ poly.bringToFront(); }   // colored line rides on top of the white casing
-    try { map.fitBounds(_trailHighlight.getBounds(), { padding: [60, 60], maxZoom: 17 }); } catch (e) {}
+    if (opts.fit !== false){ try { map.fitBounds(_trailHighlight.getBounds(), { padding: [60, 60], maxZoom: 17 }); } catch (e) {} }
+  }
+  function markSelectedTrailRow(scroll){
+    var listEl = document.getElementById('trailsList'); if (!listEl) return;
+    Array.prototype.forEach.call(listEl.querySelectorAll('[data-trail-row]'), function(r){
+      var on = r.getAttribute('data-trail-row') === selectedTrailId;
+      r.classList.toggle('sel', on);
+      if (on && scroll){ try { r.scrollIntoView({ block: 'nearest' }); } catch (e) {} }
+    });
+  }
+  // origin 'map' → don't re-fit (you're already looking at it), do scroll the list to it;
+  // origin 'list' → pan/fit the map so you can see the trail you tapped.
+  function selectTrail(id, origin){
+    selectedTrailId = id;
+    highlightTrail(id, { fit: origin === 'list' });
+    markSelectedTrailRow(origin === 'map');
+  }
+  function clearTrailSelection(){
+    selectedTrailId = null;
+    clearTrailHighlight();
+    markSelectedTrailRow(false);
   }
 
   document.getElementById('confirmSaveTrailBtn').addEventListener('click', async function(){
@@ -2992,7 +3023,7 @@
         trail.name = name; trail.type = selectedTrailType; trail.color = selectedTrailColor; trail.lineStyle = selectedTrailStyle;
         try{ await saveTrail(trail); }catch(e){ console.error('Outdoor Companion: failed to save trail edits', e); }
         renderSavedTrailOnMap(trail);
-        clearTrailHighlight();
+        clearTrailSelection();
         renderTrailsList();
         showToast('Trail updated');
       }
@@ -3014,7 +3045,7 @@
   });
 
   document.getElementById('discardTrailBtn').addEventListener('click', function(){
-    clearTrailHighlight();
+    clearTrailSelection();
     if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
     currentTrailPoints = [];
     document.getElementById('recordTrailInfoLabel').style.display = 'none';
@@ -3031,7 +3062,8 @@
     listEl.innerHTML = '';
     relevantTrails.forEach(function(trail){
       var row = document.createElement('div');
-      row.className = 'history-row';
+      row.className = 'history-row' + (trail.id === selectedTrailId ? ' sel' : '');
+      row.setAttribute('data-trail-row', trail.id);
       row.innerHTML =
         '<div class="info">' +
           '<div class="dt"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+trail.color+';margin-right:6px;"></span>' + escapeHtml(trail.name) + '</div>' +
@@ -3042,41 +3074,42 @@
           '<button class="btn-ghost" data-act="edit-trail" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;">Edit</button>' +
           '<button class="btn-ghost" data-act="delete-trail" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;color:#D94A2E;">Delete</button>' +
         '</div>';
+      // Tap anywhere on the row (except the action buttons) to select → highlights the trail on the map.
+      row.addEventListener('click', function(e){ if (e.target.closest('button')) return; selectTrail(trail.id, 'list'); });
       listEl.appendChild(row);
     });
     listEl.querySelectorAll('[data-act="toggle-trail-visibility"]').forEach(function(btn){
-      btn.addEventListener('click', async function(){
+      btn.addEventListener('click', async function(e){
+        e.stopPropagation();
         var trail = trails.filter(function(t){ return t.id === btn.getAttribute('data-id'); })[0];
         if (!trail) return;
         trail.hidden = !trail.hidden;
-        try{ await saveTrail(trail); }catch(e){ console.error('Outdoor Companion: failed to save trail visibility', e); }
+        try{ await saveTrail(trail); }catch(err){ console.error('Outdoor Companion: failed to save trail visibility', err); }
         renderSavedTrailOnMap(trail);
         renderTrailsList();
       });
     });
     listEl.querySelectorAll('[data-act="edit-trail"]').forEach(function(btn){
-      btn.addEventListener('click', function(){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
         var trail = trails.filter(function(t){ return t.id === btn.getAttribute('data-id'); })[0];
-        if (trail){ highlightTrail(trail.id); openSaveTrailModal(true, trail); }
+        if (trail){ selectTrail(trail.id, 'list'); openSaveTrailModal(true, trail); }
       });
     });
     listEl.querySelectorAll('[data-act="delete-trail"]').forEach(function(btn){
-      btn.addEventListener('click', async function(){
+      btn.addEventListener('click', async function(e){
+        e.stopPropagation();
         var id = btn.getAttribute('data-id');
         var trail = trails.filter(function(t){ return t.id === id; })[0];
-        // Show the hunter EXACTLY which trail: highlight it and drop the trails list so the map is visible
-        // behind the confirm, and name it in the prompt.
-        highlightTrail(id);
-        var mtb = document.getElementById('manageTrailsModalBackdrop');
-        if (mtb) mtb.classList.remove('show');
+        // Highlight the exact trail (map stays live behind the sheet) and name it in the confirm.
+        selectTrail(id, 'list');
         var confirmed = await showConfirm('Delete "' + (trail ? trail.name : 'this trail') + '"? This cannot be undone.');
-        if (!confirmed){ clearTrailHighlight(); if (mtb) mtb.classList.add('show'); return; }
+        if (!confirmed) return;
         if (savedTrailPolylines[id]){ map.removeLayer(savedTrailPolylines[id]); delete savedTrailPolylines[id]; }
         trails = trails.filter(function(t){ return t.id !== id; });
-        try{ await deleteTrailStorage(id); }catch(e){ console.error('Outdoor Companion: failed to delete trail', e); }
-        clearTrailHighlight();
+        try{ await deleteTrailStorage(id); }catch(err){ console.error('Outdoor Companion: failed to delete trail', err); }
+        if (selectedTrailId === id) clearTrailSelection();
         renderTrailsList();
-        if (mtb) mtb.classList.add('show');
       });
     });
   }
@@ -3087,7 +3120,7 @@
     document.getElementById('manageTrailsModalBackdrop').classList.add('show');
   });
   document.getElementById('manageTrailsClose').addEventListener('click', function(){
-    clearTrailHighlight();
+    clearTrailSelection();
     document.getElementById('manageTrailsModalBackdrop').classList.remove('show');
   });
   document.getElementById('saveTrailClose').addEventListener('click', function(){
