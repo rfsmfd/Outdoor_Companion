@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 251</div>
+    <div id="buildBadge">BUILD 252</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8790,6 +8790,19 @@
     out.sort(function(a, b){ var as = a.hasData ? a.score : -1000, bs = b.hasData ? b.score : -1000; return bs - as; });
     return out;
   }
+  function propertyNameForSite(s){ if (!s || !s.propertyId || typeof properties === 'undefined') return ''; var p = properties.filter(function(x){ return x.id === s.propertyId; })[0]; return p ? p.name : ''; }
+  // Stand-selected commit prompt — the "you picked it, here's the next step" hand-off to the Walk-In planner.
+  function showSitCommit(site){
+    var old = document.getElementById('sitCommit'); if (old) old.remove();
+    var propNm = propertyNameForSite(site);
+    var el = document.createElement('div'); el.id = 'sitCommit';
+    el.style.cssText = 'position:fixed;left:50%;bottom:70px;transform:translateX(-50%);z-index:100010;background:#14201a;border:1px solid #2c3f34;border-radius:14px;padding:13px 15px;color:#e8f0ea;box-shadow:0 10px 34px rgba(0,0,0,.55);font-family:inherit;max-width:92vw;';
+    el.innerHTML = '<div style="font-weight:800;font-size:14px;">📍 ' + escapeHtml(site.name) + '</div>' + (propNm ? '<div style="font-size:11px;color:#9db0a3;margin-top:1px;">' + escapeHtml(propNm) + '</div>' : '') +
+      '<div style="display:flex;gap:8px;margin-top:10px;"><button id="sitWalk" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:9px 12px;font-size:13px;font-weight:700;cursor:pointer;">🚶 Walk me in →</button><button id="sitX" style="background:transparent;border:1px solid #3c4d42;color:#9db0a3;border-radius:9px;padding:9px 11px;cursor:pointer;">✕</button></div>';
+    document.body.appendChild(el);
+    el.querySelector('#sitWalk').addEventListener('click', function(){ el.remove(); _wiPreStand = site; showWalkIn(); });
+    el.querySelector('#sitX').addEventListener('click', function(){ el.remove(); });
+  }
   // 🦌 Bucks in play — your tagged bucks ranked MOST KILLABLE → least (heating jumps the queue), from cameras +
   // sightings. Each carries a photo, the camera he's showing on, and his window. Opens BESIDE Where-to-Hunt.
   function bucksInPlay(){
@@ -8810,16 +8823,19 @@
   function bucksInPlayInnerHtml(list){
     var rows = list.map(function(b, i){
       var r = b.read, tone = r.has ? r.tone : '#7f8c86', verdict = r.has ? HB_VERDICT[r.state] : '— no reads';
+      var homeS = (r.has && r.homeSite && typeof sites !== 'undefined') ? sites.filter(function(z){ return z.id === r.homeSite; })[0] : null;
       var cam = (r.has && r.homeSite) ? siteNameById(r.homeSite, '') : '';
+      var propNm = homeS ? propertyNameForSite(homeS) : '';
       var win = (r.has && r.windowText) ? (bucketLabel(r.useBest) + ' · ' + r.windowText) : '';
       var dayline = r.has ? (b.pct + '% daylight' + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '')) : 'no camera data yet — goes on sightings';
-      // real <img> (like the rest of the app) with a 🦌 fallback showing through if it fails to load
-      var img = '<div style="width:46px;height:46px;border-radius:7px;flex:0 0 auto;background:#2a3a30;display:flex;align-items:center;justify-content:center;font-size:20px;overflow:hidden;">' + (b.thumb ? '<img src="' + escapeHtml(b.thumb) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">' : '🦌') + '</div>';
+      // real <img> (like the rest of the app), bigger, with a 🦌 fallback showing through if it fails to load
+      var img = '<div style="width:62px;height:62px;border-radius:8px;flex:0 0 auto;background:#2a3a30;display:flex;align-items:center;justify-content:center;font-size:26px;overflow:hidden;">' + (b.thumb ? '<img src="' + escapeHtml(b.thumb) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">' : '🦌') + '</div>';
       return '<div class="bp-buck" data-sid="' + (r.has && r.homeSite ? escapeHtml(r.homeSite) : '') + '" data-bname="' + escapeHtml(b.profile.name) + '" style="display:flex;gap:9px;align-items:center;border:1px solid #3c4d42;border-radius:9px;padding:8px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
         img +
         '<div style="flex:1;min-width:0;">' +
           '<div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline;"><span style="font-weight:700;font-size:12.5px;"><span style="color:#9db0a3;font-weight:800;">#' + (i + 1) + '</span> ' + escapeHtml(b.profile.name) + '</span><span style="font-size:10px;font-weight:800;color:' + tone + ';white-space:nowrap;">' + verdict + '</span></div>' +
-          '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">' + dayline + '</div>' +
+          (propNm ? '<div style="font-size:10px;color:#8aa596;margin-top:2px;">📍 ' + escapeHtml(propNm) + '</div>' : '') +
+          '<div style="font-size:10px;color:#9db0a3;margin-top:1px;">' + dayline + '</div>' +
           (cam ? '<div style="font-size:10px;color:#E8B04B;margin-top:1px;">📷 ' + escapeHtml(cam) + '</div>' : '') +
           (win ? '<div style="font-size:10px;color:#cfe0d6;margin-top:1px;">🌅 ' + win + '</div>' : '') +
         '</div></div>';
@@ -8854,12 +8870,13 @@
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;width:520px;max-width:92vw;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
     function close(){ if (back.parentNode) document.body.removeChild(back); }
     function spotCard(x, rank){
+      var _pn = propertyNameForSite(x.site), _pnLine = _pn ? ('<div style="font-size:10px;color:#8aa596;margin-top:2px;">📍 ' + escapeHtml(_pn) + '</div>') : '';
       if (!x.hasData || !x.read){
         return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
             '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' 🏹</div>' +
             '<div style="font-size:11px;color:#9db0a3;">no data yet</div>' +
-          '</div>' +
+          '</div>' + _pnLine +
           '<div style="font-size:11px;color:#9db0a3;margin-top:3px;">No camera data at this stand yet — hang a camera here to learn when deer move past it.</div>' +
         '</div>';
       }
@@ -8870,7 +8887,7 @@
         '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
           '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' ' + (x.huntable ? '🏹' : '👁') + '</div>' +
           '<div style="font-size:11px;font-weight:800;color:' + r.tone + ';">' + HB_VERDICT[r.state] + '</div>' +
-        '</div>' +
+        '</div>' + _pnLine +
         '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;">🌅 ' + win + star + '</div>' +
         '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">Daylight ' + r.base.pct + '% all-time' + (r.recent.located ? (' · ' + r.recent.pct + '% recent') : '') + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '') + '</div>' +
         borrowLine +
@@ -8878,7 +8895,7 @@
       '</div>';
     }
     var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
-        '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">←</button>' +
+        '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">← Back</button>' +
         '<div style="font-weight:800;font-size:16px;flex:1;min-width:0;">🎯 Where to hunt</div>' +
         '<button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button></div>' +
       '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + (plannedHunt ? ('🗓 Planning: <b style="color:#dff0e4;">' + plannedHunt.label + '</b>') : now.toDateString()) + '</div>' +
@@ -8918,7 +8935,7 @@
       el.addEventListener('click', function(){ var sid = el.getAttribute('data-sid'), la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng'));
         var st = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === sid; })[0];
         close(); try { map.setView([la, ln], 17); } catch (e) {} flashSiteRing(la, ln);
-        if (st){ _wiPreStand = st; showToast('📍 ' + st.name + ' selected — tap 🚶 Walk-In to plan your way in.'); }
+        if (st) showSitCommit(st);
       });
     });
     if (plannedHunt && plannedHunt.wind){ var _hw = document.getElementById('ht-wind'); if (_hw) _hw.textContent = plannedHunt.wind.dir + ' ' + plannedHunt.wind.mph + ' mph'; }
