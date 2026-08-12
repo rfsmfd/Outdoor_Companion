@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 256</div>
+    <div id="buildBadge">BUILD 257</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10214,34 +10214,51 @@
     (function rec(s, e){ var mx = 0, mi = -1; for (var i = s + 1; i < e; i++){ var d = segPointDistM(pts[i].lat, pts[i].lng, pts[s].lat, pts[s].lng, pts[e].lat, pts[e].lng); if (d > mx){ mx = d; mi = i; } } if (mx > epsM && mi > 0){ keep[mi] = true; rec(s, mi); rec(mi, e); } })(0, pts.length - 1);
     var out = []; for (var i = 0; i < pts.length; i++) if (keep[i]) out.push(pts[i]); return out;
   }
-  // ---- Off-trail, cover-aware FIELD-CUT route (A* over the land-cover grid) ----
-  // The founder's hunting model, baked in: a field's EDGE band is the deer's DOORWAY (every trail funnels in there),
-  // so skirting the whole perimeter lays scent across every entry point — worse than one clean line across the dead-
-  // zone middle. So here the field INTERIOR is cheap, the edge band is COSTLY, bedding pine/cutover/swamp is avoided,
-  // and timber is moderate. Afternoon walk-in (deer bedded) it slices straight through; morning it weights back into
-  // cover (deer still out feeding = skyline risk). Only runs when the property has a scanned cover grid.
-  // CUT_PEN: field types carry [interior, edge-band] penalties; the rest are single values.
-  var CUT_PEN = { F: [0.15, 1.6], R: [0.15, 1.6], A: [0.10, 1.2], W: 0.55, H: 0.7, P: 2.4, C: 2.4, D: 0.9, S: 3.0, O: 6.0 };
+  // ---- Cover-aware FIELD-CUT route (A* over the land-cover grid, snapped to your lanes in timber) ----
+  // Founder's hunting model, baked in on two rules:
+  //  1) A field's EDGE band is the deer's DOORWAY (every trail funnels in there), so skirting the whole perimeter
+  //     lays scent across every entry point — worse than ONE clean line across the dead-zone middle.
+  //  2) You do NOT bushwhack timber: off-trail travel is allowed across OPEN FIELD only. Through woods/pine/cutover/
+  //     swamp you must be ON A LANE — no path means no route there, and it would blow deer off their beds.
+  // So: on-trail cells are cheap through ANY cover, open field interior is cheap, the field edge band is costly,
+  // and off-trail woods are near-blocked. The cut slices the open field, then picks up your field-edge PATH and
+  // hugs it to the stand — exactly "cross the field, take the west edge around." Morning weights fields back up
+  // (deer still out feeding). Only the unavoidable last hop to a stand sitting off any lane goes off-trail.
+  var OFF_WOODS_PEN = 9;   // off-trail through timber/pine/cutover/swamp: near-blocked (no lane + you bump bedding)
   function _cutClampCell(lc, lat, lng){
     var bb = lc.bbox, x = Math.floor((lng - bb.w) / (bb.e - bb.w) * lc.cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * lc.rows);
     x = Math.max(0, Math.min(lc.cols - 1, x)); y = Math.max(0, Math.min(lc.rows - 1, y)); return y * lc.cols + x;
   }
-  function fieldCutRoute(entry, stand, coverProp, isAM, beds){
+  function fieldCutRoute(entry, stand, coverProp, isAM, beds, mode){
     var lc = coverProp && coverProp.landcover; if (!lc || !lc.grid) return null;
-    var types = ensureTypes(lc), cols = lc.cols, rows = lc.rows, N = cols * rows, cellM = lc.cellM || 6;
+    var types = ensureTypes(lc), cols = lc.cols, rows = lc.rows, N = cols * rows, cellM = lc.cellM || 6, bb = lc.bbox;
     function isField(c){ return c === 'F' || c === 'R' || c === 'A'; }
     // edge-band mask: a field cell within 2 cells of NON-field (a wood line) = the deer's doorway band → costly
     var edge = new Uint8Array(N);
     for (var y = 0; y < rows; y++) for (var x = 0; x < cols; x++){ var k = y * cols + x; if (!isField(types.charAt(k))) continue;
       var near = false; for (var dy = -2; dy <= 2 && !near; dy++) for (var dx = -2; dx <= 2; dx++){ var nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue; if (!isField(types.charAt(ny * cols + nx))){ near = true; break; } } edge[k] = near ? 1 : 0; }
+    // rasterize YOUR lanes onto the grid → on-trail cells (cheap through any cover; this is the timber corridor).
+    // Mark a 1-cell halo so a diagonal lane stays a continuous, walkable corridor for the 8-connected search.
+    var onTrail = new Uint8Array(N);
+    function markCell(lat, lng){ var x = Math.floor((lng - bb.w) / (bb.e - bb.w) * cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * rows);
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++){ var nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue; onTrail[ny * cols + nx] = 1; } }
+    (walkInPaths(mode || 'walk')).forEach(function(t){ for (var i = 1; i < t.points.length; i++){ var a = t.points[i-1], b = t.points[i], segM = distMeters(a.lat, a.lng, b.lat, b.lng), steps = Math.max(1, Math.ceil(segM / (cellM * 0.5)));
+      for (var s = 0; s <= steps; s++){ var f = s / steps; markCell(a.lat + (b.lat - a.lat) * f, a.lng + (b.lng - a.lng) * f); } } });
     // bedding influence stamped into the grid so the cut also bends away from marked beds
     var bedPen = null;
     if (beds && beds.length){ bedPen = new Float64Array(N);
       beds.forEach(function(bd){ var bc = _cutClampCell(lc, bd.lat, bd.lng), bx = bc % cols, by = (bc / cols) | 0, R = Math.ceil(185 / cellM);
         for (var yy = Math.max(0, by - R); yy <= Math.min(rows - 1, by + R); yy++) for (var xx = Math.max(0, bx - R); xx <= Math.min(cols - 1, bx + R); xx++){ var dd = Math.hypot(xx - bx, yy - by) * cellM; if (dd < 185){ var add = 6 * (185 - dd) / 185, kk = yy * cols + xx; if (add > bedPen[kk]) bedPen[kk] = add; } } }); }
-    function pen(k){ var code = types.charAt(k), v = CUT_PEN[code], p;
-      if (v == null) p = 0.6; else if (typeof v === 'number') p = v; else { p = edge[k] ? v[1] : v[0]; if (isAM) p += (code === 'A' ? 0.8 : 1.2); }
-      if (bedPen) p += bedPen[k]; return p; }
+    function pen(k){
+      var bp = bedPen ? bedPen[k] : 0;
+      if (onTrail[k]) return 0.12 + bp;                                    // on your lane — cheap, any cover
+      var code = types.charAt(k);
+      if (code === 'F' || code === 'R'){ var p = edge[k] ? 1.6 : 0.15; if (isAM) p += 1.2; return p + bp; }   // open field
+      if (code === 'A'){ var pa = edge[k] ? 1.2 : 0.10; if (isAM) pa += 0.8; return pa + bp; }                // pasture
+      if (code === 'D') return 1.2 + bp;                                   // drainage: a natural lane, thick but passable
+      if (code === 'O') return 6.0 + bp;                                   // water
+      return OFF_WOODS_PEN + bp;                                           // W/H/P/C/S off-trail: don't bushwhack timber
+    }
     var start = _cutClampCell(lc, entry.lat, entry.lng), goal = _cutClampCell(lc, stand.lat, stand.lng);
     if (start === goal) return null;
     var gx = goal % cols, gy = (goal / cols) | 0;
@@ -10369,7 +10386,7 @@
     // cut is often the CLEANER hunt route, not just the faster one. Compute both, draw one bold + the other faint,
     // let the hunter pick (only he knows if the crop's up) — scent/thermals are the one thing that overrides "take
     // the short one." Falls back to the network stealth/direct pair when there's no distinct cut (no cover grid, etc.).
-    var _cut = (coverProp && coverProp.landcover && coverProp.landcover.grid) ? fieldCutRoute(entry, stand, coverProp, isAM, beds) : null;
+    var _cut = (coverProp && coverProp.landcover && coverProp.landcover.grid) ? fieldCutRoute(entry, stand, coverProp, isAM, beds, _wiMode) : null;
     var _cands = [];
     if (_cut && routesDiffer(_cut.route, plan.route)){
       _cands = [ { key: 'cut', label: '✂ Cut the field', route: _cut.route, onTrail: false },
@@ -10448,7 +10465,7 @@
       altToggle +
       '<div style="background:#1c2b23;border-radius:11px;padding:12px;margin-bottom:10px;font-size:12.5px;line-height:1.55;">' +
         '🚶 From <b>' + escapeHtml(entry.name) + '</b> → <b>' + escapeHtml(stand.name) + '</b><br>' +
-        '<span style="color:#c7d4cc;">' + feet + ' ft · ' + (_pick ? (_pick.key === 'cut' ? 'across the field · off your lanes' : ('around the edge · ' + escapeHtml(plan.trailName || 'your paths'))) : (plan.onTrail ? ('along ' + escapeHtml(plan.trailName || 'your path')) : 'straight line')) + '</span><br>' +
+        '<span style="color:#c7d4cc;">' + feet + ' ft · ' + (_pick ? (_pick.key === 'cut' ? 'cuts the field + your paths' : ('around the edge · ' + escapeHtml(plan.trailName || 'your paths'))) : (plan.onTrail ? ('along ' + escapeHtml(plan.trailName || 'your path')) : 'straight line')) + '</span><br>' +
         '<span style="color:#8aa596;">' + sitLabel + '</span></div>' +
       '<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:10px;">' +
         issues.map(function(t){ return '<div style="background:#1c2b23;border-radius:9px;padding:9px 11px;font-size:12px;line-height:1.5;color:#dbe7df;">' + t + '</div>'; }).join('') +
