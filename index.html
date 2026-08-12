@@ -1794,7 +1794,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 236</div>
+    <div id="buildBadge">BUILD 237</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9623,7 +9623,7 @@
   // hunt: passing too close to KNOWN bedding, and skirting your FIELDS on a MORNING sit (rising thermal, deer
   // still out feeding). Then it reads whether your SCENT drifts into that bedding as you walk. Honest by
   // design: it only knows the bedding/fields YOU marked and the paths YOU drew — the property base feeds it.
-  var _wiBack = null, _wiStand = null, _wiEntry = null, _walkInLayer = null, _wiMode = 'ebike';
+  var _wiBack = null, _wiStand = null, _wiEntry = null, _walkInLayer = null, _wiMode = 'ebike', _wiRoutePref = 'stealth';
   function walkInStands(){ return sites.filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
   function walkInEntries(){ return sites.filter(function(s){ return s.type === 'access' && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
   function walkInBedding(){ return sites.filter(function(s){ return s.type === 'bedding' && typeof s.lat === 'number' && passesPropertyFilter(s); }); }
@@ -9670,7 +9670,9 @@
   // JOIN lanes that touch/cross (a lane vertex within ~25 m of ANOTHER lane's SEGMENT — catches T-junctions and
   // near-miss gaps, not just shared vertices), split segments at every such point, then Dijkstra. Returns
   // {route,eD,sD} on success, or {none:true, …reason} so the caller can explain a straight-line fallback.
-  function routeOnSegs(segs, entry, stand){
+  function angDiff(a, b){ var d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
+  function routesDiffer(a, b){ if (!a || !b || a.length !== b.length) return true; for (var i = 0; i < a.length; i++){ if (Math.abs(a[i].lat - b[i].lat) > 1e-5 || Math.abs(a[i].lng - b[i].lng) > 1e-5) return true; } return false; }
+  function routeOnSegs(segs, entry, stand, beds){
     if (!segs.length) return { none: true, noPaths: true };
     function attach(p){ var best = null; segs.forEach(function(s){ var pr = projOnSeg(p, s.a, s.b); if (!best || pr.d < best.pr.d) best = { s: s, pr: pr }; }); return best; }
     var eA = attach(entry), sA = attach(stand), MAXATT = 300;
@@ -9679,9 +9681,23 @@
     var verts = []; segs.forEach(function(s){ verts.push({ lat: s.a.lat, lng: s.a.lng, trail: s.trail }); verts.push({ lat: s.b.lat, lng: s.b.lng, trail: s.trail }); });
     var SNAP = 25, bridges = [];
     verts.forEach(function(v){ segs.forEach(function(s){ if (s.trail === v.trail) return; var pr = projOnSeg(v, s.a, s.b); if (pr.d < SNAP){ s.splits.push(pr.t); bridges.push({ from: { lat: v.lat, lng: v.lng }, to: pr.q }); } }); });
+    // "Deer approach" = bearing from the STAND toward its nearest bedding (the side deer come from). We penalize
+    // routing that runs near bedding (their home) OR up that approach side of the stand — so the stealth route
+    // loops the far side and drops in from behind, instead of walking in through the deer.
+    var nearBedToStand = null; if (beds && beds.length){ beds.forEach(function(bd){ var d = distMeters(stand.lat, stand.lng, bd.lat, bd.lng); if (!nearBedToStand || d < nearBedToStand.d) nearBedToStand = { d: d, bd: bd }; }); }
+    var approachDeg = nearBedToStand ? bearingBetween(stand.lat, stand.lng, nearBedToStand.bd.lat, nearBedToStand.bd.lng) : null;
+    function edgePenalty(aI, bI){
+      if (!beds || !beds.length) return 0;
+      var mLat = (nodes[aI].lat + nodes[bI].lat) / 2, mLng = (nodes[aI].lng + nodes[bI].lng) / 2, pen = 0;
+      var dB = Infinity; for (var i = 0; i < beds.length; i++){ var d = distMeters(mLat, mLng, beds[i].lat, beds[i].lng); if (d < dB) dB = d; }
+      var RB = 185; if (dB < RB) pen += 7 * (RB - dB) / RB;                              // near bedding = expensive
+      if (approachDeg != null){ var dS = distMeters(mLat, mLng, stand.lat, stand.lng), RS = 230;
+        if (dS < RS){ var diff = angDiff(bearingBetween(stand.lat, stand.lng, mLat, mLng), approachDeg); if (diff < 75) pen += 5 * (1 - diff / 75) * (1 - dS / RS); } }
+      return pen;
+    }
     var nodes = [], adj = {};
     function nid(lat, lng){ for (var i = 0; i < nodes.length; i++){ if (distMeters(lat, lng, nodes[i].lat, nodes[i].lng) < 3) return i; } nodes.push({ lat: lat, lng: lng }); return nodes.length - 1; }
-    function addEdge(a, b){ if (a === b) return; var w = distMeters(nodes[a].lat, nodes[a].lng, nodes[b].lat, nodes[b].lng); (adj[a] = adj[a] || []).push({ to: b, w: w }); (adj[b] = adj[b] || []).push({ to: a, w: w }); }
+    function addEdge(a, b){ if (a === b) return; var w = distMeters(nodes[a].lat, nodes[a].lng, nodes[b].lat, nodes[b].lng); var ws = w * (1 + edgePenalty(a, b)); (adj[a] = adj[a] || []).push({ to: b, w: w, ws: ws }); (adj[b] = adj[b] || []).push({ to: a, w: w, ws: ws }); }
     segs.forEach(function(s){
       var ts = [0, 1].concat(s.splits).filter(function(x){ return x >= 0 && x <= 1; }).sort(function(a, b){ return a - b; });
       var chain = []; ts.forEach(function(t){ if (!chain.length || Math.abs(t - chain[chain.length - 1]) > 1e-4) chain.push(t); });
@@ -9690,31 +9706,39 @@
     });
     bridges.forEach(function(br){ addEdge(nid(br.from.lat, br.from.lng), nid(br.to.lat, br.to.lng)); });
     var startId = nid(eA.pr.q.lat, eA.pr.q.lng), endId = nid(sA.pr.q.lat, sA.pr.q.lng);
-    var N = nodes.length, dist = new Array(N), prev = new Array(N), done = new Array(N);
-    for (var k = 0; k < N; k++){ dist[k] = Infinity; prev[k] = -1; done[k] = false; }
-    dist[startId] = 0;
-    for (var it = 0; it < N; it++){
-      var u = -1, ud = Infinity; for (var m = 0; m < N; m++){ if (!done[m] && dist[m] < ud){ ud = dist[m]; u = m; } }
-      if (u < 0 || u === endId) break; done[u] = true;
-      (adj[u] || []).forEach(function(ed){ if (dist[u] + ed.w < dist[ed.to]){ dist[ed.to] = dist[u] + ed.w; prev[ed.to] = u; } });
+    function dijkstra(field){
+      var N = nodes.length, dist = new Array(N), prev = new Array(N), done = new Array(N);
+      for (var k = 0; k < N; k++){ dist[k] = Infinity; prev[k] = -1; done[k] = false; }
+      dist[startId] = 0;
+      for (var it = 0; it < N; it++){
+        var u = -1, ud = Infinity; for (var m = 0; m < N; m++){ if (!done[m] && dist[m] < ud){ ud = dist[m]; u = m; } }
+        if (u < 0 || u === endId) break; done[u] = true;
+        (adj[u] || []).forEach(function(ed){ if (dist[u] + ed[field] < dist[ed.to]){ dist[ed.to] = dist[u] + ed[field]; prev[ed.to] = u; } });
+      }
+      if (dist[endId] === Infinity) return null;
+      var pathIds = [], c = endId; while (c !== -1){ pathIds.unshift(c); c = prev[c]; }
+      var mid = pathIds.map(function(id){ return { lat: nodes[id].lat, lng: nodes[id].lng }; });
+      return { route: [{ lat: entry.lat, lng: entry.lng }].concat(mid, [{ lat: stand.lat, lng: stand.lng }]), cost: dist[endId] };
     }
-    if (dist[endId] === Infinity) return { none: true, disconnected: true, eD: eA.pr.d, sD: sA.pr.d };
-    var pathIds = [], c = endId; while (c !== -1){ pathIds.unshift(c); c = prev[c]; }
-    var mid = pathIds.map(function(id){ return { lat: nodes[id].lat, lng: nodes[id].lng }; });
-    return { route: [{ lat: entry.lat, lng: entry.lng }].concat(mid, [{ lat: stand.lat, lng: stand.lng }]), eD: eA.pr.d, sD: sA.pr.d };
+    var stealth = dijkstra('ws'), direct = dijkstra('w');
+    if (!stealth) return { none: true, disconnected: true, eD: eA.pr.d, sD: sA.pr.d };
+    return { stealth: stealth, direct: direct, eD: eA.pr.d, sD: sA.pr.d };
   }
-  function buildWalkRoute(entry, stand, mode){
-    var res = routeOnSegs(buildWalkSegs(mode || 'walk'), entry, stand);
-    if (res && res.route) return { route: res.route, onTrail: true, trailName: 'your paths', diag: res };
+  function buildWalkRoute(entry, stand, mode, beds){
+    var res = routeOnSegs(buildWalkSegs(mode || 'walk'), entry, stand, beds || []);
+    if (res && res.stealth){
+      var sr = res.stealth.route, dr = res.direct ? res.direct.route : null;
+      return { route: sr, stealthRoute: sr, directRoute: dr, hasAlt: !!(dr && routesDiffer(sr, dr)), onTrail: true, trailName: 'your paths', stealthCost: res.stealth.cost, diag: res };
+    }
     return { route: [{ lat: entry.lat, lng: entry.lng }, { lat: stand.lat, lng: stand.lng }], onTrail: false, trailName: null, diag: res || {} };
   }
-  function bestEntryFor(stand, mode){
+  function bestEntryFor(stand, mode, beds){
     var es = walkInEntries(); if (!es.length) return null;
-    var best = null;
+    var best = null;   // rank entries by STEALTH cost (distance + disturbance), so it picks the cleanest way in — not just the closest parking
     es.forEach(function(e){
-      var plan = buildWalkRoute(e, stand, mode);
-      var m = routeMeters(plan.route), score = m * (plan.onTrail ? 0.85 : 1);   // prefer a real path over a shorter straight line
-      if (!best || score < best.score) best = { entry: e, plan: plan, meters: m, score: score };
+      var plan = buildWalkRoute(e, stand, mode, beds);
+      var score = plan.onTrail ? plan.stealthCost : routeMeters(plan.route) * 3;   // a straight-line entry is strongly deprioritized
+      if (!best || score < best.score) best = { entry: e, plan: plan, score: score };
     });
     return best;
   }
@@ -9733,10 +9757,12 @@
     if (!_wiBack || !_wiStand) return;
     var body = _wiBack.querySelector('#wiBody'); if (!body) return;
     var stand = _wiStand;
-    var be = _wiEntry ? { entry: _wiEntry, plan: buildWalkRoute(_wiEntry, stand, _wiMode) } : bestEntryFor(stand, _wiMode);
+    var beds = walkInBedding();
+    var be = _wiEntry ? { entry: _wiEntry, plan: buildWalkRoute(_wiEntry, stand, _wiMode, beds) } : bestEntryFor(stand, _wiMode, beds);
     if (!be){ body.innerHTML = '<div style="background:#3a2a1a;border:1px solid #7a5a2a;border-radius:10px;padding:12px;font-size:12.5px;color:#f0dcc0;line-height:1.55;">No <b>parking / entry points</b> on this property yet. Drop one where you actually step in — <b>Property Setup → 🅿 step 3</b>, or <b>+ Add Site → Parking/Access</b> — and the walk-in routes from it.</div>'; return; }
     var entry = be.entry, plan = be.plan; _wiEntry = entry;
-    drawWalkInRoute(plan, entry, stand, true);
+    var chosen = (_wiRoutePref === 'direct' && plan.directRoute) ? plan.directRoute : plan.route;   // which of the two routes is drawn/analyzed
+    drawWalkInRoute({ route: chosen }, entry, stand, true);
     // --- diagnostic: when it falls back to a straight line, say exactly WHY (the data reality), mode-aware ---
     var _modeLbl = (WALK_MODES[_wiMode] ? WALK_MODES[_wiMode].label : _wiMode), _motor = !!(WALK_MODES[_wiMode] && WALK_MODES[_wiMode].motor);
     var _paths = walkInPaths(_wiMode), _allN = walkInPaths('walk').length, _verts = [];
@@ -9747,19 +9773,19 @@
     else if (plan.onTrail) _diag = _paths.length + ' ' + _modeLbl + ' lane' + (_paths.length === 1 ? '' : 's') + ' · routed on your network ✓';
     else if (_eD > 300 || _sD > 300) _diag = _paths.length + ' lanes, but the ' + (_eD >= _sD ? 'parking' : 'stand') + ' is ' + ydsLabel(Math.max(_eD, _sD)) + ' from the nearest lane — none reaches it';
     else _diag = _paths.length + ' lanes, both ends near one (entry ' + ydsLabel(_eD) + ' / stand ' + ydsLabel(_sD) + ') but they don\'t link into ONE network — a gap wider than ~27 yds between lanes';
-    var feet = Math.round(routeMeters(plan.route) * 3.28084);
+    var feet = Math.round(routeMeters(chosen) * 3.28084);
     var ph = thermalPhase(stand.lat, stand.lng), isAM = ph.up === true, isPM = ph.up === false;
     var sitLabel = isAM ? '🌅 Morning sit — rising thermal, deer still out in the fields' : (isPM ? '🌇 Evening sit — falling thermal' : '🕛 Midday — thermals flat');
-    var beds = walkInBedding(), feeds = walkInFeeding();
-    var bedWarn = null; beds.forEach(function(b){ var d = routeMinDistToPin(plan.route, b); if (d < 137 && (!bedWarn || d < bedWarn.d)) bedWarn = { d: d, pin: b }; });
-    var feedWarn = null; feeds.forEach(function(f){ var d = routeMinDistToPin(plan.route, f); if (d < 60 && (!feedWarn || d < feedWarn.d)) feedWarn = { d: d, pin: f }; });
+    var feeds = walkInFeeding();
+    var bedWarn = null; beds.forEach(function(b){ var d = routeMinDistToPin(chosen, b); if (d < 137 && (!bedWarn || d < bedWarn.d)) bedWarn = { d: d, pin: b }; });
+    var feedWarn = null; feeds.forEach(function(f){ var d = routeMinDistToPin(chosen, f); if (d < 60 && (!feedWarn || d < feedWarn.d)) feedWarn = { d: d, pin: f }; });
     // scent read at the stand (same physics as Hunt Mode) — then does it drift INTO bedding you pass?
     var wx = await scentWeather(stand.lat, stand.lng); if (!_wiBack) return;
     var th = await standThermalPoint(stand.lat, stand.lng, wx ? wx.cloudCoverPct : null); if (!_wiBack) return;
     var windMph = wx ? wx.windMph : 0, windFrom = (wx && wx.windDirDeg != null) ? wx.windDirDeg : null;
     var sc = combineScent(th.bearing, th.mph, windFrom, windMph);
     var scentBedWarn = null;
-    if (!sc.calm){ beds.forEach(function(b){ var d = routeMinDistToPin(plan.route, b); if (d < 200){ var np = routeNearestPointTo(plan.route, b); var toBed = bearingBetween(np.lat, np.lng, b.lat, b.lng); var diff = Math.abs(sc.bearing - toBed) % 360; if (diff > 180) diff = 360 - diff; if (diff < 55 && (!scentBedWarn || d < scentBedWarn.d)) scentBedWarn = { d: d, pin: b }; } }); }
+    if (!sc.calm){ beds.forEach(function(b){ var d = routeMinDistToPin(chosen, b); if (d < 200){ var np = routeNearestPointTo(chosen, b); var toBed = bearingBetween(np.lat, np.lng, b.lat, b.lng); var diff = Math.abs(sc.bearing - toBed) % 360; if (diff > 180) diff = 360 - diff; if (diff < 55 && (!scentBedWarn || d < scentBedWarn.d)) scentBedWarn = { d: d, pin: b }; } }); }
     // verdict
     var level = 'go', issues = [];
     if (scentBedWarn){ level = 'avoid'; issues.push('🚫 Your <b>scent drifts into ' + escapeHtml(scentBedWarn.pin.name) + '</b> (' + ydsLabel(scentBedWarn.d) + ' off your route) as you walk — you\'ll wind the bedding before you\'re even settled.'); }
@@ -9767,13 +9793,22 @@
     if (feedWarn && isAM){ if (level === 'go') level = 'caution'; issues.push('⚠️ Skirts your field <b>' + escapeHtml(feedWarn.pin.name) + '</b> (' + ydsLabel(feedWarn.d) + ') on a morning walk — deer feeding there at first light will blow out.'); }
     else if (feedWarn){ issues.push('• Passes field ' + escapeHtml(feedWarn.pin.name) + ' (' + ydsLabel(feedWarn.d) + ') — fine for an evening slip-in.'); }
     if (!plan.onTrail) issues.push('• Couldn\'t route on your lanes for <b>' + _modeLbl + '</b> — drew a straight line. ' + (_motor ? 'Motorized modes use only <b>solid</b> (vehicle-ready) lanes — set a drivable lane to Solid, or switch to Walk.' : 'Check your lanes link up (gaps under ~27 yds) or draw the missing bit (✏️).'));
+    if (plan.onTrail && !beds.length) issues.push('• No <b>bedding</b> marked yet — this is shortest-distance only. Drop your bedding (🛏, Property Setup step 6) and I\'ll route <i>around</i> it to keep you off the deer\'s approach.');
+    if (plan.onTrail && plan.hasAlt && _wiRoutePref === 'stealth') issues.unshift('🕶 <b>Stealth route</b> — longer on purpose: it bends around your bedding so you don\'t walk in through the deer. Tap <b>Direct</b> for the short way.');
     var V = { go: { c: '#4CAF50', t: 'GO', s: 'Clean walk in' }, caution: { c: '#E8B04B', t: 'CAUTION', s: 'Doable — mind the notes' }, avoid: { c: '#D94A2E', t: 'RECONSIDER', s: 'This approach risks the hunt' } }[level];
     if (!issues.length) issues.push('✓ Stays clear of your marked bedding and fields, and your scent doesn\'t drift into them on the way.');
+    var altToggle = '';
+    if (plan.onTrail && plan.hasAlt){
+      var _sF = Math.round(routeMeters(plan.stealthRoute) * 3.28084), _dF = Math.round(routeMeters(plan.directRoute) * 3.28084);
+      var _pchip = function(pref, label, ft){ var on = (_wiRoutePref === pref); return '<button class="wi-pref" data-pref="' + pref + '" style="flex:1;padding:8px 6px;border-radius:9px;border:1px solid ' + (on ? '#63C6FF' : '#3c4d42') + ';background:' + (on ? '#22323b' : '#1c2b23') + ';color:#e8f0ea;cursor:pointer;font-size:11.5px;line-height:1.3;">' + label + '<br><span style="color:#9db0a3;">' + ft + ' ft</span></button>'; };
+      altToggle = '<div style="display:flex;gap:8px;margin-bottom:11px;">' + _pchip('stealth', '🕶 Stealth', _sF) + _pchip('direct', '➡ Direct', _dF) + '</div>';
+    }
     var scentTo = sc.calm ? 'dead calm' : ('drifts ' + scentCompass16(sc.bearing));
     body.innerHTML =
       '<div style="background:' + V.c + '1f;border:1px solid ' + V.c + ';border-radius:12px;padding:11px 13px;margin-bottom:11px;">' +
         '<div style="font-size:16px;font-weight:800;color:' + V.c + ';">' + V.t + '</div>' +
         '<div style="font-size:12px;color:#cfe0d6;margin-top:1px;">' + V.s + '</div></div>' +
+      altToggle +
       '<div style="background:#1c2b23;border-radius:11px;padding:12px;margin-bottom:10px;font-size:12.5px;line-height:1.55;">' +
         '🚶 From <b>' + escapeHtml(entry.name) + '</b> → <b>' + escapeHtml(stand.name) + '</b><br>' +
         '<span style="color:#c7d4cc;">' + feet + ' ft · ' + (plan.onTrail ? ('along ' + escapeHtml(plan.trailName || 'your path')) : 'straight line') + '</span><br>' +
@@ -9786,6 +9821,7 @@
         '<div style="flex:1;background:#1c2b23;border-radius:11px;padding:11px;"><div style="font-size:11px;color:#8aa596;">🧭 Your scent</div><div style="font-size:14px;color:#f2f7f3;">' + scentTo + '</div></div>' +
       '</div>' +
       '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;border-top:1px solid #24332a;padding-top:8px;">🔧 ' + _diag + '</div>';
+    Array.prototype.forEach.call(body.querySelectorAll('.wi-pref'), function(b){ b.addEventListener('click', function(){ _wiRoutePref = b.getAttribute('data-pref'); wiRenderBody(); }); });
   }
   function showWalkIn(){
     wiClose();
@@ -9804,7 +9840,7 @@
       return;
     }
     _wiStand = stands.slice().sort(function(a, b){ return lastKnownPos ? (distMeters(lastKnownPos.lat, lastKnownPos.lng, a.lat, a.lng) - distMeters(lastKnownPos.lat, lastKnownPos.lng, b.lat, b.lng)) : 0; })[0];
-    _wiEntry = null;
+    _wiEntry = null; _wiRoutePref = 'stealth';
     var standOpts = stands.map(function(s){ return '<option value="' + escapeHtml(s.id) + '"' + (s.id === _wiStand.id ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>'; }).join('');
     var entries = walkInEntries();
     var modeOpts = Object.keys(WALK_MODES).map(function(mk){ return '<option value="' + mk + '"' + (mk === _wiMode ? ' selected' : '') + '>' + WALK_MODES[mk].icon + ' ' + WALK_MODES[mk].label + '</option>'; }).join('');
@@ -9820,8 +9856,8 @@
     back.appendChild(card); document.body.appendChild(back);
     card.querySelector('#wiClose').addEventListener('click', close);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
-    card.querySelector('#wiStandSel').addEventListener('change', function(){ var v = this.value; var ns = sites.filter(function(x){ return x.id === v; })[0]; if (ns){ _wiStand = ns; _wiEntry = null; wiRenderBody(); } });
-    var msel = card.querySelector('#wiModeSel'); if (msel) msel.addEventListener('change', function(){ _wiMode = this.value; _wiEntry = null; wiRenderBody(); });
+    card.querySelector('#wiStandSel').addEventListener('change', function(){ var v = this.value; var ns = sites.filter(function(x){ return x.id === v; })[0]; if (ns){ _wiStand = ns; _wiEntry = null; _wiRoutePref = 'stealth'; wiRenderBody(); } });
+    var msel = card.querySelector('#wiModeSel'); if (msel) msel.addEventListener('change', function(){ _wiMode = this.value; _wiEntry = null; _wiRoutePref = 'stealth'; wiRenderBody(); });
     var esel = card.querySelector('#wiEntrySel'); if (esel) esel.addEventListener('change', function(){ var v = this.value; _wiEntry = v ? (sites.filter(function(x){ return x.id === v; })[0] || null) : null; wiRenderBody(); });
     wiRenderBody();
   }
