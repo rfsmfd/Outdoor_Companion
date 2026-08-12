@@ -1787,7 +1787,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 228</div>
+    <div id="buildBadge">BUILD 229</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2820,13 +2820,21 @@
     if (style === 'dotted') return '2, 6';
     return null; // solid
   }
-  function trailTotalMiles(trail){
+  function trailTotalMeters(trail){
     var totalM = 0;
     for (var i=1;i<trail.points.length;i++){
       totalM += distMeters(trail.points[i-1].lat, trail.points[i-1].lng, trail.points[i].lat, trail.points[i].lng);
     }
-    return (totalM / 1609.34).toFixed(2);
+    return totalM;
   }
+  // Imperial length label — hunters here want FEET for walk-in paths (a 400-ft lane reads as "0.02 mi",
+  // which is useless). Roll up to miles only once a path is long enough that feet get unwieldy.
+  function fmtLenImperial(totalM){
+    var feet = totalM * 3.28084;
+    if (feet < 1000) return Math.round(feet) + ' ft';
+    return (feet / 5280).toFixed(2) + ' mi';
+  }
+  function trailLenLabel(trail){ return fmtLenImperial(trailTotalMeters(trail)); }
 
   function sampleTrailPoint(lat, lng){
     if (!trailRecordingActive) return;
@@ -2848,9 +2856,9 @@
     for (var i=1;i<currentTrailPoints.length;i++){
       totalM += distMeters(currentTrailPoints[i-1].lat, currentTrailPoints[i-1].lng, currentTrailPoints[i].lat, currentTrailPoints[i].lng);
     }
-    var miles = (totalM / 1609.34).toFixed(2);
+    var lenStr = fmtLenImperial(totalM);
     var elapsed = fmtHuntDuration(currentTrailPoints[0].timestamp, Date.now());
-    label.textContent = '🥾 ' + miles + ' mi · ' + elapsed;
+    label.textContent = '🥾 ' + lenStr + ' · ' + elapsed;
     label.style.display = 'block';
   }
 
@@ -2885,7 +2893,7 @@
     if (_pathDrawer){ try { _pathDrawer.disable(); } catch (e) {} _pathDrawer = null; btn.classList.remove('active'); return; }
     btn.classList.add('active');
     showToast('Click along the path — a click at each bend. Double-click (or the Finish button) to end, then name it.');
-    _pathDrawer = new L.Draw.Polyline(map, { shapeOptions: { color: '#3F8CFF', weight: 4 } });
+    _pathDrawer = new L.Draw.Polyline(map, { metric: false, feet: true, shapeOptions: { color: '#3F8CFF', weight: 4 } });
     _pathDrawer.enable();
     map.once('draw:created', function(e){
       _pathDrawer = null; btn.classList.remove('active');
@@ -2949,7 +2957,7 @@
     var poly = L.polyline(latlngs, {
       color: trail.color, weight: 4, opacity: 0.85, dashArray: lineStyleToDashArray(trail.lineStyle)
     }).addTo(map);
-    poly.bindPopup('<strong>' + escapeHtml(trail.name) + '</strong><br>' + trailTypeLabel(trail.type) + ' · ' + trailTotalMiles(trail) + ' mi');
+    poly.bindPopup('<strong>' + escapeHtml(trail.name) + '</strong><br>' + trailTypeLabel(trail.type) + ' · ' + trailLenLabel(trail));
     savedTrailPolylines[trail.id] = poly;
   }
 
@@ -2957,6 +2965,22 @@
     Object.keys(savedTrailPolylines).forEach(function(id){ map.removeLayer(savedTrailPolylines[id]); });
     savedTrailPolylines = {};
     trails.forEach(function(trail){ renderSavedTrailOnMap(trail); });
+  }
+
+  // Highlight a trail on the map so it's unmistakable which one you're about to edit or delete: a white
+  // casing under the colored line, brought to the front, and the map framed to it. Added because deleting/
+  // editing gave no visual cue for which trail was selected — you couldn't tell what you were removing.
+  var _trailHighlight = null;
+  function clearTrailHighlight(){ if (_trailHighlight){ map.removeLayer(_trailHighlight); _trailHighlight = null; } }
+  function highlightTrail(id){
+    clearTrailHighlight();
+    var trail = trails.filter(function(t){ return t.id === id; })[0];
+    if (!trail || !trail.points || trail.points.length < 2) return;
+    var lls = trail.points.map(function(p){ return [p.lat, p.lng]; });
+    _trailHighlight = L.polyline(lls, { color: '#FFFFFF', weight: 11, opacity: 0.95, dashArray: null }).addTo(map);
+    _trailHighlight.bringToFront();
+    var poly = savedTrailPolylines[id]; if (poly){ poly.bringToFront(); }   // colored line rides on top of the white casing
+    try { map.fitBounds(_trailHighlight.getBounds(), { padding: [60, 60], maxZoom: 17 }); } catch (e) {}
   }
 
   document.getElementById('confirmSaveTrailBtn').addEventListener('click', async function(){
@@ -2968,6 +2992,7 @@
         trail.name = name; trail.type = selectedTrailType; trail.color = selectedTrailColor; trail.lineStyle = selectedTrailStyle;
         try{ await saveTrail(trail); }catch(e){ console.error('Outdoor Companion: failed to save trail edits', e); }
         renderSavedTrailOnMap(trail);
+        clearTrailHighlight();
         renderTrailsList();
         showToast('Trail updated');
       }
@@ -2989,6 +3014,7 @@
   });
 
   document.getElementById('discardTrailBtn').addEventListener('click', function(){
+    clearTrailHighlight();
     if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
     currentTrailPoints = [];
     document.getElementById('recordTrailInfoLabel').style.display = 'none';
@@ -3009,7 +3035,7 @@
       row.innerHTML =
         '<div class="info">' +
           '<div class="dt"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+trail.color+';margin-right:6px;"></span>' + escapeHtml(trail.name) + '</div>' +
-          '<div class="co">' + trailTypeLabel(trail.type) + ' · ' + trailTotalMiles(trail) + ' mi</div>' +
+          '<div class="co">' + trailTypeLabel(trail.type) + ' · ' + trailLenLabel(trail) + '</div>' +
         '</div>' +
         '<div style="display:flex;flex-direction:column;gap:4px;">' +
           '<button class="btn-ghost" data-act="toggle-trail-visibility" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;">'+(trail.hidden?'Show':'Hide')+'</button>' +
@@ -3031,18 +3057,26 @@
     listEl.querySelectorAll('[data-act="edit-trail"]').forEach(function(btn){
       btn.addEventListener('click', function(){
         var trail = trails.filter(function(t){ return t.id === btn.getAttribute('data-id'); })[0];
-        if (trail) openSaveTrailModal(true, trail);
+        if (trail){ highlightTrail(trail.id); openSaveTrailModal(true, trail); }
       });
     });
     listEl.querySelectorAll('[data-act="delete-trail"]').forEach(function(btn){
       btn.addEventListener('click', async function(){
-        var confirmed = await showConfirm('Delete this trail? This cannot be undone.');
-        if (!confirmed) return;
         var id = btn.getAttribute('data-id');
+        var trail = trails.filter(function(t){ return t.id === id; })[0];
+        // Show the hunter EXACTLY which trail: highlight it and drop the trails list so the map is visible
+        // behind the confirm, and name it in the prompt.
+        highlightTrail(id);
+        var mtb = document.getElementById('manageTrailsModalBackdrop');
+        if (mtb) mtb.classList.remove('show');
+        var confirmed = await showConfirm('Delete "' + (trail ? trail.name : 'this trail') + '"? This cannot be undone.');
+        if (!confirmed){ clearTrailHighlight(); if (mtb) mtb.classList.add('show'); return; }
         if (savedTrailPolylines[id]){ map.removeLayer(savedTrailPolylines[id]); delete savedTrailPolylines[id]; }
         trails = trails.filter(function(t){ return t.id !== id; });
         try{ await deleteTrailStorage(id); }catch(e){ console.error('Outdoor Companion: failed to delete trail', e); }
+        clearTrailHighlight();
         renderTrailsList();
+        if (mtb) mtb.classList.add('show');
       });
     });
   }
@@ -3053,6 +3087,7 @@
     document.getElementById('manageTrailsModalBackdrop').classList.add('show');
   });
   document.getElementById('manageTrailsClose').addEventListener('click', function(){
+    clearTrailHighlight();
     document.getElementById('manageTrailsModalBackdrop').classList.remove('show');
   });
   document.getElementById('saveTrailClose').addEventListener('click', function(){
@@ -6698,7 +6733,7 @@
     try { if (typeof getParcelLayer === 'function' && !parcelLayerActive){ getParcelLayer().addTo(map); } } catch (e) {}
     showToast('Trace ' + prop.name + ' — click each corner, click the first point to close. Follow the parcel line where it\'s right, cut your own where it\'s wrong.');
     if (_boundaryDrawer){ try { _boundaryDrawer.disable(); } catch (e) {} }
-    _boundaryDrawer = new L.Draw.Polygon(map, { allowIntersection: false, shapeOptions: { color: '#3F8CFF', weight: 3, fillOpacity: 0.08 } });
+    _boundaryDrawer = new L.Draw.Polygon(map, { allowIntersection: false, metric: false, feet: true, showArea: true, shapeOptions: { color: '#3F8CFF', weight: 3, fillOpacity: 0.08 } });
     _boundaryDrawer.enable();
     map.once('draw:created', async function(e){
       _boundaryDrawer = null;
