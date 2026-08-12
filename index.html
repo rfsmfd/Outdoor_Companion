@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 241</div>
+    <div id="buildBadge">BUILD 242</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6815,46 +6815,143 @@
         for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++){ var ny = yy + dy, nx = xx + dx; if (ny < 0 || nx < 0 || ny >= H || nx >= W) continue; cnt[raw[ny][nx]]++; }
         out += (cnt.f >= cnt.w && cnt.f >= cnt.c) ? 'f' : ((cnt.w >= cnt.c) ? 'w' : 'c');
       } }
-    prop.landcover = { bbox: bb, cols: W, rows: H, grid: out, cellM: CELL, createdAt: Date.now(), v: 1 };
+    var typ = ''; for (var ti = 0; ti < out.length; ti++){ typ += ({ f: 'F', w: 'W', c: 'C' })[out.charAt(ti)] || 'W'; }
+    prop.landcover = { bbox: bb, cols: W, rows: H, grid: out, types: typ, cellM: CELL, createdAt: Date.now(), v: 2 };
     try { await saveProperty(prop); } catch (e) { console.error('Outdoor Companion: failed to save landcover', e); }
     return prop.landcover;
   }
-  // sample the stored grid → 'field' | 'woods' | 'cutover' | null (used by the Walk-In planner)
-  function landcoverAt(prop, lat, lng){
+  // Hunting cover vocabulary — each TYPE carries a meaning the walk-in / where-to-hunt can use. Bold, distinct
+  // colors (verify layer). Base auto-read (aerial) maps f→Field, w→Woods, c→Cutover; the hunter refines the rest.
+  var COVER_TYPES = {
+    F: { label: 'Field (open)',          color: [240, 70, 200], meaning: 'feeding' },
+    R: { label: 'Crop field',            color: [225, 40, 110], meaning: 'feeding' },
+    A: { label: 'Pasture / grass',       color: [255, 150, 190], meaning: 'staging / light feed' },
+    W: { label: 'Woods',                 color: [40, 120, 255], meaning: 'cover' },
+    H: { label: 'Hardwood / old growth', color: [0, 200, 170], meaning: 'feed + bed' },
+    P: { label: 'Young pine',            color: [150, 80, 255], meaning: 'bedding' },
+    C: { label: 'Cutover / clearcut',    color: [255, 216, 0],  meaning: 'thick bedding' },
+    D: { label: 'Drainage / creek',      color: [0, 225, 255],  meaning: 'travel + bed edge' },
+    S: { label: 'Swamp / wetland',       color: [140, 100, 70], meaning: 'bed / travel / feed' }
+  };
+  var COVER_BASE_MAP = { f: 'F', w: 'W', c: 'C' };
+  // The editable TYPE grid (one char/cell) — hunter's read; auto-initialised from the aerial base grid. His edits win.
+  function ensureTypes(lc){
+    if (lc.types && lc.types.length === lc.cols * lc.rows) return lc.types;
+    var t = ''; for (var i = 0; i < lc.grid.length; i++){ t += (COVER_BASE_MAP[lc.grid.charAt(i)] || 'W'); }
+    lc.types = t; return t;
+  }
+  // sample the cover type at a point → { code, label, meaning } | null  (for the Walk-In planner, step 2)
+  function coverTypeAt(prop, lat, lng){
     var lc = prop && prop.landcover; if (!lc || !lc.grid) return null;
     var bb = lc.bbox; if (lat > bb.n || lat < bb.s || lng > bb.e || lng < bb.w) return null;
     var x = Math.floor((lng - bb.w) / (bb.e - bb.w) * lc.cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * lc.rows);
     if (x < 0 || y < 0 || x >= lc.cols || y >= lc.rows) return null;
-    var ch = lc.grid.charAt(y * lc.cols + x);
-    return ch === 'f' ? 'field' : ch === 'w' ? 'woods' : ch === 'c' ? 'cutover' : null;
+    var code = ensureTypes(lc).charAt(y * lc.cols + x), d = COVER_TYPES[code];
+    return d ? { code: code, label: d.label, meaning: d.meaning } : null;
   }
   function clearLandcoverOverlay(){ landcoverOverlays.forEach(function(o){ map.removeLayer(o); }); landcoverOverlays = []; }
   function renderLandcoverOverlay(){
     if (!map.getPane('landcoverPane')){ map.createPane('landcoverPane'); map.getPane('landcoverPane').style.zIndex = 414; map.getPane('landcoverPane').style.pointerEvents = 'none'; }
     clearLandcoverOverlay();
     if (!landcoverVisible) return;
-    var COLOR = { w: [40, 120, 255], f: [240, 70, 200], c: [255, 216, 0] };   // bold + non-natural, so they pop OFF the aerial (this is a verify layer, not a pretty one)
     (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
       if (p.module && p.module !== activeModule) return; var lc = p.landcover; if (!lc || !lc.grid) return;
-      var cv = document.createElement('canvas'); cv.width = lc.cols; cv.height = lc.rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(lc.cols, lc.rows);
-      for (var k = 0; k < lc.cols * lc.rows; k++){ var col = COLOR[lc.grid.charAt(k)], o = k * 4; if (col){ id.data[o] = col[0]; id.data[o+1] = col[1]; id.data[o+2] = col[2]; id.data[o+3] = 185; } }
+      var types = ensureTypes(lc), cols = lc.cols, rows = lc.rows;
+      var cv = document.createElement('canvas'); cv.width = cols; cv.height = rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(cols, rows);
+      for (var k = 0; k < cols * rows; k++){ var code = types.charAt(k), d = COVER_TYPES[code]; if (!d) continue; var o = k * 4, x = k % cols, y = (k / cols) | 0;
+        // darken the cell into a BREAK LINE where a neighbour is a different type — draws the cover-change boundaries
+        var edge = (x + 1 < cols && types.charAt(k+1) !== code) || (x > 0 && types.charAt(k-1) !== code) || (y + 1 < rows && types.charAt(k+cols) !== code) || (y > 0 && types.charAt(k-cols) !== code);
+        var f = edge ? 0.32 : 1;
+        id.data[o] = Math.round(d.color[0] * f); id.data[o+1] = Math.round(d.color[1] * f); id.data[o+2] = Math.round(d.color[2] * f); id.data[o+3] = edge ? 235 : 185;
+      }
       ctx.putImageData(id, 0, 0);
       var bb = lc.bbox;
       landcoverOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'landcoverPane', opacity: 0.55, interactive: false }).addTo(map));
     });
   }
+  // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
+  var coverEditMode = false, _coverDrawer = null;
+  function propWithCoverAt(lat, lng){
+    var list = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return (!p.module || p.module === activeModule) && p.landcover && p.landcover.grid; });
+    function inb(p){ var b = p.landcover.bbox; return lat <= b.n && lat >= b.s && lng <= b.e && lng >= b.w; }
+    var act = list.filter(function(p){ return p.id === activePropertyId; })[0];
+    if (act && inb(act)) return act;
+    return list.filter(inb)[0] || null;
+  }
+  function cellIndexAt(lc, lat, lng){ var bb = lc.bbox, x = Math.floor((lng - bb.w) / (bb.e - bb.w) * lc.cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * lc.rows); if (x < 0 || y < 0 || x >= lc.cols || y >= lc.rows) return -1; return y * lc.cols + x; }
+  function floodFillRegion(lc, startIdx){
+    var types = ensureTypes(lc), cols = lc.cols, rows = lc.rows, target = types.charAt(startIdx), seen = {}, stack = [startIdx], out = [];
+    while (stack.length){ var k = stack.pop(); if (seen[k] || types.charAt(k) !== target) continue; seen[k] = 1; out.push(k);
+      var x = k % cols, y = (k / cols) | 0;
+      if (x + 1 < cols) stack.push(k + 1); if (x > 0) stack.push(k - 1); if (y + 1 < rows) stack.push(k + cols); if (y > 0) stack.push(k - cols); }
+    return out;
+  }
+  function acresOf(lc, n){ return n * (lc.cellM * lc.cellM) / 4046.86; }
+  function applyTypeToCells(prop, cells, code){ var lc = prop.landcover, arr = ensureTypes(lc).split(''); cells.forEach(function(k){ arr[k] = code; }); lc.types = arr.join(''); saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: save cover edit failed', e); }); renderLandcoverOverlay(); }
+  function pickCoverType(cb, ctx){
+    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100050;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;';
+    var card = document.createElement('div'); card.style.cssText = 'background:#1b2822;border:1px solid #35443a;border-radius:14px;padding:14px;max-width:330px;width:100%;max-height:80vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    var opts = Object.keys(COVER_TYPES).map(function(code){ var d = COVER_TYPES[code];
+      return '<button class="ct-opt" data-code="' + code + '" style="display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:#26332b;border:1px solid #3c4d42;border-radius:9px;padding:8px 10px;margin-bottom:6px;color:#e8f0ea;cursor:pointer;">' +
+        '<span style="width:14px;height:14px;border-radius:3px;background:rgb(' + d.color.join(',') + ');flex:0 0 auto;"></span>' +
+        '<span style="flex:1;min-width:0;"><span style="font-weight:700;font-size:13px;">' + d.label + '</span><br><span style="font-size:10.5px;color:#9db0a3;">deer: ' + d.meaning + '</span></span></button>';
+    }).join('');
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:800;font-size:13.5px;">' + (ctx || 'Set cover type') + '</div><button class="ct-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' + opts;
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.ct-x').addEventListener('click', close);
+    Array.prototype.forEach.call(card.querySelectorAll('.ct-opt'), function(b){ b.addEventListener('click', function(){ var code = b.getAttribute('data-code'); close(); cb(code); }); });
+  }
+  function setCoverEditMode(v){
+    coverEditMode = v;
+    if (v && !landcoverVisible) setLandcoverVisible(true);
+    try { map.getContainer().style.cursor = v ? 'crosshair' : ''; } catch (e) {}
+    var eb = document.getElementById('lcEditBtn'); if (eb){ eb.textContent = v ? '✓ Done' : '✏️ Edit'; eb.style.background = v ? '#2E4636' : 'transparent'; }
+    var db = document.getElementById('lcDrawBtn'); if (db) db.style.display = v ? 'inline-block' : 'none';
+    if (!v && _coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
+    if (v) showToast('Tap a block to relabel it, or ▱ Draw for a custom shape. Tap ✓ Done when finished.');
+  }
+  function startCoverDrawArea(){
+    if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
+    _coverDrawer = new L.Draw.Polygon(map, { allowIntersection: false, shapeOptions: { color: '#FFD24A', weight: 2, fillOpacity: 0.05 } });
+    _coverDrawer.enable();
+    showToast('Draw around the block — click each corner, click the first point to close, then pick its type.');
+    map.once('draw:created', function(ev){
+      _coverDrawer = null; var latlngs = ev.layer.getLatLngs()[0]; if (!latlngs || latlngs.length < 3) return;
+      var poly = latlngs.map(function(pt){ return [pt.lat, pt.lng]; });
+      var prop = propWithCoverAt(latlngs[0].lat, latlngs[0].lng); if (!prop || !prop.landcover){ showToast('Draw inside a scanned property.'); return; }
+      var lc = prop.landcover, cells = [];
+      for (var y = 0; y < lc.rows; y++){ var lat = lc.bbox.n - (lc.bbox.n - lc.bbox.s) * ((y + 0.5) / lc.rows);
+        for (var x = 0; x < lc.cols; x++){ var lng = lc.bbox.w + (lc.bbox.e - lc.bbox.w) * ((x + 0.5) / lc.cols); if (pointInPolygon(lat, lng, poly)) cells.push(y * lc.cols + x); } }
+      if (!cells.length){ showToast('No cells inside that shape.'); return; }
+      pickCoverType(function(code){ applyTypeToCells(prop, cells, code); showToast('Set ~' + acresOf(lc, cells.length).toFixed(1) + ' ac to ' + COVER_TYPES[code].label + '.'); }, 'Drawn area ≈ ' + acresOf(lc, cells.length).toFixed(1) + ' ac');
+    });
+  }
+  map.on('click', function(e){
+    if (!coverEditMode || _coverDrawer) return;
+    var prop = propWithCoverAt(e.latlng.lat, e.latlng.lng); if (!prop){ showToast('Tap inside a scanned property to relabel a block.'); return; }
+    var lc = prop.landcover, idx = cellIndexAt(lc, e.latlng.lat, e.latlng.lng); if (idx < 0) return;
+    var cells = floodFillRegion(lc, idx), cur = COVER_TYPES[ensureTypes(lc).charAt(idx)];
+    pickCoverType(function(code){ applyTypeToCells(prop, cells, code); showToast('Set ' + cells.length + ' cells (~' + acresOf(lc, cells.length).toFixed(1) + ' ac) to ' + COVER_TYPES[code].label + '.'); }, 'This block ≈ ' + acresOf(lc, cells.length).toFixed(1) + ' ac' + (cur ? (' · now ' + cur.label) : ''));
+  });
   function ensureLandcoverLegend(){
     var el = document.getElementById('landcoverLegend');
     if (!el){
       el = document.createElement('div'); el.id = 'landcoverLegend';
-      el.style.cssText = 'position:fixed;left:250px;bottom:46px;z-index:1200;background:rgba(15,20,17,0.88);color:#e8f0ea;font:11px sans-serif;padding:8px 10px;border-radius:8px;border:1px solid #2c3f34;line-height:1.7;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.4);';
-      function sw(c){ return '<span style="display:inline-block;width:12px;height:12px;background:' + c + ';border-radius:2px;vertical-align:-2px;margin-right:6px;"></span>'; }
-      el.innerHTML = '<b style="font-size:11px;">🌲 App\'s read</b> <span style="color:#8aa596;">+½mi</span><br>' + sw('rgb(40,120,255)') + 'Woods<br>' + sw('rgb(240,70,200)') + 'Field<br>' + sw('rgb(255,216,0)') + 'Cutover';
+      el.style.cssText = 'position:fixed;left:250px;bottom:46px;z-index:1200;background:rgba(15,20,17,0.92);color:#e8f0ea;font:11px sans-serif;padding:9px 11px;border-radius:9px;border:1px solid #2c3f34;line-height:1.5;box-shadow:0 4px 14px rgba(0,0,0,.45);max-width:186px;';
+      function sw(code){ var d = COVER_TYPES[code]; return '<div style="display:flex;align-items:center;gap:6px;"><span style="width:11px;height:11px;border-radius:2px;background:rgb(' + d.color.join(',') + ');flex:0 0 auto;"></span><span style="font-size:10.5px;">' + d.label + '</span></div>'; }
+      el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px;"><b style="font-size:11px;">🌲 Cover <span style="color:#8aa596;font-weight:400;">+½mi</span></b>' +
+        '<span style="white-space:nowrap;"><button id="lcDrawBtn" style="display:none;font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;margin-right:4px;">▱ Draw</button>' +
+        '<button id="lcEditBtn" style="font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c4d42;background:transparent;color:#cfe0d6;cursor:pointer;">✏️ Edit</button></span></div>' +
+        ['F','W','C','H','P','D','S','R','A'].map(sw).join('');
       document.body.appendChild(el);
+      el.querySelector('#lcEditBtn').addEventListener('click', function(){ setCoverEditMode(!coverEditMode); });
+      el.querySelector('#lcDrawBtn').addEventListener('click', function(){ startCoverDrawArea(); });
     }
     return el;
   }
-  function setLandcoverVisible(v){ landcoverVisible = v; renderLandcoverOverlay(); var btn = document.getElementById('landcoverToggleBtn'); if (btn) btn.classList.toggle('active', v); ensureLandcoverLegend().style.display = v ? 'block' : 'none'; }
+  function setLandcoverVisible(v){ landcoverVisible = v; if (!v && coverEditMode) setCoverEditMode(false); renderLandcoverOverlay(); var btn = document.getElementById('landcoverToggleBtn'); if (btn) btn.classList.toggle('active', v); ensureLandcoverLegend().style.display = v ? 'block' : 'none'; }
 
   function drawPropertyBoundary(prop){
     var mp = document.getElementById('managePropertiesModalBackdrop'); if (mp) mp.classList.remove('show');
@@ -6987,7 +7084,7 @@
           classifyLandcover(prop, function(msg){ b.textContent = msg; }).then(function(){
             setLandcoverVisible(true); close();
             if (typeof prop.centerLat === 'number'){ try { map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15)); } catch (e) {} }
-            showToast('Land cover read (your land + ½ mi around) — 🟦 woods · 🟪 field · 🟨 cutover. Look it over; if a block\'s off, redraw the boundary or Rescan. Toggle it anytime with the 🌲 Cover button.');
+            showToast('Land cover read (your land + ½ mi around). Toggle it with 🌲 Cover, then tap ✏️ Edit to fix a misread or label your pine / hardwood / drainage / swamp blocks — the type sets how deer use it.');
           }).catch(function(err){ b.disabled = false; b.textContent = 'Retry'; console.error('Outdoor Companion: landcover scan failed', err); showToast(err && err.message === 'no-boundary' ? 'Draw the boundary first.' : 'Couldn\'t read the imagery — check your connection and try again.'); });
         }
         else if (act === 'import') launch(function(){ activePropertyId = prop.id; var ps = document.getElementById('propertySelect'); if (ps) ps.value = prop.id; document.getElementById('importWaypointsBtn').click(); });
