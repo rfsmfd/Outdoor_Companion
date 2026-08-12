@@ -1794,7 +1794,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 235</div>
+    <div id="buildBadge">BUILD 236</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3005,7 +3005,10 @@
   }
   // origin 'map' → don't re-fit (you're already looking at it), do scroll the list to it;
   // origin 'list' → pan/fit the map so you can see the trail you tapped.
+  var _trailClickAt = 0; // guards the click-away release below: a trail click fires just before it bubbles to the map
   function selectTrail(id, origin){
+    _trailClickAt = Date.now();
+    if (selectedTrailId === id){ clearTrailSelection(); return; }   // re-selecting the same trail RELEASES it
     selectedTrailId = id;
     highlightTrail(id, { fit: origin === 'list' });
     markSelectedTrailRow(origin === 'map');
@@ -3015,6 +3018,9 @@
     clearTrailHighlight();
     markSelectedTrailRow(false);
   }
+  // Release a trail selection by clicking empty map (not while placing a pin, and not the click that just
+  // selected a trail — that bubbles up here a beat later, so the timestamp guard lets a fresh pick survive).
+  map.on('click', function(){ if (selectedTrailId && !placing && (Date.now() - _trailClickAt > 350)) clearTrailSelection(); });
 
   document.getElementById('confirmSaveTrailBtn').addEventListener('click', async function(){
     var name = document.getElementById('trailNameInput').value.trim();
