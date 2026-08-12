@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 238</div>
+    <div id="buildBadge">BUILD 239</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6787,7 +6787,12 @@
     var bb = propBBox(prop); if (!bb) throw new Error('no-boundary');
     var mPerLat = 111320, mPerLng = 111320 * Math.cos((bb.n + bb.s) / 2 * Math.PI / 180);
     var widthM = (bb.e - bb.w) * mPerLng, heightM = (bb.n - bb.s) * mPerLat, CELL = 5;
-    var cols = Math.max(40, Math.min(300, Math.round(widthM / CELL))), rows = Math.max(40, Math.min(300, Math.round(heightM / CELL)));
+    // The export image is geographic (imageSR=4326), so its width:height MUST match the bbox's DEGREE ratio —
+    // otherwise ArcGIS silently EXPANDS the extent to fit the requested size, and the overlay lands off the ground
+    // (it drifted north). Size the long side by ground meters, derive the short side from the degree aspect.
+    var degW = bb.e - bb.w, degH = bb.n - bb.s, LONG = 300, cols, rows;
+    if (degW >= degH){ cols = Math.max(40, Math.min(LONG, Math.round(widthM / CELL))); rows = Math.max(24, Math.round(cols * degH / degW)); }
+    else { rows = Math.max(40, Math.min(LONG, Math.round(heightM / CELL))); cols = Math.max(24, Math.round(rows * degW / degH)); }
     if (onStatus) onStatus('Fetching…');
     var url = IMAGERY_EXPORT + '?bbox=' + [bb.w, bb.s, bb.e, bb.n].join(',') + '&bboxSR=4326&imageSR=4326&size=' + cols + ',' + rows + '&format=png&f=image';
     var r = await fetch(url); if (!r.ok) throw new Error('imagery ' + r.status);
