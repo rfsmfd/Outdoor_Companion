@@ -1794,7 +1794,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 232</div>
+    <div id="buildBadge">BUILD 233</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9633,18 +9633,61 @@
   function routeMeters(route){ var m = 0; for (var i = 1; i < route.length; i++) m += distMeters(route[i-1].lat, route[i-1].lng, route[i].lat, route[i].lng); return m; }
   function routeMinDistToPin(route, pin){ if (route.length < 2) return distMeters(route[0].lat, route[0].lng, pin.lat, pin.lng); var mn = Infinity; for (var i = 1; i < route.length; i++){ var d = segPointDistM(pin.lat, pin.lng, route[i-1].lat, route[i-1].lng, route[i].lat, route[i].lng); if (d < mn) mn = d; } return mn; }
   function routeNearestPointTo(route, pin){ var mn = Infinity, best = route[0]; route.forEach(function(p){ var d = distMeters(p.lat, p.lng, pin.lat, pin.lng); if (d < mn){ mn = d; best = p; } }); return best; }
-  // route entry→stand: ride an Access path if one runs near BOTH ends (within ~70m), else a straight line
-  function buildWalkRoute(entry, stand){
-    var best = null;
-    walkInAccessTrails().forEach(function(t){
-      var eIdx = nearestVertexIdx(t.points, entry.lat, entry.lng), sIdx = nearestVertexIdx(t.points, stand.lat, stand.lng);
-      var eD = distMeters(entry.lat, entry.lng, t.points[eIdx].lat, t.points[eIdx].lng), sD = distMeters(stand.lat, stand.lng, t.points[sIdx].lat, t.points[sIdx].lng);
-      if (eD <= 70 && sD <= 70){ var sc = eD + sD; if (!best || sc < best.sc) best = { t: t, eIdx: eIdx, sIdx: sIdx, sc: sc }; }
+  // Build a walking GRAPH from ALL your Access paths: every path vertex is a node, consecutive vertices are
+  // edges, and vertices from DIFFERENT paths that nearly touch (a junction/crossing, within ~22 m) get joined.
+  // That lets the route HOP between connected lanes — the way you really walk in — instead of needing one
+  // single path to run the entire way (the old logic drew a straight line whenever no lone path did).
+  function buildAccessGraph(){
+    var segs = walkInAccessTrails(), nodes = [], adj = {};
+    function addEdge(a, b, w){ (adj[a] = adj[a] || []).push({ to: b, w: w }); (adj[b] = adj[b] || []).push({ to: a, w: w }); }
+    segs.forEach(function(t){
+      var prev = -1, prevPt = null;
+      t.points.forEach(function(p){
+        var id = nodes.length; nodes.push({ lat: p.lat, lng: p.lng, trail: t.id });
+        if (prev >= 0) addEdge(prev, id, distMeters(prevPt.lat, prevPt.lng, p.lat, p.lng));
+        prev = id; prevPt = p;
+      });
     });
-    if (best){ var pts = [], a = best.eIdx, b = best.sIdx, step = a <= b ? 1 : -1; for (var i = a; ; i += step){ pts.push({ lat: best.t.points[i].lat, lng: best.t.points[i].lng }); if (i === b) break; } return { route: [{ lat: entry.lat, lng: entry.lng }].concat(pts, [{ lat: stand.lat, lng: stand.lng }]), onTrail: true, trailName: best.t.name }; }
+    var SNAP = 22;
+    for (var i = 0; i < nodes.length; i++){ for (var j = i + 1; j < nodes.length; j++){ if (nodes[i].trail !== nodes[j].trail){ var d = distMeters(nodes[i].lat, nodes[i].lng, nodes[j].lat, nodes[j].lng); if (d < SNAP) addEdge(i, j, d); } } }
+    return { nodes: nodes, adj: adj };
+  }
+  // Dijkstra from the nearest node to the entry → nearest node to the stand (each must be within ~250 m of a
+  // path, else there's genuinely nothing to route on and we fall back to a straight line).
+  function routeOnGraph(g, entry, stand){
+    if (!g.nodes.length) return null;
+    function nearest(lat, lng){ var bi = -1, bd = Infinity; for (var i = 0; i < g.nodes.length; i++){ var d = distMeters(lat, lng, g.nodes[i].lat, g.nodes[i].lng); if (d < bd){ bd = d; bi = i; } } return { i: bi, d: bd }; }
+    var e = nearest(entry.lat, entry.lng), s = nearest(stand.lat, stand.lng), MAX = 250;
+    if (e.i < 0 || s.i < 0 || e.d > MAX || s.d > MAX) return null;
+    var N = g.nodes.length, dist = new Array(N), prev = new Array(N), done = new Array(N);
+    for (var k = 0; k < N; k++){ dist[k] = Infinity; prev[k] = -1; done[k] = false; }
+    dist[e.i] = 0;
+    for (var it = 0; it < N; it++){
+      var u = -1, ud = Infinity; for (var m = 0; m < N; m++){ if (!done[m] && dist[m] < ud){ ud = dist[m]; u = m; } }
+      if (u < 0 || u === s.i) break; done[u] = true;
+      (g.adj[u] || []).forEach(function(ed){ if (dist[u] + ed.w < dist[ed.to]){ dist[ed.to] = dist[u] + ed.w; prev[ed.to] = u; } });
+    }
+    if (dist[s.i] === Infinity) return null;
+    var pathIds = [], c = s.i; while (c !== -1){ pathIds.unshift(c); c = prev[c]; }
+    var mid = pathIds.map(function(id){ return { lat: g.nodes[id].lat, lng: g.nodes[id].lng }; });
+    return { route: [{ lat: entry.lat, lng: entry.lng }].concat(mid, [{ lat: stand.lat, lng: stand.lng }]), trailName: 'your access paths' };
+  }
+  function buildWalkRoute(entry, stand){
+    var routed = routeOnGraph(buildAccessGraph(), entry, stand);
+    if (routed) return { route: routed.route, onTrail: true, trailName: routed.trailName };
     return { route: [{ lat: entry.lat, lng: entry.lng }, { lat: stand.lat, lng: stand.lng }], onTrail: false, trailName: null };
   }
-  function bestEntryFor(stand){ var es = walkInEntries(); if (!es.length) return null; var best = null; es.forEach(function(e){ var plan = buildWalkRoute(e, stand), m = routeMeters(plan.route), score = m * (plan.onTrail ? 0.85 : 1); if (!best || score < best.score) best = { entry: e, plan: plan, meters: m, score: score }; }); return best; }
+  function bestEntryFor(stand){
+    var es = walkInEntries(); if (!es.length) return null;
+    var g = buildAccessGraph(), best = null;   // build the graph ONCE, route every entry on it
+    es.forEach(function(e){
+      var routed = routeOnGraph(g, e, stand);
+      var plan = routed ? { route: routed.route, onTrail: true, trailName: routed.trailName } : { route: [{ lat: e.lat, lng: e.lng }, { lat: stand.lat, lng: stand.lng }], onTrail: false, trailName: null };
+      var m = routeMeters(plan.route), score = m * (plan.onTrail ? 0.85 : 1);   // prefer a real path over a shorter straight line
+      if (!best || score < best.score) best = { entry: e, plan: plan, meters: m, score: score };
+    });
+    return best;
+  }
   function clearWalkInRoute(){ if (_walkInLayer){ map.removeLayer(_walkInLayer); _walkInLayer = null; } }
   function drawWalkInRoute(plan, entry, stand, fit){
     clearWalkInRoute(); _walkInLayer = L.layerGroup().addTo(map);
@@ -9683,7 +9726,7 @@
     if (bedWarn){ if (level === 'go') level = 'caution'; issues.push('⚠️ Route passes <b>' + ydsLabel(bedWarn.d) + '</b> from bedding (' + escapeHtml(bedWarn.pin.name) + ') — ' + (bedWarn.d < 70 ? 'too tight, you\'ll bump them.' : 'ease through quiet and slow.')); }
     if (feedWarn && isAM){ if (level === 'go') level = 'caution'; issues.push('⚠️ Skirts your field <b>' + escapeHtml(feedWarn.pin.name) + '</b> (' + ydsLabel(feedWarn.d) + ') on a morning walk — deer feeding there at first light will blow out.'); }
     else if (feedWarn){ issues.push('• Passes field ' + escapeHtml(feedWarn.pin.name) + ' (' + ydsLabel(feedWarn.d) + ') — fine for an evening slip-in.'); }
-    if (!plan.onTrail) issues.push('• No Access path connects here — this is a straight line. Draw the lane you actually walk (✏️) and it\'ll route on it.');
+    if (!plan.onTrail) issues.push('• No connected Access path reached this route — drew a straight line. Check your lanes are saved as <b>Access</b> trails and actually link up (junctions within ~20 yds), or draw the missing bit (✏️).');
     var V = { go: { c: '#4CAF50', t: 'GO', s: 'Clean walk in' }, caution: { c: '#E8B04B', t: 'CAUTION', s: 'Doable — mind the notes' }, avoid: { c: '#D94A2E', t: 'RECONSIDER', s: 'This approach risks the hunt' } }[level];
     if (!issues.length) issues.push('✓ Stays clear of your marked bedding and fields, and your scent doesn\'t drift into them on the way.');
     var scentTo = sc.calm ? 'dead calm' : ('drifts ' + scentCompass16(sc.bearing));
