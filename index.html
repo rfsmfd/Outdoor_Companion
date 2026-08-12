@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 260</div>
+    <div id="buildBadge">BUILD 261</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6952,7 +6952,7 @@
     });
   }
   // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
-  var coverEditMode = false, _coverDrawer = null;
+  var coverEditMode = false, _coverDrawer = null, _coverUndo = null, _coverLineRadius = 2;   // drain corridor radius in cells (1≈narrow / 2≈med / 3≈wide)
   function propWithCoverAt(lat, lng){
     var list = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return (!p.module || p.module === activeModule) && p.landcover && p.landcover.grid; });
     function inb(p){ var b = p.landcover.bbox; return lat <= b.n && lat >= b.s && lng <= b.e && lng >= b.w; }
@@ -6970,7 +6970,18 @@
   }
   function acresOf(lc, n){ return n * (lc.cellM * lc.cellM) / 4046.86; }
   function ensureConfirmed(lc){ if (!lc.confirmed || lc.confirmed.length !== lc.cols * lc.rows) lc.confirmed = new Array(lc.cols * lc.rows + 1).join('0'); return lc.confirmed; }
-  function applyTypeToCells(prop, cells, code){ var lc = prop.landcover, arr = ensureTypes(lc).split(''), conf = ensureConfirmed(lc).split(''); cells.forEach(function(k){ arr[k] = code; conf[k] = '1'; }); lc.types = arr.join(''); lc.confirmed = conf.join(''); saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: save cover edit failed', e); }); renderLandcoverOverlay(); }
+  function applyTypeToCells(prop, cells, code){ var lc = prop.landcover, arr = ensureTypes(lc).split(''), conf = ensureConfirmed(lc).split('');
+    _coverUndo = { propId: prop.id, types: arr.join(''), confirmed: conf.join('') };   // snapshot BEFORE the change so one ↩ reverses it
+    cells.forEach(function(k){ arr[k] = code; conf[k] = '1'; }); lc.types = arr.join(''); lc.confirmed = conf.join(''); saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: save cover edit failed', e); }); renderLandcoverOverlay(); updateCoverUndoBtn(); }
+  function undoCoverEdit(){
+    if (!_coverUndo) return;
+    var prop = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === _coverUndo.propId; })[0];
+    if (!prop || !prop.landcover){ _coverUndo = null; updateCoverUndoBtn(); return; }
+    prop.landcover.types = _coverUndo.types; prop.landcover.confirmed = _coverUndo.confirmed; _coverUndo = null;
+    saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: undo save failed', e); }); renderLandcoverOverlay(); updateCoverUndoBtn(); showToast('Undid the last cover change.');
+  }
+  function updateCoverUndoBtn(){ var b = document.getElementById('lcUndoBtn'); if (b) b.style.display = (coverEditMode && _coverUndo) ? 'inline-block' : 'none'; }
+  function setActiveCoverTool(id){ ['lcBoxBtn','lcLineBtn','lcDrawBtn'].forEach(function(bid){ var el = document.getElementById(bid); if (el){ var on = (bid === id); el.style.background = on ? '#3c6d42' : '#26332b'; el.style.color = on ? '#fff' : '#dff0e4'; } }); }
   // Show the exact cells about to change — a white outline + faint fill — so you SEE the selection while you pick.
   function clearCoverSelection(){ if (_coverSelOverlay){ map.removeLayer(_coverSelOverlay); _coverSelOverlay = null; } }
   function showCoverSelection(prop, cells){
@@ -7004,17 +7015,19 @@
     if (v && !landcoverVisible) setLandcoverVisible(true);
     try { map.getContainer().style.cursor = v ? 'crosshair' : ''; } catch (e) {}
     var eb = document.getElementById('lcEditBtn'); if (eb){ eb.textContent = v ? '✓ Done' : '✏️ Edit'; eb.style.background = v ? '#2E4636' : 'transparent'; }
-    ['lcDrawBtn', 'lcBoxBtn', 'lcLineBtn'].forEach(function(idd){ var bx = document.getElementById(idd); if (bx) bx.style.display = v ? 'inline-block' : 'none'; });
-    if (!v){ if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; } clearCoverSelection(); }
+    ['lcDrawBtn', 'lcBoxBtn', 'lcLineBtn', 'lcWidthBtn'].forEach(function(idd){ var bx = document.getElementById(idd); if (bx) bx.style.display = v ? 'inline-block' : 'none'; });
+    if (!v){ if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; } clearCoverSelection(); setActiveCoverTool(null); }
+    updateCoverUndoBtn();
     if (v) showToast('Tap a block to relabel it · ▭ box · ▱ area · 〰 line (for drains). Tap ✓ Done when finished.');
   }
   function startCoverDrawArea(){
     if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
+    setActiveCoverTool('lcDrawBtn');
     _coverDrawer = new L.Draw.Polygon(map, { allowIntersection: false, shapeOptions: { color: '#FFD24A', weight: 2, fillOpacity: 0.05 } });
     _coverDrawer.enable();
     showToast('Draw around the block — click each corner, click the first point to close, then pick its type.');
     map.once('draw:created', function(ev){
-      _coverDrawer = null; var latlngs = ev.layer.getLatLngs()[0]; if (!latlngs || latlngs.length < 3) return;
+      _coverDrawer = null; setActiveCoverTool(null); var latlngs = ev.layer.getLatLngs()[0]; if (!latlngs || latlngs.length < 3) return;
       var poly = latlngs.map(function(pt){ return [pt.lat, pt.lng]; });
       var prop = propWithCoverAt(latlngs[0].lat, latlngs[0].lng); if (!prop || !prop.landcover){ showToast('Draw inside a scanned property.'); return; }
       var lc = prop.landcover, cells = [];
@@ -7027,11 +7040,12 @@
   }
   function startCoverBox(){
     if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
+    setActiveCoverTool('lcBoxBtn');
     _coverDrawer = new L.Draw.Rectangle(map, { shapeOptions: { color: '#FFD24A', weight: 2, fillOpacity: 0.05 } });
     _coverDrawer.enable();
     showToast('Drag a box over the patch, then pick its type.');
     map.once('draw:created', function(ev){
-      _coverDrawer = null; var b = ev.layer.getBounds();
+      _coverDrawer = null; setActiveCoverTool(null); var b = ev.layer.getBounds();
       var prop = propWithCoverAt(b.getCenter().lat, b.getCenter().lng); if (!prop || !prop.landcover){ showToast('Draw inside a scanned property.'); return; }
       var lc = prop.landcover, cells = [];
       for (var y = 0; y < lc.rows; y++){ var lat = lc.bbox.n - (lc.bbox.n - lc.bbox.s) * ((y + 0.5) / lc.rows); if (lat > b.getNorth() || lat < b.getSouth()) continue;
@@ -7043,21 +7057,25 @@
   }
   function startCoverLine(){
     if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
+    setActiveCoverTool('lcLineBtn');
     _coverDrawer = new L.Draw.Polyline(map, { shapeOptions: { color: '#00E5FF', weight: 3 } });
     _coverDrawer.enable();
-    showToast('Trace the drain (or feature) as a line — double-click to finish, then pick its type.');
+    var wName = _coverLineRadius <= 1 ? 'narrow' : (_coverLineRadius >= 3 ? 'wide' : 'medium');
+    showToast('Trace the drain down its bottom — double-click to finish, then pick Drainage. Corridor width: ' + wName + ' (change with the width button).');
     map.once('draw:created', function(ev){
-      _coverDrawer = null; var lls = ev.layer.getLatLngs(); if (!lls || lls.length < 2) return;
+      _coverDrawer = null; setActiveCoverTool(null); var lls = ev.layer.getLatLngs(); if (!lls || lls.length < 2) return;
       var prop = propWithCoverAt(lls[0].lat, lls[0].lng); if (!prop || !prop.landcover){ showToast('Draw inside a scanned property.'); return; }
-      var lc = prop.landcover, cellSet = {}, cells = [];
+      var lc = prop.landcover, cellSet = {}, cells = [], R = Math.max(0, _coverLineRadius | 0), R2 = R * R + 0.001;
+      // Paint a BOUNDED corridor of radius R cells around the traced line — captures the wooded drainage bottom
+      // (the trees in the drain ARE the drain), but never floods the whole stand the way a bare tap-fill does.
       function markLine(lat, lng){ var x = Math.floor((lng - lc.bbox.w) / (lc.bbox.e - lc.bbox.w) * lc.cols), y = Math.floor((lc.bbox.n - lat) / (lc.bbox.n - lc.bbox.s) * lc.rows);
-        for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++){ if (dx !== 0 && dy !== 0) continue; var xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < lc.cols && yy < lc.rows){ var idx = yy * lc.cols + xx; if (!cellSet[idx]){ cellSet[idx] = 1; cells.push(idx); } } } }
+        for (var dy = -R; dy <= R; dy++) for (var dx = -R; dx <= R; dx++){ if (dx * dx + dy * dy > R2) continue; var xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < lc.cols && yy < lc.rows){ var idx = yy * lc.cols + xx; if (!cellSet[idx]){ cellSet[idx] = 1; cells.push(idx); } } } }
       for (var i = 1; i < lls.length; i++){ var la1 = lls[i-1].lat, ln1 = lls[i-1].lng, la2 = lls[i].lat, ln2 = lls[i].lng;
         var dxc = Math.abs((ln2 - ln1) / (lc.bbox.e - lc.bbox.w) * lc.cols), dyc = Math.abs((la2 - la1) / (lc.bbox.n - lc.bbox.s) * lc.rows), st = Math.max(1, Math.ceil(Math.max(dxc, dyc)));
         for (var t = 0; t <= st; t++){ var f = t / st; markLine(la1 + (la2 - la1) * f, ln1 + (ln2 - ln1) * f); } }
       if (!cells.length){ showToast('Nothing traced.'); return; }
       showCoverSelection(prop, cells);
-      pickCoverType(function(code){ applyTypeToCells(prop, cells, code); showToast('Set the traced line to ' + COVER_TYPES[code].label + '.'); }, 'Traced line — pick type (Drainage?)');
+      pickCoverType(function(code){ applyTypeToCells(prop, cells, code); showToast('Set the traced corridor (~' + acresOf(lc, cells.length).toFixed(1) + ' ac) to ' + COVER_TYPES[code].label + '. Tap ↩ to undo.'); }, 'Traced corridor ≈ ' + acresOf(lc, cells.length).toFixed(1) + ' ac — pick type (Drainage?)');
     });
   }
   map.on('click', function(e){
@@ -7076,7 +7094,7 @@
       function sw(code){ var d = COVER_TYPES[code]; return '<div style="display:flex;align-items:center;gap:6px;"><span style="width:11px;height:11px;border-radius:2px;background:rgb(' + d.color.join(',') + ');flex:0 0 auto;"></span><span style="font-size:10.5px;">' + d.label + '</span></div>'; }
       var toolBtn = function(id, label, title){ return '<button id="' + id + '" title="' + title + '" style="display:none;font-size:11px;padding:2px 6px;border-radius:5px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;margin-right:3px;">' + label + '</button>'; };
       el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:6px;"><b style="font-size:11px;">🌲 Cover <span style="color:#8aa596;font-weight:400;">+½mi</span></b>' +
-        '<span style="white-space:nowrap;">' + toolBtn('lcBoxBtn', '▭', 'Box-select a patch') + toolBtn('lcLineBtn', '〰', 'Trace a line (drains)') + toolBtn('lcDrawBtn', '▱', 'Draw an area') +
+        '<span style="white-space:nowrap;">' + toolBtn('lcUndoBtn', '↩', 'Undo last change') + toolBtn('lcWidthBtn', '〰 med', 'Drain corridor width — tap to cycle narrow/med/wide') + toolBtn('lcBoxBtn', '▭', 'Box-select a patch') + toolBtn('lcLineBtn', '〰', 'Trace a line (drains)') + toolBtn('lcDrawBtn', '▱', 'Draw an area') +
         '<button id="lcEditBtn" style="font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c4d42;background:transparent;color:#cfe0d6;cursor:pointer;">✏️ Edit</button></span></div>' +
         ['R','A','F','H','P','W','C','D','S','O'].map(sw).join('') +
         '<div style="display:flex;align-items:center;gap:6px;margin-top:7px;border-top:1px solid #2c3f34;padding-top:6px;"><span style="font-size:10px;color:#8aa596;">Fade</span><input id="lcOpacity" type="range" min="15" max="100" value="' + Math.round(landcoverOpacity * 100) + '" style="flex:1;accent-color:#7CCB7C;cursor:pointer;"></div>';
@@ -7085,6 +7103,8 @@
       el.querySelector('#lcDrawBtn').addEventListener('click', function(){ startCoverDrawArea(); });
       el.querySelector('#lcBoxBtn').addEventListener('click', function(){ startCoverBox(); });
       el.querySelector('#lcLineBtn').addEventListener('click', function(){ startCoverLine(); });
+      el.querySelector('#lcUndoBtn').addEventListener('click', function(){ undoCoverEdit(); });
+      el.querySelector('#lcWidthBtn').addEventListener('click', function(){ _coverLineRadius = _coverLineRadius >= 3 ? 1 : _coverLineRadius + 1; this.textContent = '〰 ' + (_coverLineRadius <= 1 ? 'narrow' : _coverLineRadius >= 3 ? 'wide' : 'med'); showToast('Drain corridor width: ' + (_coverLineRadius <= 1 ? 'narrow (~1 cell)' : _coverLineRadius >= 3 ? 'wide (~7 cells)' : 'medium (~5 cells)') + '. Now trace the 〰 line.'); });
       el.querySelector('#lcOpacity').addEventListener('input', function(){ landcoverOpacity = this.value / 100; renderLandcoverOverlay(); });
     }
     return el;
