@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 252</div>
+    <div id="buildBadge">BUILD 253</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8747,6 +8747,15 @@
   // A camera-less hunt spot (a stand) borrows deer activity from cameras within SHOOTING RANGE — the deer
   // those cams caught are deer you could kill from that stand. Founder's call: a stand next to Cox Gate
   // (which has bucks) should rank at the top even with no camera of its own.
+  // How the (planned) wind sits at a hunt spot: does your scent blow AWAY from the deer it borrows (+), or TOWARD
+  // them (−)? This is the "conditions" term folded into both the stand rank and the property rank.
+  function spotWindBonus(x, wind){
+    if (!wind || wind.mph <= 2 || !x || !x.hasData) return 0;
+    var dd = (x.borrow && x.borrow.length && x.borrow[0].lat != null) ? bearingBetween(x.site.lat, x.site.lng, x.borrow[0].lat, x.borrow[0].lng) : null;
+    if (dd == null) return 0;
+    var scentTo = (wind.deg + 180) % 360, df = Math.abs(scentTo - dd) % 360; if (df > 180) df = 360 - df;
+    return df > 120 ? 16 : (df < 60 ? -28 : 2);
+  }
   var SHOOT_RANGE_M = 183; // ~200 yds effective range in open country (tunable later for bow vs rifle)
   function ydsLabel(m){ return Math.round(m * 1.09361) + ' yds'; }
   function borrowedDeerForSpot(s){
@@ -8845,6 +8854,70 @@
       rows +
       '<div style="font-size:9px;color:#6f8377;margin-top:4px;line-height:1.4;">Tap a buck → the map flies to where he\'s showing. Killability = recent daylight movement; 🔥 heating jumps the line.</div>';
   }
+  // ---------- Step 2: WHICH FARM? Cross-property ranker ----------
+  // Ranks the hunter's properties against each other for the planned time: the best conditions+activity stand on
+  // each, the bucks in play there, and recent daylight sightings (camera-optional). Answers "go to Jenkins" before
+  // "sit Ditch Stand" — so a hot buck two counties away doesn't pull you off a workable nearby farm.
+  function propsForModule(){ return (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return !p.module || p.module === activeModule; }); }
+  function rankProperties(wind){
+    var spots = huntTonightSpots(), bucks = bucksInPlay();
+    return propsForModule().map(function(prop){
+      var ps = spots.filter(function(x){ return x.hasData && x.huntable && x.site.propertyId === prop.id; });
+      var best = -1000, bestSpot = null;
+      ps.forEach(function(x){ var sc = x.score + spotWindBonus(x, wind); if (sc > best){ best = sc; bestSpot = x; } });
+      var propBucks = bucks.filter(function(b){ if (!b.read.has || !b.read.homeSite) return false; var hs = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === b.read.homeSite; })[0]; return hs && hs.propertyId === prop.id; });
+      var hot = propBucks.filter(function(b){ return b.read.state === 'heating'; }).length;
+      var cutoff = Date.now() - huntRecentDays * 86400000, sights = 0;
+      (typeof observations !== 'undefined' ? observations : []).forEach(function(o){ if (o.propertyId === prop.id && o.timestamp && o.timestamp >= cutoff && typeIsInActiveModule(o.type, true)) sights++; });
+      var stands = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.propertyId === prop.id && siteIsHuntable(s); }).length;
+      var hasData = ps.length > 0 || sights > 0;
+      var score = ps.length ? best : (sights * 4 - 40);
+      return { prop: prop, score: score, bestSpot: bestSpot, bucks: propBucks, hot: hot, sights: sights, stands: stands, hasData: hasData };
+    }).sort(function(a, b){ return b.score - a.score; });
+  }
+  async function showPropertyRanker(){
+    var props = propsForModule();
+    if (props.length <= 1){ if (props.length === 1){ activePropertyId = props[0].id; var ps0 = document.getElementById('propertySelect'); if (ps0) ps0.value = props[0].id; } showHuntTodayPanel(); return; }
+    var wind = (plannedHunt && plannedHunt.wind && plannedHunt.wind.deg != null) ? { deg: plannedHunt.wind.deg, mph: plannedHunt.wind.mph } : null;
+    if (!wind){ var loc = forecastLocation(); if (loc){ try { var w = await scentWeather(loc.lat, loc.lng); if (w && w.windDirDeg != null) wind = { deg: w.windDirDeg, mph: w.windMph }; } catch (e) {} } }
+    var ranked = rankProperties(wind);
+    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div'); card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;width:460px;max-width:92vw;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    var windTxt = wind ? (degreesToCompass(wind.deg) + ' ' + Math.round(wind.mph) + ' mph') : 'wind offline';
+    var rows = ranked.map(function(pr, i){
+      var topBuck = pr.bucks[0], thumb = (topBuck && topBuck.thumb) ? topBuck.thumb : '';
+      var img = '<div style="width:54px;height:54px;border-radius:8px;flex:0 0 auto;background:#2a3a30;display:flex;align-items:center;justify-content:center;font-size:22px;overflow:hidden;">' + (thumb ? '<img src="' + escapeHtml(thumb) + '" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\'">' : '🗺') + '</div>';
+      var light = pr.hasData ? (pr.score >= 45 ? '🟢' : pr.score >= 18 ? '🟡' : '🔴') : '⚪';
+      var bits = [];
+      if (pr.hot) bits.push('🔥 ' + pr.hot + ' hot');
+      if (pr.bucks.length) bits.push('🦌 ' + pr.bucks.length);
+      if (pr.sights) bits.push('👁 ' + pr.sights);
+      if (pr.stands) bits.push(pr.stands + ' stand' + (pr.stands === 1 ? '' : 's'));
+      var bestLine = pr.bestSpot ? ('Best: ' + escapeHtml(pr.bestSpot.site.name) + (pr.bestSpot.read ? (' · ' + HB_VERDICT[pr.bestSpot.read.state]) : '')) : (pr.sights ? 'Going on sightings + sign' : 'No data yet');
+      var buckLine = topBuck ? ('Top buck: ' + escapeHtml(topBuck.profile.name) + (topBuck.read.has ? (' — ' + HB_VERDICT[topBuck.read.state]) : '')) : '';
+      return '<div class="pr-farm" data-pid="' + escapeHtml(pr.prop.id) + '" style="display:flex;gap:10px;align-items:center;border:1px solid #3c4d42;border-radius:10px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
+        img +
+        '<div style="flex:1;min-width:0;">' +
+          '<div style="font-weight:800;font-size:13.5px;">' + light + ' <span style="color:#9db0a3;">#' + (i + 1) + '</span> ' + escapeHtml(pr.prop.name) + '</div>' +
+          (buckLine ? '<div style="font-size:10.5px;color:#E8B04B;margin-top:2px;">' + buckLine + '</div>' : '') +
+          '<div style="font-size:10.5px;color:#cfe0d6;margin-top:1px;">' + bestLine + '</div>' +
+          (bits.length ? '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">' + bits.join(' · ') + '</div>' : '') +
+        '</div><div style="color:#7CCB7C;font-size:18px;flex:0 0 auto;">›</div>' +
+      '</div>';
+    }).join('');
+    card.innerHTML = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
+      '<button class="pr-back" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">← Back</button>' +
+      '<div style="font-weight:800;font-size:16px;flex:1;min-width:0;">🗺 Which farm?</div>' +
+      '<button class="pr-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button></div>' +
+      '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + (plannedHunt ? ('🗓 ' + plannedHunt.label + ' · ') : '') + '💨 ' + windTxt + ' — ranked by bucks in play + how the wind sits. Tap a farm → its stands.</div>' +
+      (rows || '<div style="font-size:12px;color:#9db0a3;">No properties with data yet.</div>');
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.pr-close').addEventListener('click', close);
+    card.querySelector('.pr-back').addEventListener('click', function(){ close(); showForecastPanel(); });
+    Array.prototype.forEach.call(card.querySelectorAll('.pr-farm'), function(el){ el.addEventListener('click', function(){ var pid = el.getAttribute('data-pid'); activePropertyId = pid; var ps = document.getElementById('propertySelect'); if (ps) ps.value = pid; close(); renderAll(); showHuntTodayPanel(); }); });
+  }
   async function showHuntTodayPanel(){
     var spots = huntTonightSpots(), now = new Date(), lat = null, lng = null;
     if (spots.length){ lat = spots[0].site.lat; lng = spots[0].site.lng; }
@@ -8852,16 +8925,14 @@
     var per = (lat != null) ? getSolunarPeriodsForDay(now, lat, lng) : null;
     var moon = getMoonPhase(now);
     var hunt = spots.filter(function(x){ return x.huntable; }), obs = spots.filter(function(x){ return !x.huntable; });
+    if (activePropertyId){ hunt = hunt.filter(function(x){ return x.site.propertyId === activePropertyId; }); obs = obs.filter(function(x){ return x.site.propertyId === activePropertyId; }); }   // scoped to the farm you picked
     // Rank by CONDITIONS + activity: fold how the planned wind sits (does your scent blow toward or away the deer)
     // into each hunt spot's score, then re-sort. Wind is the master factor; the thermal-refined stoplight still
     // fills per-spot below. Planned sit → wind is known instantly; "Now" → one quick live-wind read.
     var _wind = (plannedHunt && plannedHunt.wind && plannedHunt.wind.deg != null) ? { deg: plannedHunt.wind.deg, mph: plannedHunt.wind.mph } : null;
     if (!_wind && lat != null){ try { var _wq = await scentWeather(lat, lng); if (_wq && _wq.windDirDeg != null) _wind = { deg: _wq.windDirDeg, mph: _wq.windMph }; } catch (e) {} }
     if (_wind && _wind.mph > 2){
-      var _scentTo = (_wind.deg + 180) % 360;
-      hunt.forEach(function(x){ if (!x.hasData) return;
-        var dd = (x.borrow && x.borrow.length && x.borrow[0].lat != null) ? bearingBetween(x.site.lat, x.site.lng, x.borrow[0].lat, x.borrow[0].lng) : null;
-        if (dd != null){ var df = Math.abs(_scentTo - dd) % 360; if (df > 180) df = 360 - df; x.score += (df > 120 ? 16 : (df < 60 ? -28 : 2)); } });
+      hunt.forEach(function(x){ x.score += spotWindBonus(x, _wind); });
       hunt.sort(function(a, b){ return (b.hasData ? b.score : -1000) - (a.hasData ? a.score : -1000); });
     }
     var back = document.createElement('div');
@@ -8898,7 +8969,7 @@
         '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">← Back</button>' +
         '<div style="font-weight:800;font-size:16px;flex:1;min-width:0;">🎯 Where to hunt</div>' +
         '<button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button></div>' +
-      '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + (plannedHunt ? ('🗓 Planning: <b style="color:#dff0e4;">' + plannedHunt.label + '</b>') : now.toDateString()) + '</div>' +
+      '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + (plannedHunt ? ('🗓 Planning: <b style="color:#dff0e4;">' + plannedHunt.label + '</b>') : now.toDateString()) + (activePropertyId ? (' · 📍 ' + escapeHtml(propertyNameForSite({ propertyId: activePropertyId }))) : '') + '</div>' +
       '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:12px;font-size:11.5px;line-height:1.6;">' +
         '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
         (per ? ('<br>⭐ Feeding — major <b>' + fmtSolWin(per.major1) + '</b> & <b>' + fmtSolWin(per.major2) + '</b><br><span style="color:#9db0a3;">minor ' + fmtSolWin(per.minor1) + ' & ' + fmtSolWin(per.minor2) + '</span>') : '') +
@@ -8915,6 +8986,7 @@
     back.appendChild(card); document.body.appendChild(back);
     // 🦌 Bucks-in-play companion panel, docked to the LEFT of Where-to-Hunt (only when you have tagged bucks)
     var _bip = bucksInPlay();
+    if (activePropertyId){ _bip = _bip.filter(function(b){ if (!b.read.has || !b.read.homeSite) return false; var hs = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === b.read.homeSite; })[0]; return hs && hs.propertyId === activePropertyId; }); }
     if (_bip.length){
       var bucksEl = document.createElement('div');
       bucksEl.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:14px;width:290px;max-width:92vw;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);order:-1;';
@@ -8930,7 +9002,7 @@
     }
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('.ht-close').addEventListener('click', close);
-    var _htBack = card.querySelector('.ht-back'); if (_htBack) _htBack.addEventListener('click', function(){ close(); showForecastPanel(); });
+    var _htBack = card.querySelector('.ht-back'); if (_htBack) _htBack.addEventListener('click', function(){ close(); if (propsForModule().length > 1) showPropertyRanker(); else showForecastPanel(); });
     Array.prototype.forEach.call(card.querySelectorAll('.ht-spot'), function(el){
       el.addEventListener('click', function(){ var sid = el.getAttribute('data-sid'), la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng'));
         var st = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === sid; })[0];
@@ -9113,9 +9185,9 @@
     html += '<div style="font-size:9.5px;color:#6f8377;margin-top:12px;line-height:1.45;">Wind is the first gate, then the front — rising pressure + a temp drop = deer on their feet. Forecast confidence fades a few days out, and wind is a regional read (your stand may differ). The 🚦 is a starting read, not a promise. Tap any sit to plan it.</div>';
     var nowBtn = '<button id="fcNow" style="width:100%;background:#3a2016;border:1px solid #8a5230;color:#ffd9c2;border-radius:10px;padding:11px;font-size:13.5px;font-weight:800;cursor:pointer;margin-bottom:12px;">🔴 Hunting right now → where to hunt</button>';
     body.innerHTML = nowBtn + html;
-    body.querySelector('#fcNow').addEventListener('click', function(){ planNow(); close(); showHuntTodayPanel(); });
-    var nextEl = body.querySelector('#fcNext'); if (nextEl && nextSit) nextEl.addEventListener('click', function(){ planFromSit(nextSit); close(); showHuntTodayPanel(); });
-    Array.prototype.forEach.call(body.querySelectorAll('.fc-sit'), function(el){ el.addEventListener('click', function(){ var di = +el.getAttribute('data-di'), kind = el.getAttribute('data-kind'), sit = fc.days[di] && fc.days[di][kind]; if (!sit) return; planFromSit(sit); close(); showHuntTodayPanel(); }); });
+    body.querySelector('#fcNow').addEventListener('click', function(){ planNow(); close(); showPropertyRanker(); });
+    var nextEl = body.querySelector('#fcNext'); if (nextEl && nextSit) nextEl.addEventListener('click', function(){ planFromSit(nextSit); close(); showPropertyRanker(); });
+    Array.prototype.forEach.call(body.querySelectorAll('.fc-sit'), function(el){ el.addEventListener('click', function(){ var di = +el.getAttribute('data-di'), kind = el.getAttribute('data-kind'), sit = fc.days[di] && fc.days[di][kind]; if (!sit) return; planFromSit(sit); close(); showPropertyRanker(); }); });
   }
 
   // ---------- Huntability Ship 3b: front-screen "on their feet" alert ----------
