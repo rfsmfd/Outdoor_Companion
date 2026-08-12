@@ -1794,7 +1794,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 231</div>
+    <div id="buildBadge">BUILD 232</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9653,7 +9653,7 @@
     L.polyline(lls, { color: '#63C6FF', weight: 4.5, opacity: 0.95, dashArray: '2 11', lineCap: 'round', interactive: false }).addTo(_walkInLayer);
     L.circleMarker([entry.lat, entry.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#2E7DD1', fillOpacity: 1, interactive: false }).addTo(_walkInLayer);
     L.circleMarker([stand.lat, stand.lng], { radius: 7, color: '#fff', weight: 2, fillColor: '#D94A2E', fillOpacity: 1, interactive: false }).addTo(_walkInLayer);
-    if (fit){ try { map.fitBounds(L.polyline(lls).getBounds(), { padding: [70, 70], maxZoom: 17 }); } catch (e) {} }
+    if (fit){ try { var padL = Math.min(360, Math.round((window.innerWidth || 800) * 0.55)); map.fitBounds(L.polyline(lls).getBounds(), { paddingTopLeft: [padL, 40], paddingBottomRight: [40, 40], maxZoom: 17 }); } catch (e) {} }
   }
   function wiClose(){ if (_wiBack && _wiBack.parentNode) document.body.removeChild(_wiBack); _wiBack = null; _wiStand = null; _wiEntry = null; clearWalkInRoute(); }
   async function wiRenderBody(){
@@ -9706,8 +9706,10 @@
   function showWalkIn(){
     wiClose();
     var stands = walkInStands();
-    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100008;background:rgba(6,10,8,.9);display:flex;align-items:flex-start;justify-content:center;padding:16px;overflow:auto;font-family:inherit;';
-    var card = document.createElement('div'); card.style.cssText = 'background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;max-width:460px;width:100%;color:#e8f0ea;box-shadow:0 12px 44px rgba(0,0,0,.6);margin:auto;';
+    // Non-covering sheet (bottom-left): the map stays LIVE so you SEE the drawn route redraw as you pick a
+    // stand/entry — a full-screen cover would hide the very thing this tool draws.
+    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100008;background:transparent;pointer-events:none;font-family:inherit;';
+    var card = document.createElement('div'); card.style.cssText = 'pointer-events:auto;position:fixed;left:12px;bottom:12px;width:380px;max-width:92vw;max-height:78vh;overflow:auto;background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;color:#e8f0ea;box-shadow:0 12px 44px rgba(0,0,0,.6);';
     _wiBack = back;
     function close(){ wiClose(); }
     if (!stands.length){
