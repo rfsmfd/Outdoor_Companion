@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 244</div>
+    <div id="buildBadge">BUILD 245</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6798,6 +6798,30 @@
     if (a === 'f') return n === 'crop' ? 'R' : (n === 'pasture' || n === 'grass') ? 'A' : (n === 'wetwood' || n === 'wetherb') ? 'S' : 'F';
     return n === 'evergreen' ? 'P' : (n === 'decid' || n === 'mixed') ? 'H' : (n === 'wetwood' || n === 'wetherb') ? 'S' : 'C';
   }
+  // Burn DRAINAGES from USGS NHD (surveyed stream/drain centrelines) into the type grid as 'D', a ~3-cell corridor
+  // down each. This is the right source on flat coastal-plain ground — LiDAR flow-accumulation just draws noise
+  // there (same reason the old auto-terrain-scout was pulled). Direct layer query (skip the heavy service metadata),
+  // 12s timeout, non-fatal. NHD line coords are [lng, lat].
+  async function burnDrainages(bb, fineW, fineH, typArr){
+    var env = [bb.w, bb.s, bb.e, bb.n].join(',');
+    var url = 'https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/6/query?geometry=' + env + '&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=true&outFields=fcode&f=geojson';
+    var timer = null;
+    var res = await Promise.race([ fetch(url), new Promise(function(_, rej){ timer = setTimeout(function(){ rej(new Error('nhd-timeout')); }, 12000); }) ]);
+    if (timer) clearTimeout(timer);
+    if (!res.ok) return;
+    var gj = await res.json(), feats = gj.features || [], lines = [];
+    feats.forEach(function(f){ var g = f.geometry; if (!g) return; if (g.type === 'LineString') lines.push(g.coordinates); else if (g.type === 'MultiLineString') g.coordinates.forEach(function(c){ lines.push(c); }); });
+    function markWide(lat, lng){ var x = Math.floor((lng - bb.w) / (bb.e - bb.w) * fineW), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * fineH);
+      for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++){ if (dx !== 0 && dy !== 0) continue; var xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < fineW && yy < fineH) typArr[yy * fineW + xx] = 'D'; } }
+    lines.forEach(function(coords){
+      for (var i = 1; i < coords.length; i++){
+        var ln1 = coords[i-1][0], la1 = coords[i-1][1], ln2 = coords[i][0], la2 = coords[i][1];
+        var dxc = Math.abs((ln2 - ln1) / (bb.e - bb.w) * fineW), dyc = Math.abs((la2 - la1) / (bb.n - bb.s) * fineH);
+        var steps = Math.max(1, Math.ceil(Math.max(dxc, dyc)));   // rasterize ~1 step per fine cell so the line stays connected
+        for (var t = 0; t <= steps; t++){ var ff = t / steps; markWide(la1 + (la2 - la1) * ff, ln1 + (ln2 - ln1) * ff); }
+      }
+    });
+  }
   async function classifyLandcover(prop, onStatus){
     var bb0 = propBBox(prop); if (!bb0) throw new Error('no-boundary');
     var mPerLat = 111320, mPerLng = 111320 * Math.cos((bb0.n + bb0.s) / 2 * Math.PI / 180);
@@ -6843,6 +6867,8 @@
         out += (cA.f >= cA.w && cA.f >= cA.c) ? 'f' : ((cA.w >= cA.c) ? 'w' : 'c');
         var bk = 'W', bn = -1; for (var kk in cF){ if (cF[kk] > bn){ bn = cF[kk]; bk = kk; } } typ += bk;
       } }
+    if (onStatus) onStatus('Streams (USGS NHD)…');
+    try { var _tarr = typ.split(''); await burnDrainages(bb, W, H, _tarr); typ = _tarr.join(''); } catch (e){ console.warn('Outdoor Companion: drainage trace skipped', e); }
     prop.landcover = { bbox: bb, cols: W, rows: H, grid: out, types: typ, confirmed: new Array(W * H + 1).join('0'), cellM: CELL, createdAt: Date.now(), v: 3 };
     try { await saveProperty(prop); } catch (e) { console.error('Outdoor Companion: failed to save landcover', e); }
     return prop.landcover;
