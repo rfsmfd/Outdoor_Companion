@@ -1786,7 +1786,7 @@
       <button class="layer-btn" id="hydroToggleBtn" title="Streams &amp; drainage lines (USGS National Hydrography Dataset) over any layer">💧 Streams</button>
       <button class="layer-btn" id="thermalToggleBtn" title="Thermal drift — which way your scent drains at each spot, from the LiDAR slope, flipped by time of day (rising uphill in the morning, falling downhill in the evening)">🌡 Thermals</button>
       <button class="layer-btn" id="scentToggleBtn" title="Scent cones — where your scent blows from each hunt spot right now (wind + thermals combined). A wider cone = swirlier, less certain. Red = where a deer would wind you.">🌬 Scent cones</button>
-      <button class="layer-btn" id="landcoverToggleBtn" title="Field vs woods — the app's read of your property from the aerial (green = woods, tan = field, brown = cutover). Scan/verify it in Property Setup; the Walk-In planner uses it to route through cover.">🌲 Cover</button>
+      <button class="layer-btn" id="landcoverToggleBtn" title="Field vs woods — the app's read of your property from the aerial (blue = woods, pink = field, yellow = cutover). Scan/verify it in Property Setup; the Walk-In planner uses it to route through cover.">🌲 Cover</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 239</div>
+    <div id="buildBadge">BUILD 240</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6830,17 +6830,28 @@
     if (!map.getPane('landcoverPane')){ map.createPane('landcoverPane'); map.getPane('landcoverPane').style.zIndex = 414; map.getPane('landcoverPane').style.pointerEvents = 'none'; }
     clearLandcoverOverlay();
     if (!landcoverVisible) return;
-    var COLOR = { w: [47, 107, 58], f: [206, 182, 108], c: [150, 92, 52] };
+    var COLOR = { w: [40, 120, 255], f: [240, 70, 200], c: [255, 216, 0] };   // bold + non-natural, so they pop OFF the aerial (this is a verify layer, not a pretty one)
     (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
       if (p.module && p.module !== activeModule) return; var lc = p.landcover; if (!lc || !lc.grid) return;
       var cv = document.createElement('canvas'); cv.width = lc.cols; cv.height = lc.rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(lc.cols, lc.rows);
-      for (var k = 0; k < lc.cols * lc.rows; k++){ var col = COLOR[lc.grid.charAt(k)], o = k * 4; if (col){ id.data[o] = col[0]; id.data[o+1] = col[1]; id.data[o+2] = col[2]; id.data[o+3] = 150; } }
+      for (var k = 0; k < lc.cols * lc.rows; k++){ var col = COLOR[lc.grid.charAt(k)], o = k * 4; if (col){ id.data[o] = col[0]; id.data[o+1] = col[1]; id.data[o+2] = col[2]; id.data[o+3] = 185; } }
       ctx.putImageData(id, 0, 0);
       var bb = lc.bbox;
       landcoverOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'landcoverPane', opacity: 0.55, interactive: false }).addTo(map));
     });
   }
-  function setLandcoverVisible(v){ landcoverVisible = v; renderLandcoverOverlay(); var btn = document.getElementById('landcoverToggleBtn'); if (btn) btn.classList.toggle('active', v); }
+  function ensureLandcoverLegend(){
+    var el = document.getElementById('landcoverLegend');
+    if (!el){
+      el = document.createElement('div'); el.id = 'landcoverLegend';
+      el.style.cssText = 'position:fixed;left:250px;bottom:46px;z-index:1200;background:rgba(15,20,17,0.88);color:#e8f0ea;font:11px sans-serif;padding:8px 10px;border-radius:8px;border:1px solid #2c3f34;line-height:1.7;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.4);';
+      function sw(c){ return '<span style="display:inline-block;width:12px;height:12px;background:' + c + ';border-radius:2px;vertical-align:-2px;margin-right:6px;"></span>'; }
+      el.innerHTML = '<b style="font-size:11px;">🌲 App\'s read</b><br>' + sw('rgb(40,120,255)') + 'Woods<br>' + sw('rgb(240,70,200)') + 'Field<br>' + sw('rgb(255,216,0)') + 'Cutover';
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function setLandcoverVisible(v){ landcoverVisible = v; renderLandcoverOverlay(); var btn = document.getElementById('landcoverToggleBtn'); if (btn) btn.classList.toggle('active', v); ensureLandcoverLegend().style.display = v ? 'block' : 'none'; }
 
   function drawPropertyBoundary(prop){
     var mp = document.getElementById('managePropertiesModalBackdrop'); if (mp) mp.classList.remove('show');
@@ -6927,7 +6938,7 @@
       { done: st.boundary, icon:'🗺', title:'1. Draw the boundary', sub: st.boundary ? 'Boundary set' : 'So the app knows what\'s yours', btn: st.boundary ? 'Redraw' : 'Draw', act:'boundary',
         help:'Tap <b>Draw</b> — the map flies to your farm with the parcel lines showing. Click each <b>corner</b> (follow the parcel line where it\'s right, cut your own where it\'s wrong), then click your <b>first point</b> to close it. If a line\'s off, just Redraw — it\'s editable forever.' },
       { done: !!(prop.landcover && prop.landcover.grid), icon:'🌲', title:'2. Scan field vs woods', sub: (prop.landcover && prop.landcover.grid) ? 'Cover mapped — look it over' : 'Auto-read from the aerial', btn: (prop.landcover && prop.landcover.grid) ? 'Rescan' : 'Scan', act:'landcover',
-        help:'Tap <b>Scan</b> and the app reads inside your boundary off the aerial and paints it: <span style="color:#7fbf85;">green = woods</span>, <span style="color:#d8c07a;">tan = field</span>, <span style="color:#b98a5e;">brown = cutover/scrub</span>. <b>Look it over</b> — it\'s a good read, not perfect (cutovers are the trickiest). If a block\'s wrong, redraw the boundary tighter or just <b>Rescan</b>. This is what lets the Walk-In planner know where the open ground and wood lines are — so it can route you through cover to a stand <b>even before you\'ve marked every bedding area</b>. Re-run it anytime the ground changes (timber cut, fields rotated). Needs the boundary drawn first.' },
+        help:'Tap <b>Scan</b> and the app reads inside your boundary off the aerial and paints it in bold colors so it stands out from the ground: <span style="color:#5b9bff;">blue = woods</span>, <span style="color:#f06ac8;">pink = field</span>, <span style="color:#ffe04d;">yellow = cutover/scrub</span>. <b>Look it over</b> — it\'s a good read, not perfect (cutovers are the trickiest). If a block\'s wrong, redraw the boundary tighter or just <b>Rescan</b>. This is what lets the Walk-In planner know where the open ground and wood lines are — so it can route you through cover to a stand <b>even before you\'ve marked every bedding area</b>. Re-run it anytime the ground changes (timber cut, fields rotated). Needs the boundary drawn first.' },
       { done: st.stands>0, icon:'📥', title:'3. Import / add stands & cameras', sub: st.stands>0 ? (st.stands+' placed') : 'Bring in what you already have', btn:'Import', act:'import',
         help:'Tap <b>Import</b> → pick a file exported from another app: <b>KML, KMZ, GPX, GeoJSON, or CSV</b> (onX, HuntStand, Google Earth, Garmin). HuntStand has no exporter — use the ChatGPT-built browser script to pull your stands to a CSV first (ask me if you need it again). Then pick the type and Import selected.<br>No file? Add them by hand: <b>+ Add Site → Tree Stand / Trail Camera</b>.' },
       { done: st.entries>0, icon:'🅿', title:'4. Parking / entry points', sub: st.entries>0 ? (st.entries+' placed') : 'Where you start — powers walk-in routing', btn:'Add', act:'entry',
@@ -6973,7 +6984,7 @@
           classifyLandcover(prop, function(msg){ b.textContent = msg; }).then(function(){
             setLandcoverVisible(true); close();
             if (typeof prop.centerLat === 'number'){ try { map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15)); } catch (e) {} }
-            showToast('Land cover read — 🟩 woods · 🟨 field · 🟫 cutover. Look it over; if a block\'s off, redraw the boundary or Rescan. Toggle it anytime with the 🌲 Cover button.');
+            showToast('Land cover read — 🟦 woods · 🟪 field · 🟨 cutover. Look it over; if a block\'s off, redraw the boundary or Rescan. Toggle it anytime with the 🌲 Cover button.');
           }).catch(function(err){ b.disabled = false; b.textContent = 'Retry'; console.error('Outdoor Companion: landcover scan failed', err); showToast(err && err.message === 'no-boundary' ? 'Draw the boundary first.' : 'Couldn\'t read the imagery — check your connection and try again.'); });
         }
         else if (act === 'import') launch(function(){ activePropertyId = prop.id; var ps = document.getElementById('propertySelect'); if (ps) ps.value = prop.id; document.getElementById('importWaypointsBtn').click(); });
