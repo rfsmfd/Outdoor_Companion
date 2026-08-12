@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 246</div>
+    <div id="buildBadge">BUILD 247</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10013,7 +10013,10 @@
   // {route,eD,sD} on success, or {none:true, …reason} so the caller can explain a straight-line fallback.
   function angDiff(a, b){ var d = Math.abs(a - b) % 360; return d > 180 ? 360 - d : d; }
   function routesDiffer(a, b){ if (!a || !b || a.length !== b.length) return true; for (var i = 0; i < a.length; i++){ if (Math.abs(a[i].lat - b[i].lat) > 1e-5 || Math.abs(a[i].lng - b[i].lng) > 1e-5) return true; } return false; }
-  function routeOnSegs(segs, entry, stand, beds){
+  // Per-cover routing cost (added to the stealth edge penalty): timber is free, open ground costs (double at dawn),
+  // bedding cover (pine/cutover/swamp) and water are dear. This is how the wood lines start driving the route.
+  var COVER_ROUTE_PEN = { F: 1.3, R: 1.3, A: 0.9, W: 0, H: 0.5, P: 2.2, C: 2.2, S: 3.0, D: 0.7, O: 6.0 };
+  function routeOnSegs(segs, entry, stand, beds, coverProp, isAM){
     if (!segs.length) return { none: true, noPaths: true };
     function attach(p){ var best = null; segs.forEach(function(s){ var pr = projOnSeg(p, s.a, s.b); if (!best || pr.d < best.pr.d) best = { s: s, pr: pr }; }); return best; }
     var eA = attach(entry), sA = attach(stand), MAXATT = 300;
@@ -10028,12 +10031,15 @@
     var nearBedToStand = null; if (beds && beds.length){ beds.forEach(function(bd){ var d = distMeters(stand.lat, stand.lng, bd.lat, bd.lng); if (!nearBedToStand || d < nearBedToStand.d) nearBedToStand = { d: d, bd: bd }; }); }
     var approachDeg = nearBedToStand ? bearingBetween(stand.lat, stand.lng, nearBedToStand.bd.lat, nearBedToStand.bd.lng) : null;
     function edgePenalty(aI, bI){
-      if (!beds || !beds.length) return 0;
       var mLat = (nodes[aI].lat + nodes[bI].lat) / 2, mLng = (nodes[aI].lng + nodes[bI].lng) / 2, pen = 0;
-      var dB = Infinity; for (var i = 0; i < beds.length; i++){ var d = distMeters(mLat, mLng, beds[i].lat, beds[i].lng); if (d < dB) dB = d; }
-      var RB = 185; if (dB < RB) pen += 7 * (RB - dB) / RB;                              // near bedding = expensive
-      if (approachDeg != null){ var dS = distMeters(mLat, mLng, stand.lat, stand.lng), RS = 230;
-        if (dS < RS){ var diff = angDiff(bearingBetween(stand.lat, stand.lng, mLat, mLng), approachDeg); if (diff < 75) pen += 5 * (1 - diff / 75) * (1 - dS / RS); } }
+      if (beds && beds.length){
+        var dB = Infinity; for (var i = 0; i < beds.length; i++){ var d = distMeters(mLat, mLng, beds[i].lat, beds[i].lng); if (d < dB) dB = d; }
+        var RB = 185; if (dB < RB) pen += 7 * (RB - dB) / RB;                            // near a marked bed = expensive
+        if (approachDeg != null){ var dS = distMeters(mLat, mLng, stand.lat, stand.lng), RS = 230;
+          if (dS < RS){ var diff = angDiff(bearingBetween(stand.lat, stand.lng, mLat, mLng), approachDeg); if (diff < 75) pen += 5 * (1 - diff / 75) * (1 - dS / RS); } }
+      }
+      // COVER read: prefer timber (W=0), avoid open field (×2 at dawn), bedding cover (pine/cutover/swamp) & water
+      if (coverProp){ var ct = coverTypeAt(coverProp, mLat, mLng); if (ct){ var cp = COVER_ROUTE_PEN[ct.code]; if (cp != null){ if (isAM && (ct.code === 'F' || ct.code === 'R' || ct.code === 'A')) cp *= 2; pen += cp; } } }
       return pen;
     }
     var nodes = [], adj = {};
@@ -10065,19 +10071,19 @@
     if (!stealth) return { none: true, disconnected: true, eD: eA.pr.d, sD: sA.pr.d };
     return { stealth: stealth, direct: direct, eD: eA.pr.d, sD: sA.pr.d };
   }
-  function buildWalkRoute(entry, stand, mode, beds){
-    var res = routeOnSegs(buildWalkSegs(mode || 'walk'), entry, stand, beds || []);
+  function buildWalkRoute(entry, stand, mode, beds, coverProp, isAM){
+    var res = routeOnSegs(buildWalkSegs(mode || 'walk'), entry, stand, beds || [], coverProp, isAM);
     if (res && res.stealth){
       var sr = res.stealth.route, dr = res.direct ? res.direct.route : null;
       return { route: sr, stealthRoute: sr, directRoute: dr, hasAlt: !!(dr && routesDiffer(sr, dr)), onTrail: true, trailName: 'your paths', stealthCost: res.stealth.cost, diag: res };
     }
     return { route: [{ lat: entry.lat, lng: entry.lng }, { lat: stand.lat, lng: stand.lng }], onTrail: false, trailName: null, diag: res || {} };
   }
-  function bestEntryFor(stand, mode, beds){
+  function bestEntryFor(stand, mode, beds, coverProp, isAM){
     var es = walkInEntries(); if (!es.length) return null;
     var best = null;   // rank entries by STEALTH cost (distance + disturbance), so it picks the cleanest way in — not just the closest parking
     es.forEach(function(e){
-      var plan = buildWalkRoute(e, stand, mode, beds);
+      var plan = buildWalkRoute(e, stand, mode, beds, coverProp, isAM);
       var score = plan.onTrail ? plan.stealthCost : routeMeters(plan.route) * 3;   // a straight-line entry is strongly deprioritized
       if (!best || score < best.score) best = { entry: e, plan: plan, score: score };
     });
@@ -10099,7 +10105,9 @@
     var body = _wiBack.querySelector('#wiBody'); if (!body) return;
     var stand = _wiStand;
     var beds = walkInBedding();
-    var be = _wiEntry ? { entry: _wiEntry, plan: buildWalkRoute(_wiEntry, stand, _wiMode, beds) } : bestEntryFor(stand, _wiMode, beds);
+    var coverProp = propWithCoverAt(stand.lat, stand.lng);                 // the field/woods read drives the route now
+    var isAM = thermalPhase(stand.lat, stand.lng).up === true;             // morning field crossings are the worst
+    var be = _wiEntry ? { entry: _wiEntry, plan: buildWalkRoute(_wiEntry, stand, _wiMode, beds, coverProp, isAM) } : bestEntryFor(stand, _wiMode, beds, coverProp, isAM);
     if (!be){ body.innerHTML = '<div style="background:#3a2a1a;border:1px solid #7a5a2a;border-radius:10px;padding:12px;font-size:12.5px;color:#f0dcc0;line-height:1.55;">No <b>parking / entry points</b> on this property yet. Drop one where you actually step in — <b>Property Setup → 🅿 step 3</b>, or <b>+ Add Site → Parking/Access</b> — and the walk-in routes from it.</div>'; return; }
     var entry = be.entry, plan = be.plan; _wiEntry = entry;
     var chosen = (_wiRoutePref === 'direct' && plan.directRoute) ? plan.directRoute : plan.route;   // which of the two routes is drawn/analyzed
@@ -10115,11 +10123,15 @@
     else if (_eD > 300 || _sD > 300) _diag = _paths.length + ' lanes, but the ' + (_eD >= _sD ? 'parking' : 'stand') + ' is ' + ydsLabel(Math.max(_eD, _sD)) + ' from the nearest lane — none reaches it';
     else _diag = _paths.length + ' lanes, both ends near one (entry ' + ydsLabel(_eD) + ' / stand ' + ydsLabel(_sD) + ') but they don\'t link into ONE network — a gap wider than ~27 yds between lanes';
     var feet = Math.round(routeMeters(chosen) * 3.28084);
-    var ph = thermalPhase(stand.lat, stand.lng), isAM = ph.up === true, isPM = ph.up === false;
+    var ph = thermalPhase(stand.lat, stand.lng), isPM = ph.up === false;
     var sitLabel = isAM ? '🌅 Morning sit — rising thermal, deer still out in the fields' : (isPM ? '🌇 Evening sit — falling thermal' : '🕛 Midday — thermals flat');
     var feeds = walkInFeeding();
     var bedWarn = null; beds.forEach(function(b){ var d = routeMinDistToPin(chosen, b); if (d < 137 && (!bedWarn || d < bedWarn.d)) bedWarn = { d: d, pin: b }; });
     var feedWarn = null; feeds.forEach(function(f){ var d = routeMinDistToPin(chosen, f); if (d < 60 && (!feedWarn || d < feedWarn.d)) feedWarn = { d: d, pin: f }; });
+    // COVER read along the chosen route — auto, no pins needed: how much OPEN FIELD it crosses, and if it threads bedding cover
+    var openM = 0, bedCover = null, hasCover = !!(coverProp && coverProp.landcover && coverProp.landcover.grid);
+    if (hasCover){ for (var ri = 1; ri < chosen.length; ri++){ var ca = chosen[ri-1], cb = chosen[ri], segM = distMeters(ca.lat, ca.lng, cb.lat, cb.lng), ct = coverTypeAt(coverProp, (ca.lat+cb.lat)/2, (ca.lng+cb.lng)/2);
+      if (ct){ if (ct.code === 'F' || ct.code === 'R' || ct.code === 'A') openM += segM; else if ((ct.code === 'P' || ct.code === 'C' || ct.code === 'S') && !bedCover) bedCover = ct; } } }
     // scent read at the stand (same physics as Hunt Mode) — then does it drift INTO bedding you pass?
     var wx = await scentWeather(stand.lat, stand.lng); if (!_wiBack) return;
     var th = await standThermalPoint(stand.lat, stand.lng, wx ? wx.cloudCoverPct : null); if (!_wiBack) return;
@@ -10133,6 +10145,10 @@
     if (bedWarn){ if (level === 'go') level = 'caution'; issues.push('⚠️ Route passes <b>' + ydsLabel(bedWarn.d) + '</b> from bedding (' + escapeHtml(bedWarn.pin.name) + ') — ' + (bedWarn.d < 70 ? 'too tight, you\'ll bump them.' : 'ease through quiet and slow.')); }
     if (feedWarn && isAM){ if (level === 'go') level = 'caution'; issues.push('⚠️ Skirts your field <b>' + escapeHtml(feedWarn.pin.name) + '</b> (' + ydsLabel(feedWarn.d) + ') on a morning walk — deer feeding there at first light will blow out.'); }
     else if (feedWarn){ issues.push('• Passes field ' + escapeHtml(feedWarn.pin.name) + ' (' + ydsLabel(feedWarn.d) + ') — fine for an evening slip-in.'); }
+    // cover-driven (no pins needed) — from the field/woods scan
+    if (hasCover && openM > 25){ var oy = ydsLabel(openM); if (isAM){ level = (level === 'avoid') ? 'avoid' : 'caution'; issues.push('⚠️ Crosses <b>' + oy + ' of open field</b> on a morning walk-in — deer out feeding at first light will pick you off. Look for a timber edge, or hunt it in the evening.'); } else { issues.push('• Crosses <b>' + oy + ' of open field</b> — fine for an evening slip-in, exposed at dawn.'); } }
+    if (hasCover && bedCover){ if (level === 'go') level = 'caution'; issues.push('⚠️ Threads <b>' + bedCover.label + '</b> (bedding cover) — ease through slow and quiet, or you\'ll bump deer off the bed.'); }
+    if (hasCover && level === 'go' && !openM && !bedCover && plan.onTrail) issues.push('✓ Stays in the timber the whole way — deer won\'t see you coming.');
     if (!plan.onTrail) issues.push('• Couldn\'t route on your lanes for <b>' + _modeLbl + '</b> — drew a straight line. ' + (_motor ? 'Motorized modes use only <b>solid</b> (vehicle-ready) lanes — set a drivable lane to Solid, or switch to Walk.' : 'Check your lanes link up (gaps under ~27 yds) or draw the missing bit (✏️).'));
     if (plan.onTrail && !beds.length) issues.push('• No <b>bedding</b> marked yet — this is shortest-distance only. Drop your bedding (🛏, Property Setup step 6) and I\'ll route <i>around</i> it to keep you off the deer\'s approach.');
     if (plan.onTrail && plan.hasAlt && _wiRoutePref === 'stealth') issues.unshift('🕶 <b>Stealth route</b> — longer on purpose: it bends around your bedding so you don\'t walk in through the deer. Tap <b>Direct</b> for the short way.');
