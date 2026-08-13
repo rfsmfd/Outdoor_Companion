@@ -1836,7 +1836,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 281</div>
+    <div id="buildBadge">BUILD 282</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2538,7 +2538,7 @@
     feeding:  {label:'Feeding Area',  abbrev:'FD',  color:'#8FA05C'},
     bedding:  {label:'Bedding Area',  abbrev:'BED', color:'#4A7A6C'},
     water:    {label:'Water Source',  abbrev:'H2O', color:'#4A7AA8'},
-    sighting: {label:'Wildlife Sighting', abbrev:'SGT', color:'#D94A2E'},
+    sighting: {label:'Wildlife Sighting', abbrev:'SGT', color:'#D94A2E', hidden:true},
     custom:   {label:'Custom Point',  abbrev:'PIN', color:'#B8AF9C'}
   };
 
@@ -6633,7 +6633,7 @@
     return row;
   }
   function traySiteRow(key){
-    var t = getActiveTypes()[key]; if (!t) return null;
+    var t = getActiveTypes()[key]; if (!t || t.hidden) return null;   // retired types never get a toggle
     var isOn = activeFilters.has(key);
     var lbl = (key === 'camera') ? 'Camera Locations' : t.label;   // the dots/names (places), not the camera icons
     var row = document.createElement('div');
@@ -6685,7 +6685,7 @@
     container.appendChild(traySection('Stands & Cameras', [trayCamIconsRow()].concat(['camera','stand','access'].map(traySiteRow))));
     container.appendChild(traySection('Habitat', ['bedding','feeding','water'].map(traySiteRow)));
     container.appendChild(traySection('Sign &amp; Sightings', ['buck','doe','bear','turkey','scrape','rub','track','trail','hunt','custom'].map(trayObsRow)));
-    container.appendChild(traySection('Other Markers', ['sighting','custom'].map(traySiteRow)));
+    container.appendChild(traySection('Other Markers', ['sighting','custom'].map(traySiteRow)));   // 'sighting' is retired (hidden) → only Custom Point shows
   }
   function renderObsTypeToggles(){ renderChips(); }
 
@@ -8870,9 +8870,52 @@
     });
     return { day: day, total: total };
   }
+  // Time-of-day split of your buck sightings (dawn/mid/dusk/night), plus when you last saw him — the
+  // raw material for the sightings-only card below.
+  function sightingBuckets(obsList){
+    var b = { firstLight:0, midday:0, lastLight:0, night:0 };
+    var located = 0, lastTs = 0, lastLL = null;
+    (obsList || []).forEach(function(o){
+      if (!o || o.type !== 'buck' || !o.createdAt) return;
+      if (o.createdAt > lastTs){ lastTs = o.createdAt; if (typeof o.lat === 'number') lastLL = { lat:o.lat, lng:o.lng, siteId:o.siteId }; }
+      if (typeof o.lat !== 'number' || typeof o.lng !== 'number') return;
+      var st = sunTimesFor(o.createdAt, o.lat, o.lng, o.siteId);
+      if (!st) return;
+      located++;
+      b[lightBucket(o.createdAt, st.sr, st.ss)]++;
+    });
+    return { buckets:b, located:located, lastTs:lastTs, lastLL:lastLL };
+  }
+  // When a buck has NO located trail-cam photos yet but you HAVE logged sightings of him, show a lighter
+  // huntability read from your own eyes. Deliberately NOT a "% daylight" — your sightings are daylight-
+  // biased (you only sit in daylight), so a ratio would lie. Instead: the raw daylight count, WHEN you've
+  // tended to see him (the dawn/mid/dusk split IS real intel), and when you last laid eyes on him. Bridges
+  // the gap until his cameras start producing.
+  function sightingsOnlyCardHtml(sightings){
+    var s = sightingDaylightStats(sightings || []);
+    if (!s.total) return '';
+    var sb = sightingBuckets(sightings || []);
+    var daysSince = sb.lastTs ? Math.floor((Date.now() - sb.lastTs) / 86400000) : null;
+    var src = sb.buckets, srcTot = (src.firstLight + src.midday + src.lastLight + src.night) || 1;
+    function bar(k, label, color){ var v = src[k], h = Math.round((v / srcTot) * 34); return '<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;"><div style="width:100%;display:flex;flex-direction:column;justify-content:flex-end;height:36px;">' + (h ? '<div style="height:' + h + 'px;background:' + color + ';border-radius:2px 2px 0 0;"></div>' : '') + '</div><div style="font-size:8.5px;color:#9db0a3;">' + label + '</div><div style="font-size:9px;color:#c7d4cc;font-weight:700;">' + v + '</div></div>'; }
+    var bars = sb.located ? ('<div style="display:flex;gap:5px;align-items:flex-end;margin:8px 0 2px;">' + bar('firstLight','Dawn','#9ED17A') + bar('midday','Mid','#9ED17A') + bar('lastLight','Dusk','#9ED17A') + bar('night','Night','#415146') + '</div>') : '';
+    var best = bestDaylightBucket(sb.buckets);
+    return '<div style="border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:10px;background:#1b2822;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">' +
+        '<div style="font-weight:700;font-size:13px;">🎯 Huntability</div>' +
+        '<div style="font-size:11.5px;font-weight:800;color:#9ED17A;">👁 Your sightings</div>' +
+      '</div>' +
+      '<div style="font-size:11.5px;color:#cfe0d6;line-height:1.5;margin-bottom:6px;">No trail-cam photos on him yet — this is what your own eyes have logged.' + (best && sb.located ? ' You\'ve seen him most at <b>' + bucketLabel(best) + '</b>.' : '') + '</div>' +
+      '<div style="display:flex;gap:7px;flex-wrap:wrap;margin:0 0 4px;">' +
+        '<span style="font-size:11px;font-weight:700;white-space:nowrap;background:rgba(158,209,122,.14);color:#9ED17A;border-radius:10px;padding:2px 9px;">👁 seen ' + s.day + '× daylight · you</span>' +
+      '</div>' +
+      bars +
+      '<div style="font-size:9.5px;color:#6f8377;margin-top:6px;line-height:1.45;">' + s.total + ' sighting' + (s.total === 1 ? '' : 's') + ' logged' + (daysSince != null ? ' · last seen ' + daysSince + 'd ago' : '') + '. A camera daylight-% will appear here once he turns up on a trail cam.</div>' +
+    '</div>';
+  }
   function huntabilityCardHtml(photos, recentDays, sightings){
     var r = huntabilityRead(photos, recentDays);
-    if (!r.has) return '';
+    if (!r.has) return sightingsOnlyCardHtml(sightings || []);
     var ss = sightingDaylightStats(sightings || []);
     var shiftNote = (r.recentUsable && r.recBest && r.baseBest && r.recBest !== r.baseBest) ? (' <span style="color:#E8823F;">Now favoring ' + bucketLabel(r.recBest) + '</span> (was ' + bucketLabel(r.baseBest) + ').') : '';
     var src = r.recentUsable ? r.recent.buckets : r.base.buckets;
