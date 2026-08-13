@@ -1777,15 +1777,7 @@
     <h3 style="margin-top:0;">Map Display <button class="close-x" id="displayTrayClose">&times;</button></h3>
     <p style="font-size:11px;color:var(--text-dim);margin:0 0 16px 0;">Choose what shows on the map right now — none of this affects your saved data, just what's currently visible.</p>
 
-    <div class="display-tray-section">
-      <div class="display-tray-section-title">Site Visibility</div>
-      <div id="displayTraySiteTypes"></div>
-    </div>
-
-    <div class="display-tray-section">
-      <div class="display-tray-section-title" id="obsVisibilityTitle">Sightings</div>
-      <div id="displayTrayObsTypes"></div>
-    </div>
+    <div id="displayTrayGroups"></div>
 
     <div class="display-tray-section">
       <div class="display-tray-section-title">Camera History</div>
@@ -1844,7 +1836,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 280</div>
+    <div id="buildBadge">BUILD 281</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2540,9 +2532,9 @@
     camera:   {label:'Trail Camera',  abbrev:'CAM', color:'#FF6A13'},
     stand:    {label:'Tree Stand',    abbrev:'STD', color:'#6B8F5C'},
     access:   {label:'Parking / Access', abbrev:'P', color:'#2E7DD1'},
-    scrape:   {label:'Scrape',        abbrev:'SCR', color:'#8B5E3C'},
-    rub:      {label:'Rub',           abbrev:'RUB', color:'#C9A03C'},
-    trail:    {label:'Trail',         abbrev:'TRL', color:'#7A8A94'},
+    scrape:   {label:'Scrape',        abbrev:'SCR', color:'#8B5E3C', hidden:true},
+    rub:      {label:'Rub',           abbrev:'RUB', color:'#C9A03C', hidden:true},
+    trail:    {label:'Trail',         abbrev:'TRL', color:'#7A8A94', hidden:true},
     feeding:  {label:'Feeding Area',  abbrev:'FD',  color:'#8FA05C'},
     bedding:  {label:'Bedding Area',  abbrev:'BED', color:'#4A7A6C'},
     water:    {label:'Water Source',  abbrev:'H2O', color:'#4A7AA8'},
@@ -2573,8 +2565,8 @@
     rub:     {label:'Rub',         abbrev:'RUB', color:'#C9A03C'},
     track:   {label:'Tracks',      abbrev:'TRX', color:'#7A8A94'},
     trail:   {label:'On Trail',    abbrev:'TRL', color:'#7A8A94'},
-    bedding: {label:'Bedding',     abbrev:'BED', color:'#4A7A6C'},
-    feeding: {label:'Feeding',     abbrev:'FD',  color:'#8FA05C'},
+    bedding: {label:'Bedding',     abbrev:'BED', color:'#4A7A6C', hidden:true},
+    feeding: {label:'Feeding',     abbrev:'FD',  color:'#8FA05C', hidden:true},
     hunt:    {label:'Hunt Note',   abbrev:'HNT', color:'#FF6A13'},
     custom:  {label:'Custom',      abbrev:'OBS', color:'#B8AF9C'}
   };
@@ -2592,6 +2584,14 @@
     fishnote:  {label:'Trip Note',  abbrev:'NOTE', color:'#FF6A13'},
     fishcustom2:{label:'Custom',    abbrev:'OBS', color:'#B8AF9C'}
   };
+
+  // Some type keys are marked hidden:true — they were duplicated across the Site and Sighting systems
+  // (e.g. scrape/rub/trail existed as BOTH a Site type and a Sighting type). Each kind of mark now lives
+  // in exactly ONE place: sign you come across (scrape/rub/trail/track) is a Sighting you Quick-Log;
+  // bedding/feeding are permanent Sites the Walk-In planner reads. Hidden types are dropped from the
+  // "add new" pickers and the display-tray visibility list, but still resolve for rendering, so any
+  // records created before the cleanup keep their label/color/glyph — nothing orphans to "Custom".
+  function typeVisibleKeys(dict){ return Object.keys(dict).filter(function(k){ return !dict[k].hidden; }); }
 
   var activeModule = 'hunting'; // 'hunting' | 'fishing'
   function getActiveTypes(){ return activeModule === 'fishing' ? TYPES_FISHING : TYPES_HUNTING; }
@@ -6591,45 +6591,6 @@
   }
 
   // ---------- rendering ----------
-  function renderChips(){
-    var container = document.getElementById('displayTraySiteTypes');
-    container.innerHTML = '';
-    // Camera ICONS (the orange flags on deployed spots) get their OWN toggle, OFF by default — flip on
-    // when working with cameras. Separate from the camera LOCATIONS (the dots + names like "Cox Gate"),
-    // which have their own type toggle below and stay on unless you turn them off.
-    if (activeModule === 'hunting'){
-      var camRow = document.createElement('div');
-      camRow.className = 'toggle-row';
-      camRow.innerHTML =
-        '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">📷</span> Camera icons</div>' +
-        '<div class="toggle-switch' + (showCameraFlags ? ' on' : '') + '"><div class="knob"></div></div>';
-      camRow.querySelector('.toggle-switch').addEventListener('click', function(){ showCameraFlags = !showCameraFlags; renderChips(); renderMarkers(); });
-      container.appendChild(camRow);
-    }
-    Object.keys(getActiveTypes()).forEach(function(key){
-      var t = getActiveTypes()[key];
-      var isOn = activeFilters.has(key);
-      var lbl = (key === 'camera') ? 'Camera Locations' : t.label;   // clarify: the dots/names (places), not the camera icons
-      var row = document.createElement('div');
-      row.className = 'toggle-row';
-      row.innerHTML =
-        '<div class="toggle-row-label"><span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>' + lbl + '</div>' +
-        '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>';
-      row.querySelector('.toggle-switch').addEventListener('click', function(){
-        if (activeFilters.has(key)) activeFilters.delete(key); else activeFilters.add(key);
-        renderChips();
-        renderMarkers();
-        renderList();
-      });
-      container.appendChild(row);
-    });
-  }
-
-  // Mirrors renderChips exactly, for logged catches/sightings (Observations) rather than
-  // Sites — a separate rendering/data system that the original Site Visibility section
-  // never actually covered, despite the similar naming (a real gap, not a bug, identified
-  // directly from a founder report where "Wildlife Sighting" the Site type was confused
-  // with actual logged wildlife sighting Observations).
   // Per-type MAP-DISPLAY period — how far back to draw that sighting type's PINS. Default 6 months.
   // This ONLY hides pins on the map; it never touches analytics, lists, timelines, or the data itself.
   var obsTypePeriod = {};  // key -> '1mo'|'3mo'|'6mo'|'1yr'|'all'
@@ -6647,33 +6608,86 @@
       return '<option value="'+o[0]+'"'+(cur===o[0]?' selected':'')+'>'+o[1]+'</option>';
     }).join('');
   }
-  function renderObsTypeToggles(){
-    document.getElementById('obsVisibilityTitle').textContent = activeModule === 'fishing' ? 'Catches' : 'Sightings';
-    var container = document.getElementById('displayTrayObsTypes');
-    container.innerHTML = '';
-    Object.keys(getActiveObsTypes()).forEach(function(key){
-      var t = getActiveObsTypes()[key];
-      var isOn = activeObsFilters.has(key);
-      var row = document.createElement('div');
-      row.className = 'toggle-row';
-      row.innerHTML =
-        '<div class="toggle-row-label"><span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;vertical-align:middle;margin-right:4px;">'+obsGlyphInline(key, 22)+'</span>' + t.label + '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px;">' +
-          '<select class="obs-period" title="How far back to show ' + escapeHtml(t.label) + ' pins on the MAP (data/analytics unaffected)" style="padding:3px 4px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.28);color:var(--text);font-size:11px;">' + obsPeriodOpts(key) + '</select>' +
-          '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>' +
-        '</div>';
-      row.querySelector('.toggle-switch').addEventListener('click', function(){
-        if (activeObsFilters.has(key)) activeObsFilters.delete(key); else activeObsFilters.add(key);
-        renderObsTypeToggles();
-        renderObsMarkers();
-      });
-      row.querySelector('.obs-period').addEventListener('change', function(){
-        obsTypePeriod[key] = this.value;   // map-display only
-        renderObsMarkers();
-      });
-      container.appendChild(row);
-    });
+  // ----- Map Display tray, grouped by KIND -----
+  // The tray used to mirror the app's internal split (Sites vs Sightings), which is an implementation
+  // detail — you don't care whether a bed is stored as a Site and a buck as a Sighting, you care what
+  // KIND of thing it is. So the hunting tray groups by meaning: Stands & Cameras, Habitat, Sign &
+  // Sightings, Other. Rows mixing both data systems live side by side; each still drives its own filter
+  // set and redraw. Fishing keeps its simpler two-list layout.
+  function traySection(title, rows){
+    var sec = document.createElement('div');
+    sec.className = 'display-tray-section';
+    sec.innerHTML = '<div class="display-tray-section-title">' + title + '</div>';
+    rows.forEach(function(r){ if (r) sec.appendChild(r); });
+    return sec;
   }
+  // The orange camera FLAGS on deployed spots get their own toggle, OFF by default — separate from the
+  // camera LOCATIONS (the dots + names), which is the 'camera' site type below.
+  function trayCamIconsRow(){
+    var row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.innerHTML =
+      '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">📷</span> Camera icons</div>' +
+      '<div class="toggle-switch' + (showCameraFlags ? ' on' : '') + '"><div class="knob"></div></div>';
+    row.querySelector('.toggle-switch').addEventListener('click', function(){ showCameraFlags = !showCameraFlags; renderChips(); renderMarkers(); });
+    return row;
+  }
+  function traySiteRow(key){
+    var t = getActiveTypes()[key]; if (!t) return null;
+    var isOn = activeFilters.has(key);
+    var lbl = (key === 'camera') ? 'Camera Locations' : t.label;   // the dots/names (places), not the camera icons
+    var row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.innerHTML =
+      '<div class="toggle-row-label"><span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>' + lbl + '</div>' +
+      '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>';
+    row.querySelector('.toggle-switch').addEventListener('click', function(){
+      if (activeFilters.has(key)) activeFilters.delete(key); else activeFilters.add(key);
+      renderChips();
+      renderMarkers();
+      renderList();
+    });
+    return row;
+  }
+  function trayObsRow(key){
+    var t = getActiveObsTypes()[key]; if (!t) return null;
+    var isOn = activeObsFilters.has(key);
+    var row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.innerHTML =
+      '<div class="toggle-row-label"><span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;vertical-align:middle;margin-right:4px;">'+obsGlyphInline(key, 22)+'</span>' + t.label + '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<select class="obs-period" title="How far back to show ' + escapeHtml(t.label) + ' pins on the MAP (data/analytics unaffected)" style="padding:3px 4px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.28);color:var(--text);font-size:11px;">' + obsPeriodOpts(key) + '</select>' +
+        '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>' +
+      '</div>';
+    row.querySelector('.toggle-switch').addEventListener('click', function(){
+      if (activeObsFilters.has(key)) activeObsFilters.delete(key); else activeObsFilters.add(key);
+      renderChips();
+      renderObsMarkers();
+    });
+    row.querySelector('.obs-period').addEventListener('change', function(){
+      obsTypePeriod[key] = this.value;   // map-display only
+      renderObsMarkers();
+    });
+    return row;
+  }
+  // Builds the WHOLE tray (Sites + Sightings together, grouped by kind). renderObsTypeToggles is kept as
+  // an alias so the many existing callers that refresh "just the obs toggles" still repaint everything.
+  function renderChips(){
+    var container = document.getElementById('displayTrayGroups');
+    if (!container) return;
+    container.innerHTML = '';
+    if (activeModule === 'fishing'){
+      container.appendChild(traySection('Site Visibility', typeVisibleKeys(getActiveTypes()).map(traySiteRow)));
+      container.appendChild(traySection('Catches', typeVisibleKeys(getActiveObsTypes()).map(trayObsRow)));
+      return;
+    }
+    container.appendChild(traySection('Stands & Cameras', [trayCamIconsRow()].concat(['camera','stand','access'].map(traySiteRow))));
+    container.appendChild(traySection('Habitat', ['bedding','feeding','water'].map(traySiteRow)));
+    container.appendChild(traySection('Sign &amp; Sightings', ['buck','doe','bear','turkey','scrape','rub','track','trail','hunt','custom'].map(trayObsRow)));
+    container.appendChild(traySection('Other Markers', ['sighting','custom'].map(traySiteRow)));
+  }
+  function renderObsTypeToggles(){ renderChips(); }
 
   // ---------- Property layer: organize Sites under named properties ----------
   function renderPropertySelect(){
@@ -9827,7 +9841,7 @@
         '<input type="text" id="f_name" placeholder="e.g. North Fence Camera" />' +
         '<label>Type</label>' +
         '<select id="f_type">' +
-          Object.keys(getActiveTypes()).map(function(k){ return '<option value="'+k+'">'+getActiveTypes()[k].label+'</option>'; }).join('') +
+          typeVisibleKeys(getActiveTypes()).map(function(k){ return '<option value="'+k+'">'+getActiveTypes()[k].label+'</option>'; }).join('') +
         '</select>' +
         (properties.length > 0 ?
           '<label>Property</label>' +
@@ -12079,7 +12093,7 @@
   var obsGrid = document.getElementById('obsGrid');
   function renderQuickLogGrid(){
     obsGrid.innerHTML = '';
-    Object.keys(getActiveObsTypes()).forEach(function(key){
+    typeVisibleKeys(getActiveObsTypes()).forEach(function(key){
       var t = getActiveObsTypes()[key];
       var tile = document.createElement('div');
       tile.className = 'obs-tile';
