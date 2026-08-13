@@ -1784,6 +1784,7 @@
         <option value="Preset 10ft Contour Interval">10 ft</option>
       </select>
       <input type="range" id="contourOpacitySlider" min="10" max="100" value="45" title="Contour line transparency" style="display:none;width:70px;vertical-align:middle;margin:0 6px;accent-color:#E8823F;cursor:pointer;" />
+      <button class="layer-btn" id="elevToolBtn" title="Elevation tools — draw a side-view PROFILE of the ground, or TAP a spot to read its height (from the LiDAR). For reading high vs low at a glance.">📈 Elev</button>
       <button class="layer-btn" id="hydroToggleBtn" title="Streams &amp; drainage lines (USGS National Hydrography Dataset) over any layer">💧 Streams</button>
       <button class="layer-btn" id="thermalToggleBtn" title="Thermal drift — which way your scent drains at each spot, from the LiDAR slope, flipped by time of day (rising uphill in the morning, falling downhill in the evening)">🌡 Thermals</button>
       <button class="layer-btn" id="scentToggleBtn" title="Scent cones — where your scent blows from each hunt spot right now (wind + thermals combined). A wider cone = swirlier, less certain. Red = where a deer would wind you.">🌬 Scent cones</button>
@@ -1796,7 +1797,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 264</div>
+    <div id="buildBadge">BUILD 265</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9880,6 +9881,105 @@
     if (localStorage.getItem('oc_contour_on') === '1'){ contourOn = true; contourLayer.addTo(map); document.getElementById('contoursToggleBtn').classList.add('active'); showContourControls(true); }
     if (hillshadeOn || contourOn) raiseOverlaysAndMarkers();
   }catch(e){}
+
+  // ---------- 📈 ELEVATION TOOLS — read the LiDAR ground as a side-view PROFILE or a tapped SPOT height ----------
+  // For the hunter who can't picture high vs low from contour lines: draw a line and see the ground from the SIDE
+  // (a plain up/down graph), or tap a spot and get its height — tap a second and get the difference. Same 3DEP
+  // getSamples the thermals use; feet, because that's how topo reads on the ground.
+  var _elevMode = null, _elevStart = null, _elevLastSpot = null, _elevLayer = null;
+  function _elevGroup(){ if (!_elevLayer) _elevLayer = L.layerGroup().addTo(map); return _elevLayer; }
+  function clearElevLayer(){ if (_elevLayer){ map.removeLayer(_elevLayer); _elevLayer = null; } var ep = document.getElementById('elevProfilePanel'); if (ep) ep.remove(); _elevLastSpot = null; }
+  function m2ft(m){ return m * 3.28084; }
+  async function sampleElevPoints(pts){
+    try {
+      var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: pts, spatialReference: { wkid: 4326 } })) + '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+      var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+      var d = await resp.json(); var out = new Array(pts.length); for (var i = 0; i < pts.length; i++) out[i] = NaN;
+      if (d && d.samples) d.samples.forEach(function(s, i){ var li = (s.locationId != null) ? s.locationId : i; var v = (s && s.value != null) ? parseFloat(s.value) : NaN; if (li < out.length) out[li] = v; });
+      return out;
+    } catch (e){ return null; }
+  }
+  function setElevMode(mode){
+    _elevMode = mode;
+    try { map.getContainer().style.cursor = mode ? 'crosshair' : ''; } catch (e) {}
+    ['epProfileBtn', 'epSpotBtn'].forEach(function(id){ var b = document.getElementById(id); if (b){ var on = (mode === (id === 'epProfileBtn' ? 'profile-a' : 'spot')) || (id === 'epProfileBtn' && mode === 'profile-b'); b.style.background = on ? '#3c6d42' : '#26332b'; b.style.color = on ? '#fff' : '#dff0e4'; } });
+  }
+  async function drawElevProfile(a, b){
+    var N = 64, pts = []; for (var i = 0; i < N; i++){ var f = i / (N - 1); pts.push([a.lng + (b.lng - a.lng) * f, a.lat + (b.lat - a.lat) * f]); }
+    showToast('Reading the ground…');
+    var vals = await sampleElevPoints(pts); if (!vals){ showToast('Couldn\'t read the elevation — try again.'); return; }
+    var g = _elevGroup();
+    L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: '#E8823F', weight: 3, dashArray: '5 5', interactive: false }).addTo(g);
+    L.circleMarker([a.lat, a.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#E8823F', fillOpacity: 1, interactive: false }).addTo(g);
+    L.circleMarker([b.lat, b.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#D94A2E', fillOpacity: 1, interactive: false }).addTo(g);
+    showElevProfilePanel(vals, distMeters(a.lat, a.lng, b.lat, b.lng));
+  }
+  function showElevProfilePanel(valsM, totalM){
+    var ft = valsM.map(function(v){ return isFinite(v) ? m2ft(v) : NaN; });
+    for (var i = 0; i < ft.length; i++){ if (!isFinite(ft[i])){ var l = i - 1; while (l >= 0 && !isFinite(ft[l])) l--; var r = i + 1; while (r < ft.length && !isFinite(ft[r])) r++; ft[i] = isFinite(ft[l]) ? ft[l] : (isFinite(ft[r]) ? ft[r] : 0); } }
+    var min = Math.min.apply(null, ft), max = Math.max.apply(null, ft), totalYd = m2ft(totalM) / 3, net = ft[ft.length - 1] - ft[0];
+    var old = document.getElementById('elevProfilePanel'); if (old) old.remove();
+    var el = document.createElement('div'); el.id = 'elevProfilePanel';
+    el.style.cssText = 'position:fixed;left:50%;bottom:64px;transform:translateX(-50%);z-index:100014;background:#14201a;border:1px solid #2c3f34;border-radius:14px;padding:14px;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.6);width:min(470px,94vw);font-family:inherit;';
+    el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:800;font-size:14px;">📈 Elevation profile</div><button id="epX" style="background:transparent;border:none;color:#9db0a3;font-size:20px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<canvas id="epCanvas" width="440" height="172" style="width:100%;height:auto;display:block;background:#0e1712;border-radius:8px;"></canvas>' +
+      '<div id="epStats" style="display:flex;flex-wrap:wrap;gap:7px;margin-top:9px;"></div>' +
+      '<div style="font-size:10.5px;color:#6f8377;margin-top:8px;">Side-view of the ground along your line — left = start (orange), right = end (red). Straight off the LiDAR.</div>';
+    document.body.appendChild(el);
+    el.querySelector('#epX').addEventListener('click', function(){ el.remove(); });
+    var cv = el.querySelector('#epCanvas'), ctx = cv.getContext('2d'), W = cv.width, H = cv.height, padL = 40, padR = 12, padT = 12, padB = 22;
+    var plotW = W - padL - padR, plotH = H - padT - padB, range = Math.max(2, max - min), yPad = range * 0.18, yMin = min - yPad, yMax = max + yPad, yr = yMax - yMin;
+    function X(idx){ return padL + plotW * (idx / (ft.length - 1)); }
+    function Y(v){ return padT + plotH * (1 - (v - yMin) / yr); }
+    ctx.strokeStyle = '#1e2d24'; ctx.lineWidth = 1;   // faint gridlines at min/mid/max
+    [min, (min + max) / 2, max].forEach(function(v){ ctx.beginPath(); ctx.moveTo(padL, Y(v)); ctx.lineTo(W - padR, Y(v)); ctx.stroke(); });
+    ctx.beginPath(); ctx.moveTo(X(0), Y(ft[0])); for (var k = 1; k < ft.length; k++) ctx.lineTo(X(k), Y(ft[k])); ctx.lineTo(X(ft.length - 1), padT + plotH); ctx.lineTo(X(0), padT + plotH); ctx.closePath();
+    var grad = ctx.createLinearGradient(0, padT, 0, padT + plotH); grad.addColorStop(0, 'rgba(158,209,122,0.55)'); grad.addColorStop(1, 'rgba(158,209,122,0.06)'); ctx.fillStyle = grad; ctx.fill();
+    ctx.beginPath(); ctx.moveTo(X(0), Y(ft[0])); for (var k2 = 1; k2 < ft.length; k2++) ctx.lineTo(X(k2), Y(ft[k2])); ctx.strokeStyle = '#9ED17A'; ctx.lineWidth = 2; ctx.stroke();
+    var hi = ft.indexOf(max), lo = ft.indexOf(min);
+    function dot(idx, v, col, lbl){ ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(idx), Y(v), 3.5, 0, 6.29); ctx.fill(); ctx.fillStyle = '#cfe0d6'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(lbl, X(idx), Y(v) - 6); }
+    dot(hi, max, '#E8B04B', 'H'); dot(lo, min, '#5FB0C9', 'L');
+    ctx.fillStyle = '#8aa596'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(max) + 'ft', padL - 5, Y(max) + 3); ctx.fillText(Math.round(min) + 'ft', padL - 5, Y(min) + 3);
+    ctx.textAlign = 'left'; ctx.fillText('start', padL, H - 6); ctx.textAlign = 'right'; ctx.fillText(Math.round(totalYd) + ' yd', W - padR, H - 6);
+    el.querySelector('#epStats').innerHTML = [['Length', Math.round(totalYd) + ' yd'], ['Relief', Math.round(max - min) + ' ft'], ['High', Math.round(max) + ' ft'], ['Low', Math.round(min) + ' ft'], ['Net', (net >= 0 ? '+' : '') + Math.round(net) + ' ft']].map(function(s){ return '<div style="flex:1;min-width:64px;background:#1c2b23;border-radius:8px;padding:7px 9px;"><div style="font-size:9.5px;color:#8aa596;">' + s[0] + '</div><div style="font-size:13px;font-weight:700;">' + s[1] + '</div></div>'; }).join('');
+  }
+  map.on('click', async function(e){
+    if (!_elevMode) return;
+    if (_elevMode === 'spot'){
+      var vals = await sampleElevPoints([[e.latlng.lng, e.latlng.lat]]); var m = vals ? vals[0] : NaN;
+      if (!isFinite(m)){ showToast('No LiDAR elevation at that spot.'); return; }
+      var ftv = Math.round(m2ft(m)), diff = (_elevLastSpot != null) ? (ftv - _elevLastSpot) : null;
+      var label = ftv + ' ft' + (diff != null ? ' (' + (diff >= 0 ? '+' : '') + diff + ' vs last)' : '');
+      var g = _elevGroup();
+      L.circleMarker([e.latlng.lat, e.latlng.lng], { radius: 5, color: '#fff', weight: 2, fillColor: '#E8823F', fillOpacity: 1, interactive: false }).addTo(g);
+      L.marker([e.latlng.lat, e.latlng.lng], { interactive: false, icon: L.divIcon({ className: '', html: '<div style="transform:translate(10px,-50%);white-space:nowrap;background:rgba(15,20,17,0.92);color:#fff;font:700 11px sans-serif;padding:2px 7px;border-radius:6px;border:1px solid #E8823F;">' + label + '</div>', iconSize: [0, 0] }) }).addTo(g);
+      _elevLastSpot = ftv; return;
+    }
+    if (_elevMode === 'profile-a'){ _elevStart = e.latlng; setElevMode('profile-b'); L.circleMarker([e.latlng.lat, e.latlng.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#E8823F', fillOpacity: 1, interactive: false }).addTo(_elevGroup()); showToast('…now click the END of the line.'); return; }
+    if (_elevMode === 'profile-b'){ var a = _elevStart; setElevMode(null); drawElevProfile(a, e.latlng); return; }
+  });
+  (function(){
+    var btn = document.getElementById('elevToolBtn'); if (!btn) return;
+    var bar = null;
+    function closeBar(){ if (bar){ bar.remove(); bar = null; } setElevMode(null); btn.classList.remove('active'); }
+    btn.addEventListener('click', function(){
+      if (bar){ closeBar(); return; }
+      btn.classList.add('active');
+      bar = document.createElement('div'); bar.id = 'elevToolBar';
+      bar.style.cssText = 'position:fixed;left:50%;bottom:110px;transform:translateX(-50%);z-index:100013;background:#14201a;border:1px solid #2c3f34;border-radius:12px;padding:9px 11px;color:#e8f0ea;box-shadow:0 10px 30px rgba(0,0,0,.55);font-family:inherit;display:flex;align-items:center;gap:7px;';
+      bar.innerHTML = '<span style="font-size:11px;color:#8aa596;margin-right:2px;">📈 Elevation:</span>' +
+        '<button id="epProfileBtn" style="font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;">Draw profile</button>' +
+        '<button id="epSpotBtn" style="font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;">Tap for height</button>' +
+        '<button id="epClearBtn" style="font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#9db0a3;cursor:pointer;">Clear</button>' +
+        '<button id="epCloseBtn" style="background:transparent;border:none;color:#9db0a3;font-size:19px;cursor:pointer;line-height:1;">×</button>';
+      document.body.appendChild(bar);
+      bar.querySelector('#epProfileBtn').addEventListener('click', function(){ _elevStart = null; setElevMode('profile-a'); showToast('📈 Click the START of your line (across a draw or ridge), then the END.'); });
+      bar.querySelector('#epSpotBtn').addEventListener('click', function(){ setElevMode('spot'); _elevLastSpot = null; showToast('📍 Tap any spot to read its height. Tap a second to see the difference.'); });
+      bar.querySelector('#epClearBtn').addEventListener('click', function(){ clearElevLayer(); setElevMode(null); showToast('Cleared.'); });
+      bar.querySelector('#epCloseBtn').addEventListener('click', function(){ clearElevLayer(); closeBar(); });
+    });
+  })();
 
   // 💧 Streams — USGS National Hydrography Dataset (real surveyed stream/drainage lines + water), a
   // transparent cached tile overlay toggled over any base. Unlike a GUESSED drainage, these are the actual
