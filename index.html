@@ -1797,7 +1797,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 266</div>
+    <div id="buildBadge">BUILD 267</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6611,7 +6611,7 @@
     properties.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); }).forEach(function(p){
       var opt = document.createElement('option');
       opt.value = p.id;
-      opt.textContent = p.name;
+      opt.textContent = p.name + ((p.boundary && p.boundary.length >= 3) ? '  ·  ' + acresLabel(polygonAcres(p.boundary)) : '');
       sel.appendChild(opt);
     });
     // Restore previous selection if it still exists, else fall back to "All Properties"
@@ -6754,6 +6754,17 @@
     }
     return inside;
   }
+  // Geodesic area of a lat/lng ring → ACRES (spherical-excess formula; accurate to a fraction of a percent at farm scale).
+  function polygonAcres(ring){
+    if (!ring || ring.length < 3) return 0;
+    var R = 6378137, area = 0, D2R = Math.PI / 180;
+    for (var i = 0; i < ring.length; i++){
+      var p1 = ring[i], p2 = ring[(i + 1) % ring.length];
+      area += (p2[1] - p1[1]) * D2R * (2 + Math.sin(p1[0] * D2R) + Math.sin(p2[0] * D2R));
+    }
+    return Math.abs(area * R * R / 2) / 4046.8564224;
+  }
+  function acresLabel(a){ return a >= 10 ? Math.round(a) + ' ac' : (a >= 0.1 ? a.toFixed(1) + ' ac' : '<0.1 ac'); }
   function pointInProperty(lat, lng, prop){
     if (prop.boundary && prop.boundary.length >= 3) return pointInPolygon(lat, lng, prop.boundary);
     if (prop.bounds) return lat >= prop.bounds.south && lat <= prop.bounds.north && lng >= prop.bounds.west && lng <= prop.bounds.east;
