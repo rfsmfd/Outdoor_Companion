@@ -207,7 +207,7 @@
     }
     #quickLogFab .fab-label{ top:80px; }
     #buildBadge{ top:165px; font-size:12px; padding:5px 10px; }
-    #huntBar{ top:64px; }
+    #huntBar{ top:80px !important; }
     #layerDock{ bottom:24px; }
     /* Field screens: the layer tray hides behind the ⛰ Layers pill so the map keeps the screen */
     #layersToggleBtn{ display:inline-flex; align-items:center; font-size:15px; padding:13px 20px; }
@@ -217,6 +217,15 @@
     /* forecast time-scrubber: narrow it and sit it to the RIGHT of the ⛰ Layers pill so they stop overlapping */
     #projTimeCtrl{ left:142px !important; right:10px !important; bottom:26px !important; transform:none !important; width:auto !important; padding:7px 11px !important; gap:5px !important; }
     #projTimeCtrl span{ font-size:11px !important; }
+    /* --- top strip declutter (founder's phone tuning) --- */
+    /* account/login band: drop the email, narrow, and center at the very top so the corners free up (Quick-Log + shows) */
+    #oc-signout{ left:50%; right:auto; transform:translateX(-50%); top:6px; }
+    #oc-signout-email{ display:none; }
+    /* 🗺 right slide button up under the (temporary) build badge, opposite the ☰ menu on the left */
+    #displayTrayToggleBtn{ top:116px; bottom:auto; }
+    /* 📐 parcel + 💨 wind nudge up the right side so the bottom Now scrubber is clear */
+    #parcelToggleBtn{ bottom:172px !important; top:auto !important; }
+    #windToggleBtn{ bottom:120px !important; top:auto !important; }
 
     /* Readability: everything in the sidebar was sized for a desktop screen — scale up. */
     #brand h1{ font-size:25px; }
@@ -1833,7 +1842,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 272</div>
+    <div id="buildBadge">BUILD 273</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10088,6 +10097,7 @@
     if (!el){ el = document.createElement('div'); el.id = 'thermalChip';
       el.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:20px;padding:5px 13px;font-size:12px;font-weight:600;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4);white-space:nowrap;';
       document.getElementById('map').appendChild(el); }
+    el.style.top = (window.innerWidth <= 820) ? '46px' : '8px';   // on the phone, sit below the centered login band
     el.textContent = '🌡 ' + text;
     el.style.display = thermalOn ? 'block' : 'none';
   }
@@ -10197,7 +10207,8 @@
     if (!el){ el = document.createElement('div'); el.id = 'scentChip';
       el.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);z-index:800;background:rgba(46,26,22,.92);color:#f2ddd5;border:1px solid #7a3a30;border-radius:20px;padding:5px 13px;font-size:12px;font-weight:600;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4);white-space:nowrap;';
       document.getElementById('map').appendChild(el); }
-    el.style.top = (typeof thermalOn !== 'undefined' && thermalOn) ? '40px' : '8px';  // sit below the thermal chip if both on
+    var _cbase = (window.innerWidth <= 820) ? 46 : 8;                                  // phone: below the centered login band
+    el.style.top = ((typeof thermalOn !== 'undefined' && thermalOn) ? (_cbase + 34) : _cbase) + 'px';  // below the thermal chip if both on
     el.textContent = '🌬 ' + text;
     el.style.display = scentOn ? 'block' : 'none';
   }
