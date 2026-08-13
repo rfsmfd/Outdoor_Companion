@@ -1844,7 +1844,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 277</div>
+    <div id="buildBadge">BUILD 278</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -11203,7 +11203,22 @@
     if (!stands.length){ showToast('No hunt spots yet — drop a Tree Stand (or flag a site 🏹 I hunt here) first, then log the sit against it.'); return; }
     var stand = (hunt && hunt.siteId) ? stands.filter(function(s){ return s.id === hunt.siteId; })[0] : null;
     if (!stand) stand = (lastKnownPos ? stands.slice().sort(function(a, b){ return distMeters(lastKnownPos.lat, lastKnownPos.lng, a.lat, a.lng) - distMeters(lastKnownPos.lat, lastKnownPos.lng, b.lat, b.lng); })[0] : stands[0]) || stands[0];
-    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: null, does: 0, unknown: 0, bucks: {}, harvest: null };
+    // ROLL-UP: prefill the tally from what you already quick-logged DURING this hunt, so you never re-enter it.
+    // (fromSit obs are a prior sit-log's OWN creations — skip those, or reopening would double-count.) Save writes
+    // only the DELTA beyond this prefill.
+    var _pref = { does: 0, unknown: 0, buckIds: {} };
+    if (hunt && hunt.observationIds){
+      hunt.observationIds.forEach(function(oid){
+        var o = (typeof observations !== 'undefined' ? observations : []).filter(function(x){ return x.id === oid; })[0];
+        if (!o || o.fromSit) return;
+        var c = o.count || 1;
+        if (o.type === 'doe') _pref.does += c;
+        else if (o.type === 'buck'){ if (o.buckProfileId) _pref.buckIds[o.buckProfileId] = (_pref.buckIds[o.buckProfileId] || 0) + c; else _pref.unknown += c; }
+      });
+    }
+    var _prefTotal = _pref.does + _pref.unknown + Object.keys(_pref.buckIds).length;
+    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: null, does: _pref.does, unknown: _pref.unknown, bucks: {}, harvest: null };
+    Object.keys(_pref.buckIds).forEach(function(bid){ st.bucks[bid] = true; });
     var back = document.createElement('div'); back.id = 'sitLogPanel'; back.style.cssText = 'position:fixed;inset:0;z-index:100012;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;overflow:auto;';
     var card = document.createElement('div'); card.style.cssText = 'background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;width:440px;max-width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 14px 44px rgba(0,0,0,.6);';
     back.appendChild(card); document.body.appendChild(back);
@@ -11214,6 +11229,7 @@
     var dLbl = fcDayLabel(st.sitTime);
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;"><div><div style="font-weight:800;font-size:16px;">📓 Log the sit</div><div style="font-size:11px;color:#8aa596;margin-top:2px;">' + escapeHtml(dLbl) + ' · feeds your rankings</div></div><button id="slX" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div id="slRollup" style="display:none;font-size:11.5px;color:#bcd18a;background:rgba(124,203,124,.1);border-radius:9px;padding:9px 11px;margin-bottom:12px;line-height:1.5;"></div>' +
       '<div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Stand you sat</div>' +
       '<select id="slStand" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;margin-bottom:12px;">' + standOpts + '</select>' +
       '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">How was the movement?</div>' +
@@ -11239,17 +11255,32 @@
     function bump(t, d){ st[t] = Math.max(0, (st[t] || 0) + d); var el = card.querySelector('#sl-' + t); if (el) el.textContent = st[t]; }
     Array.prototype.forEach.call(card.querySelectorAll('.sl-inc'), function(b){ b.addEventListener('click', function(){ bump(b.getAttribute('data-t'), 1); }); });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-dec'), function(b){ b.addEventListener('click', function(){ bump(b.getAttribute('data-t'), -1); }); });
+    // paint the prefilled roll-up (counters, selected buck chips, and a note of what carried over)
+    card.querySelector('#sl-does').textContent = st.does;
+    card.querySelector('#sl-unknown').textContent = st.unknown;
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-buck'), function(b){ if (st.bucks[b.getAttribute('data-bid')]){ b.style.border = '1px solid #E8B04B'; b.style.background = '#3a3320'; } });
+    if (_prefTotal > 0){
+      var ru = card.querySelector('#slRollup');
+      var _names = Object.keys(_pref.buckIds).map(function(id){ var bp = buckProfiles.filter(function(x){ return x.id === id; })[0]; return bp ? bp.name : 'a buck'; });
+      var _parts = [ _pref.does ? (_pref.does + ' doe' + (_pref.does > 1 ? 's' : '')) : '', _pref.unknown ? (_pref.unknown + ' buck' + (_pref.unknown > 1 ? 's' : '')) : '', _names.join(', ') ].filter(Boolean);
+      ru.style.display = 'block';
+      ru.innerHTML = '✓ Rolled up from what you logged this sit: <b>' + _parts.join(' · ') + '</b>. Just add anything you didn\'t pin.';
+    }
     card.querySelector('#slSave').addEventListener('click', function(){
       var stand = _logHuntStands().filter(function(s){ return s.id === st.standId; })[0]; if (!stand){ showToast('Pick a stand.'); return; }
       var notes = (card.querySelector('#slNotes').value || '').trim(), pid = _logPropIdFor(stand), created = [];
       function mk(type, buckId, count, harv){ var o = { id: uid(), type: type, lat: stand.lat, lng: stand.lng, approx: false, siteId: stand.id, propertyId: pid, createdAt: st.sitTime, moonPhase: getMoonPhase(new Date(st.sitTime)), solunarPeriod: classifyEventSolunarPeriod(new Date(st.sitTime), stand.lat, stand.lng), weather: null, weatherStatus: 'pending', fromSit: true, activity: st.activity }; if (buckId) o.buckProfileId = buckId; if (count && count > 1) o.count = count; if (harv) o.harvest = true; if (notes) o.note = notes; return o; }
-      if (st.does > 0) created.push(mk('doe', null, st.does, st.harvest === 'doe'));
+      // DELTA only — the prefilled sightings already exist as observations, so we create just what you ADDED.
       var namedSeen = Object.keys(st.bucks).filter(function(b){ return st.bucks[b]; });
-      namedSeen.forEach(function(bid){ created.push(mk('buck', bid, 1, false)); });
-      if (st.unknown > 0) created.push(mk('buck', null, st.unknown, false));
-      if (st.harvest === 'buck' && !namedSeen.length && st.unknown === 0) created.push(mk('buck', null, 1, true));
-      if (st.harvest === 'doe' && st.does === 0) created.push(mk('doe', null, 1, true));
-      if (!created.length && !st.activity && !notes){ showToast('Nothing logged yet — set the movement, deer seen, or a note.'); return; }
+      var doeDelta = Math.max(0, st.does - _pref.does), unkDelta = Math.max(0, st.unknown - _pref.unknown);
+      var newNamed = namedSeen.filter(function(bid){ return !_pref.buckIds[bid]; });   // bucks not already quick-logged this sit
+      if (doeDelta > 0) created.push(mk('doe', null, doeDelta, st.harvest === 'doe'));
+      newNamed.forEach(function(bid){ created.push(mk('buck', bid, 1, false)); });
+      if (unkDelta > 0) created.push(mk('buck', null, unkDelta, false));
+      // harvest is a flag on ONE record, not an extra animal — mark a created one, or add a marker if it was prefilled
+      if (st.harvest === 'buck'){ var _bh = created.filter(function(o){ return o.type === 'buck'; })[0]; if (_bh) _bh.harvest = true; else created.push(mk('buck', null, 1, true)); }
+      if (st.harvest === 'doe'){ var _dh = created.filter(function(o){ return o.type === 'doe'; })[0]; if (_dh) _dh.harvest = true; else created.push(mk('doe', null, 1, true)); }
+      if (!created.length && !st.activity && !notes && _prefTotal === 0){ showToast('Nothing logged yet — set the movement, deer seen, or a note.'); return; }
       created.forEach(function(o){ observations.push(o); saveObservation(o).catch(function(e){ console.error('Outdoor Companion: sit-log obs save failed', e); }); });
       if (st.hunt){ st.hunt.observationIds = (st.hunt.observationIds || []).concat(created.map(function(o){ return o.id; })); st.hunt.sitLog = { activity: st.activity, does: st.does, buckIds: namedSeen, unknownBucks: st.unknown, harvest: st.harvest, notes: notes, loggedAt: Date.now() }; saveHuntEvent(st.hunt).catch(function(e){ console.error('Outdoor Companion: sit-log hunt save failed', e); }); }
       try { renderObsMarkers(); } catch (e) {}
