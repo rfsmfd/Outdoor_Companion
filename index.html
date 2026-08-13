@@ -1844,7 +1844,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 278</div>
+    <div id="buildBadge">BUILD 279</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8786,9 +8786,30 @@
       windowText: useBest ? todayWindowText(useBest, homeSite) : '' };
   }
   var HB_VERDICT = { heating: '🔥 Heating up', cooling: '❄ Cooling off', steady: 'Steady', quiet: '💤 Gone quiet' };
-  function huntabilityCardHtml(photos, recentDays){
+  // Your OWN daylight sightings of this buck — the hunter counterpart to the camera daylight-%. He argued
+  // (rightly) that a buck YOU saw moving in shooting light is proven daytime movement just like a photo is.
+  // We keep it as a SEPARATE number rather than folding it into the camera ratio: cameras sample 24/7 so
+  // their day/total ratio is unbiased, but you only sit in daylight — mixing your sightings into that ratio
+  // would inflate it. Shown side by side so each stays honest. No location/sun-times on a sighting → count
+  // it as daylight anyway (a live sighting during a sit is in shooting light by nature).
+  function sightingDaylightStats(obsList){
+    var day = 0, total = 0;
+    (obsList || []).forEach(function(o){
+      if (!o || o.type !== 'buck') return;
+      total++;
+      var bk = null;
+      if (typeof o.lat === 'number' && typeof o.lng === 'number' && o.createdAt){
+        var st = sunTimesFor(o.createdAt, o.lat, o.lng, o.siteId);
+        if (st) bk = lightBucket(o.createdAt, st.sr, st.ss);
+      }
+      if (bk !== 'night') day++;
+    });
+    return { day: day, total: total };
+  }
+  function huntabilityCardHtml(photos, recentDays, sightings){
     var r = huntabilityRead(photos, recentDays);
     if (!r.has) return '';
+    var ss = sightingDaylightStats(sightings || []);
     var shiftNote = (r.recentUsable && r.recBest && r.baseBest && r.recBest !== r.baseBest) ? (' <span style="color:#E8823F;">Now favoring ' + bucketLabel(r.recBest) + '</span> (was ' + bucketLabel(r.baseBest) + ').') : '';
     var src = r.recentUsable ? r.recent.buckets : r.base.buckets;
     var srcTot = (src.firstLight + src.midday + src.lastLight + src.night) || 1;
@@ -8801,9 +8822,13 @@
         '<div style="font-size:11.5px;font-weight:800;color:' + r.tone + ';">' + HB_VERDICT[r.state] + '</div>' +
       '</div>' +
       '<div style="font-size:11.5px;color:#cfe0d6;line-height:1.5;margin-bottom:6px;">' + r.msg + shiftNote + '</div>' +
+      '<div style="display:flex;gap:7px;flex-wrap:wrap;margin:0 0 4px;">' +
+        '<span style="font-size:11px;font-weight:700;white-space:nowrap;background:rgba(232,176,75,.14);color:#E8B04B;border-radius:10px;padding:2px 9px;">📷 ' + r.base.pct + '% daylight · cams</span>' +
+        (ss.total ? '<span style="font-size:11px;font-weight:700;white-space:nowrap;background:rgba(158,209,122,.14);color:#9ED17A;border-radius:10px;padding:2px 9px;">👁 seen ' + ss.day + '× daylight · you</span>' : '') +
+      '</div>' +
       (r.windowText ? '<div style="font-size:12.5px;color:#dff0e4;margin-bottom:2px;">🌅 Best window tonight: <b>' + bucketLabel(r.useBest) + ' · ' + r.windowText + '</b></div>' : '') +
       bars + toggle +
-      '<div style="font-size:9.5px;color:#6f8377;margin-top:6px;line-height:1.45;">All-time ' + r.base.pct + '% daylight (' + r.base.located + ' cam photo' + (r.base.located === 1 ? '' : 's') + '). Recent: ' + r.recent.located + ' in ' + r.recentDays + 'd' + (r.daysSince != null ? (' · last seen ' + r.daysSince + 'd ago') : '') + '.' + (r.recent.located && !r.recentUsable ? ' <span style="color:#E8B04B;">⚠ thin — read as a trend, not a number.</span>' : '') + '</div>' +
+      '<div style="font-size:9.5px;color:#6f8377;margin-top:6px;line-height:1.45;">Camera daylight-% is from ' + r.base.located + ' located cam photo' + (r.base.located === 1 ? '' : 's') + '. Recent: ' + r.recent.located + ' in ' + r.recentDays + 'd' + (r.daysSince != null ? (' · last seen ' + r.daysSince + 'd ago') : '') + '.' + (ss.total ? ' Your daylight tally counts sightings you tagged to him.' : '') + (r.recent.located && !r.recentUsable ? ' <span style="color:#E8B04B;">⚠ thin — read as a trend, not a number.</span>' : '') + '</div>' +
     '</div>';
   }
 
@@ -9512,7 +9537,7 @@
         linkedPhotos.forEach(function(p){ items.push({ t:(p.timestamp||0), html: renderBuckPhotoEntry(p) }); });
         linkedObs.forEach(function(o){ items.push({ t:(o.createdAt||0), html: renderBuckGalleryEntry(o) }); });
         items.sort(function(a,b){ return b.t - a.t; });
-        galleryWrap.innerHTML = '<div class="hb-wrap">' + huntabilityCardHtml(linkedPhotos, huntRecentDays) + '</div>' + items.map(function(i){ return i.html; }).join('');
+        galleryWrap.innerHTML = '<div class="hb-wrap">' + huntabilityCardHtml(linkedPhotos, huntRecentDays, linkedObs) + '</div>' + items.map(function(i){ return i.html; }).join('');
       }
       var actionsRow = document.createElement('div');
       actionsRow.style.cssText = 'margin-top:8px;';
@@ -9536,7 +9561,7 @@
               e.stopPropagation();
               huntRecentDays = parseInt(btn.getAttribute('data-days'), 10) || 14;
               try { localStorage.setItem('oc_hunt_recent_days', huntRecentDays); } catch (err) {}
-              w.innerHTML = huntabilityCardHtml(linkedPhotos, huntRecentDays);
+              w.innerHTML = huntabilityCardHtml(linkedPhotos, huntRecentDays, linkedObs);
               wireHb();
             });
           });
