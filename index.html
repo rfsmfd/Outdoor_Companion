@@ -1844,7 +1844,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 274</div>
+    <div id="buildBadge">BUILD 275</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10094,14 +10094,18 @@
     if (m >= sr + 2.5*H && m < ss - 1.75*H)  return { up:null,  label:'Midday — thermals weak, play the wind' };
     return { up:false, label:'Night — cold air pooling in the lows' };
   }
+  // ONE conditions strip for both the Thermals and Scent-cone layers: time/thermal phase + wind, no duplication and
+  // no second band. `_condWind` is cached by the scent layer (the wind you can't see on the map); the thermal phase
+  // is what you're already told. Shown whenever either layer is on.
+  var _condWind = '';
   function updateThermalChip(text){
     var el = document.getElementById('thermalChip');
     if (!el){ el = document.createElement('div'); el.id = 'thermalChip';
       el.style.cssText = 'position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:20px;padding:5px 13px;font-size:12px;font-weight:600;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4);white-space:nowrap;';
       document.getElementById('map').appendChild(el); }
     el.style.top = (window.innerWidth <= 820) ? '82px' : '8px';   // phone: below the login band + Start Hunt
-    el.textContent = '🌡 ' + text;
-    el.style.display = thermalOn ? 'block' : 'none';
+    el.textContent = '🌡 ' + text + (_condWind ? '  ·  💨 ' + _condWind : '');
+    el.style.display = (thermalOn || (typeof scentOn !== 'undefined' && scentOn)) ? 'block' : 'none';
   }
   async function updateThermalLayer(){
     if (!thermalOn) return;
@@ -10204,15 +10208,12 @@
     var x = Math.cos(lat1 * D2R) * Math.sin(lat2 * D2R) - Math.sin(lat1 * D2R) * Math.cos(lat2 * D2R) * Math.cos((lng2 - lng1) * D2R);
     return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
   }
+  // Scent no longer gets its own strip — it feeds the single conditions chip. A scent status message only surfaces
+  // when the thermal layer isn't already driving that chip (avoids clobbering the phase / double "midday").
   function updateScentChip(text){
-    var el = document.getElementById('scentChip');
-    if (!el){ el = document.createElement('div'); el.id = 'scentChip';
-      el.style.cssText = 'position:absolute;left:50%;transform:translateX(-50%);z-index:800;background:rgba(46,26,22,.92);color:#f2ddd5;border:1px solid #7a3a30;border-radius:20px;padding:5px 13px;font-size:12px;font-weight:600;pointer-events:none;box-shadow:0 2px 10px rgba(0,0,0,.4);white-space:nowrap;';
-      document.getElementById('map').appendChild(el); }
-    var _cbase = (window.innerWidth <= 820) ? 82 : 8;                                  // phone: below the login band + Start Hunt
-    el.style.top = ((typeof thermalOn !== 'undefined' && thermalOn) ? (_cbase + 32) : _cbase) + 'px';  // below the thermal chip if both on
-    el.textContent = '🌬 ' + text;
-    el.style.display = scentOn ? 'block' : 'none';
+    if (thermalOn) return;
+    _condWind = '';
+    updateThermalChip(text);
   }
   async function updateScentCones(){
     if (!scentOn) return;
@@ -10266,14 +10267,18 @@
       }
       L.polygon(poly, { pane: 'scentPane', color: '#D94A2E', weight: 1, opacity: 0.5, fillColor: '#D94A2E', fillOpacity: 0.15, interactive: false }).addTo(scentLayer);
     });
-    var wtxt = wx ? (wx.windDir + ' ' + windMph + ' mph') : 'wind offline (thermal only)';
-    updateScentChip(stands.length + ' hunt spot' + (stands.length === 1 ? '' : 's') + ' · ' + wtxt + ' · ' + ph.label.split('—')[0].trim().toLowerCase());
+    // fold the WIND (the one thing you can't see on the map) into the single conditions strip; the phase is already
+    // shown, and the "N hunt spots" count was just repeating the cones you can already see — dropped.
+    _condWind = wx ? (wx.windDir + ' ' + windMph + ' mph') : '';
+    updateThermalChip(ph.label);
   }
   document.getElementById('scentToggleBtn').addEventListener('click', function(){
     scentOn = !scentOn;
     this.classList.toggle('active', scentOn);
     if (scentOn){ scentLayer.addTo(map); updateScentCones(); }
-    else { scentLayer.clearLayers(); map.removeLayer(scentLayer); var chip = document.getElementById('scentChip'); if (chip) chip.style.display = 'none'; }
+    else { scentLayer.clearLayers(); map.removeLayer(scentLayer); _condWind = '';   // scent off → clear the wind from the conditions strip
+      if (thermalOn){ updateThermalChip(thermalPhase(map.getCenter().lat, map.getCenter().lng, projTimeMs()).label); }
+      else { var chip = document.getElementById('thermalChip'); if (chip) chip.style.display = 'none'; } }
     ensureProjControl();
     try{ localStorage.setItem('oc_scent_on', scentOn ? '1' : '0'); }catch(e){}
   });
