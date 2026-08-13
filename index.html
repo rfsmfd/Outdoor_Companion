@@ -208,7 +208,10 @@
     #quickLogFab .fab-label{ top:80px; }
     #buildBadge{ top:165px; font-size:12px; padding:5px 10px; }
     #huntBar{ top:64px; }
-    #layerSwitch{ bottom:24px; }
+    #layerDock{ bottom:24px; }
+    /* Field screens: the layer tray hides behind the ⛰ Layers pill so the map keeps the screen */
+    #layersToggleBtn{ display:inline-flex; align-items:center; font-size:15px; padding:13px 20px; }
+    #layerDock:not(.open) #layerSwitch{ display:none; }
     .layer-btn{ font-size:16px; padding:13px 18px; }
     #followMeBtn{ bottom:78px; width:50px; height:50px; font-size:22px; }
 
@@ -531,10 +534,16 @@
   }
   #hint.show{display:block;}
 
-  #layerSwitch{
+  #layerDock{
     position:absolute;
     bottom:24px;left:14px;
     z-index:1000;
+    display:flex;
+    flex-direction:column;
+    align-items:flex-start;
+    gap:8px;
+  }
+  #layerSwitch{
     display:flex;
     flex-wrap:wrap;
     max-width:calc(100vw - 28px);
@@ -544,6 +553,21 @@
     overflow:hidden;
     box-shadow:0 2px 8px rgba(0,0,0,0.4);
   }
+  /* ⛰ Layers pill — shown only on narrow (field) screens; collapses the whole layer tray so the map isn't buried */
+  .layers-toggle{
+    display:none;
+    background:var(--panel);
+    color:var(--text);
+    border:1px solid var(--line);
+    border-radius:22px;
+    font-size:13px;
+    font-weight:600;
+    padding:11px 17px;
+    letter-spacing:0.3px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+    cursor:pointer;
+  }
+  .layers-toggle.on{ background:var(--accent); color:#1A1204; border-color:var(--accent); }
   .layer-btn{
     background:transparent;
     color:var(--text-dim);
@@ -1763,7 +1787,8 @@
   <div id="map-wrap">
     <button id="mobileMenuBtn" title="Menu">☰</button>
     <div id="hint">TAP THE MAP TO PLACE YOUR SITE</div>
-    <div id="layerSwitch">
+    <div id="layerDock">
+      <div id="layerSwitch">
       <button class="layer-btn active" data-layer="aerial">Aerial</button>
       <button class="layer-btn" data-layer="street">Street</button>
       <button class="layer-btn" data-layer="usgstopo" title="USGS Topo — official U.S. government topographic data">USGS</button>
@@ -1789,6 +1814,8 @@
       <button class="layer-btn" id="thermalToggleBtn" title="Thermal drift — which way your scent drains at each spot, from the LiDAR slope, flipped by time of day (rising uphill in the morning, falling downhill in the evening)">🌡 Thermals</button>
       <button class="layer-btn" id="scentToggleBtn" title="Scent cones — where your scent blows from each hunt spot right now (wind + thermals combined). A wider cone = swirlier, less certain. Red = where a deer would wind you.">🌬 Scent cones</button>
       <button class="layer-btn" id="landcoverToggleBtn" title="Field vs woods — the app's read of your property from the aerial (blue = woods, pink = field, yellow = cutover). Scan/verify it in Property Setup; the Walk-In planner uses it to route through cover.">🌲 Cover</button>
+      </div>
+      <button id="layersToggleBtn" class="layers-toggle" aria-expanded="false" title="Show / hide the map layers">⛰ Layers</button>
     </div>
     <button id="followMeBtn" title="Follow my location">🧭</button>
     <button id="recordTrailBtn" title="Record a trail"><span class="record-dot"></span></button>
@@ -1797,7 +1824,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 268</div>
+    <div id="buildBadge">BUILD 269</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10837,6 +10864,16 @@
       updateContourColor();      // white contour lines on the aerial, black on the light bases
     });
   });
+  // ⛰ Layers pill (phone): tap to reveal/hide the whole layer tray so the map keeps the screen in the field
+  (function(){
+    var t = document.getElementById('layersToggleBtn'), dock = document.getElementById('layerDock');
+    if (!t || !dock) return;
+    t.addEventListener('click', function(){
+      var open = dock.classList.toggle('open');
+      t.classList.toggle('on', open);
+      t.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+  })();
 
   // Resilience: some networks (ISP/router-level filtering, certain mobile carriers or
   // DNS-blocking apps) block Esri's tile domain specifically even though other sites work
