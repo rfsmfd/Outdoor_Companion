@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 289</div>
+    <div id="buildBadge">BUILD 290</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13348,6 +13348,40 @@
     return counts;
   }
 
+  // Fishing catch buckets — group catches by fish size and by season, so patterns ("my big ones come on
+  // falling pressure in the fall") fall out of the founder's own log. Natural-order labels handled below.
+  function weightBucket(lb){
+    if (lb == null || !(lb > 0)) return null;
+    if (lb < 1) return 'Under 1 lb';
+    if (lb < 2) return '1-2 lb';
+    if (lb < 3) return '2-3 lb';
+    if (lb < 4) return '3-4 lb';
+    if (lb < 5) return '4-5 lb';
+    if (lb < 7) return '5-7 lb';
+    if (lb < 10) return '7-10 lb';
+    return '10 lb+';
+  }
+  function lengthBucket(inch){
+    if (inch == null || !(inch > 0)) return null;
+    if (inch < 8) return 'Under 8"';
+    if (inch < 12) return '8-12"';
+    if (inch < 15) return '12-15"';
+    if (inch < 18) return '15-18"';
+    if (inch < 22) return '18-22"';
+    return '22"+';
+  }
+  function seasonBucket(ts){
+    if (!ts) return null;
+    var m = new Date(ts).getMonth();
+    if (m === 11 || m <= 1) return 'Winter';
+    if (m <= 4) return 'Spring';
+    if (m <= 7) return 'Summer';
+    return 'Fall';
+  }
+  // Natural (not by-count) chart order for the size/season buckets — must match the labels above exactly.
+  var WEIGHT_BUCKET_ORDER = ['Under 1 lb','1-2 lb','2-3 lb','3-4 lb','4-5 lb','5-7 lb','7-10 lb','10 lb+'];
+  var LENGTH_BUCKET_ORDER = ['Under 8"','8-12"','12-15"','15-18"','18-22"','22"+'];
+  var SEASON_BUCKET_ORDER = ['Spring','Summer','Fall','Winter'];
   function tempBucket(tempF){
     if (tempF == null) return null;
     if (tempF < 0) return 'Under 0°F';
@@ -13476,12 +13510,20 @@
   // -> Run. Deliberately generic and reusable rather than hardcoded, so it directly
   // serves both "give me some common starter queries" and "let me build my own" — the
   // same mechanism serves both, per the founder's own stated goal for this feature.
+  // Break-down dimensions. The 3rd element gates a dimension to one module ('hunting'|'fishing'); no 3rd
+  // element = shared (all the environmental ones apply equally to a catch or a sighting).
   var QUERY_GROUPBY_OPTIONS = [
     ['moon','Moon Phase'], ['illum','Moon Illumination %'], ['wind','Wind Direction'],
     ['pressure','Pressure Trend'], ['pressureval','Barometric Pressure'], ['temp','Temperature'],
     ['condition','Weather Condition'], ['sun','Time of Day'], ['hour','Actual Clock Time'],
-    ['solunar','Solunar Period'], ['site','Site'], ['property','Property'], ['buck','Buck Profile']
+    ['solunar','Solunar Period'], ['season','Season'], ['site','Site'], ['property','Property'],
+    ['buck','Buck Profile','hunting'],
+    ['fishspecies','Species','fishing'], ['lure','Lure','fishing'], ['lurecolor','Lure Color','fishing'],
+    ['weightclass','Weight','fishing'], ['lengthclass','Length','fishing']
   ];
+  function queryGroupByOptionsForModule(){
+    return QUERY_GROUPBY_OPTIONS.filter(function(o){ return !o[2] || o[2] === activeModule; });
+  }
 
   function queryGroupKeyForObs(o, dimension){
     if (dimension === 'moon') return o.moonPhase ? o.moonPhase.name : null;
@@ -13511,6 +13553,13 @@
     }
     if (dimension === 'species') return o.species || null;
     if (dimension === 'buckclass') return eventBuckClass(o);
+    if (dimension === 'season') return seasonBucket(o.createdAt);
+    // ----- fishing catch dimensions -----
+    if (dimension === 'fishspecies'){ var ft = getActiveObsTypes()[o.type]; return ft ? ft.label : (o.type || null); }
+    if (dimension === 'lure') return (o.lure && o.lure.trim()) ? o.lure.trim() : null;
+    if (dimension === 'lurecolor') return (o.lureColor && o.lureColor.trim()) ? o.lureColor.trim() : null;
+    if (dimension === 'weightclass') return weightBucket(o.weight);
+    if (dimension === 'lengthclass') return lengthBucket(o.length);
     return null;
   }
 
@@ -13535,11 +13584,12 @@
     var section = document.createElement('div');
     section.className = 'query-builder';
 
-    // Break Down By is analytical dimensions only now — Species/Buck live in the shared
-    // Subject filter above, not here. Guard against a stale selection from before.
-    if (queryGroupBy === 'species' || queryGroupBy === 'buckclass') queryGroupBy = 'moon';
-    var groupByOptionsHtml = QUERY_GROUPBY_OPTIONS
-      .filter(function(pair){ return activeModule === 'hunting' || pair[0] !== 'buck'; })
+    // Break Down By is analytical dimensions only now — Species/Buck live in the shared Subject filter
+    // above, not here. Also guard against a dimension left selected from the OTHER module (e.g. a Buck
+    // break-down still selected after switching to Fishing) — fall back to Moon Phase, valid in both.
+    var _opts = queryGroupByOptionsForModule();
+    if (!_opts.some(function(o){ return o[0] === queryGroupBy; })) queryGroupBy = 'moon';
+    var groupByOptionsHtml = _opts
       .map(function(pair){ return '<option value="'+pair[0]+'"'+(queryGroupBy===pair[0]?' selected':'')+'>'+pair[1]+'</option>'; }).join('');
 
     section.innerHTML =
@@ -14131,6 +14181,12 @@
       ? HOUR_BUCKET_ORDER.filter(function(h){ return counts[h]; })
       : (queryGroupBy === 'illum')
       ? ILLUM_BUCKET_ORDER.filter(function(i){ return counts[i]; })
+      : (queryGroupBy === 'weightclass')
+      ? WEIGHT_BUCKET_ORDER.filter(function(w){ return counts[w]; })
+      : (queryGroupBy === 'lengthclass')
+      ? LENGTH_BUCKET_ORDER.filter(function(l){ return counts[l]; })
+      : (queryGroupBy === 'season')
+      ? SEASON_BUCKET_ORDER.filter(function(s){ return counts[s]; })
       : Object.keys(counts).sort(function(a,b){ return counts[b] - counts[a]; });
     if (labels.length === 0){
       resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">Nothing to break down — none of these sightings have that data yet.</div>';
@@ -14372,7 +14428,10 @@
           __source:'obs', type:o.type, createdAt:o.createdAt, moonPhase:o.moonPhase||null,
           weatherStatus:o.weatherStatus, weather:o.weather||null, solunarPeriod:o.solunarPeriod||null,
           siteId:o.siteId||null, propertyId:o.propertyId||null, buckProfileId:o.buckProfileId||null,
-          species:null, isBuck:(o.type==='buck'), lat:(typeof o.lat==='number'?o.lat:null), lng:(typeof o.lng==='number'?o.lng:null)
+          species:null, isBuck:(o.type==='buck'), lat:(typeof o.lat==='number'?o.lat:null), lng:(typeof o.lng==='number'?o.lng:null),
+          // fishing catch fields — carried through so the Query Builder can break catches down by them
+          lure:o.lure||null, lureColor:o.lureColor||null,
+          weight:(typeof o.weight==='number'?o.weight:null), length:(typeof o.length==='number'?o.length:null)
         });
       }
     }
@@ -14542,6 +14601,26 @@
       var buckClassLabels = ['Buck','Antlerless / Other'].filter(function(l){ return buckClassCounts[l]; });
       if (buckClassLabels.length){
         buildBarChart(makeChartCanvas(chartsGrid, '🦌 Bucks vs. Antlerless', 'chartBuckClass'), buckClassLabels, buckClassLabels.map(function(l){ return buckClassCounts[l]; }), 'Count');
+      }
+    }
+
+    // Fishing quick-glance charts — what's biting, on what, and how big — the summary version of the
+    // Query Builder's fishing dimensions, built from the same catch data.
+    if (activeModule === 'fishing'){
+      var fishSpCounts = groupCount(relevantObs, function(o){ var t = getActiveObsTypes()[o.type]; return t ? t.label : null; });
+      var fishSpLabels = Object.keys(fishSpCounts).sort(function(a,b){ return fishSpCounts[b] - fishSpCounts[a]; });
+      if (fishSpLabels.length){
+        buildBarChart(makeChartCanvas(chartsGrid, '🐟 By Species', 'chartFishSp'), fishSpLabels, fishSpLabels.map(function(s){ return fishSpCounts[s]; }), 'Count');
+      }
+      var lureCounts = groupCount(relevantObs, function(o){ return (o.lure && o.lure.trim()) ? o.lure.trim() : null; });
+      var lureLabels = Object.keys(lureCounts).sort(function(a,b){ return lureCounts[b] - lureCounts[a]; }).slice(0, 10);
+      if (lureLabels.length){
+        buildBarChart(makeChartCanvas(chartsGrid, '🎣 By Lure (top 10)', 'chartLure'), lureLabels, lureLabels.map(function(l){ return lureCounts[l]; }), 'Count');
+      }
+      var wCounts = groupCount(relevantObs, function(o){ return weightBucket(o.weight); });
+      var wLabels = WEIGHT_BUCKET_ORDER.filter(function(w){ return wCounts[w]; });
+      if (wLabels.length){
+        buildBarChart(makeChartCanvas(chartsGrid, '⚖️ By Weight', 'chartWeight'), wLabels, wLabels.map(function(w){ return wCounts[w]; }), 'Count');
       }
     }
   }
