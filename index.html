@@ -214,6 +214,9 @@
     #layerDock:not(.open) #layerSwitch{ display:none; }
     .layer-btn{ font-size:16px; padding:13px 18px; }
     #followMeBtn{ bottom:78px; width:50px; height:50px; font-size:22px; }
+    /* forecast time-scrubber: narrow it and sit it to the RIGHT of the ⛰ Layers pill so they stop overlapping */
+    #projTimeCtrl{ left:142px !important; right:10px !important; bottom:26px !important; transform:none !important; width:auto !important; padding:7px 11px !important; gap:5px !important; }
+    #projTimeCtrl span{ font-size:11px !important; }
 
     /* Readability: everything in the sidebar was sized for a desktop screen — scale up. */
     #brand h1{ font-size:25px; }
@@ -1830,7 +1833,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 271</div>
+    <div id="buildBadge">BUILD 272</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
