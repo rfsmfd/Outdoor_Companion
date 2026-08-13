@@ -1797,7 +1797,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 267</div>
+    <div id="buildBadge">BUILD 268</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7172,7 +7172,8 @@
       prop.centerLat = c.lat; prop.centerLng = c.lng;
       try { await saveProperty(prop); } catch (err) { console.error('Outdoor Companion: failed to save boundary', err); }
       renderPropertyBoundaries();
-      showToast('Boundary saved for ' + prop.name);
+      renderPropertySelect();   // refresh the dropdown so the acreage recomputes off the new boundary
+      showToast('Boundary saved for ' + prop.name + ' · ' + acresLabel(polygonAcres(prop.boundary)));
       await offerRehomeForBoundary(prop);
     });
   }
