@@ -1844,7 +1844,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 276</div>
+    <div id="buildBadge">BUILD 277</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1915,6 +1915,10 @@
       </div>
       <button class="btn-ghost" id="logLocationJumpToPropertyBtn" type="button" style="width:100%;margin-bottom:8px;font-size:11px;">🏡 Jump to Property</button>
       <div id="logLocationPropertyList" style="display:none;margin-bottom:8px;max-height:140px;overflow-y:auto;"></div>
+      <div id="logBuckRow" style="display:none;margin-bottom:10px;">
+        <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:6px;">Which buck? <span style="opacity:.65;">optional — tags this sighting to him so it lands on his timeline</span></div>
+        <div id="logBuckChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
       <button class="btn-primary" id="logLocationUseMyLocationBtn" style="width:100%;margin-bottom:8px;background:#3B9EFF;color:#0A1A2E;">📍 Use My Location (fast)</button>
       <button class="btn-primary" id="logLocationConfirmBtn" style="width:100%;margin-bottom:8px;">Confirm This Spot</button>
       <button class="btn-ghost" id="logLocationCancelBtn" style="width:100%;">Cancel</button>
@@ -12024,6 +12028,7 @@
       weather: null,
       weatherStatus: 'pending' // 'pending' | 'ok' | 'unavailable'
     };
+    if (type === 'buck' && _logBuckId) obs.buckProfileId = _logBuckId;   // tag the sighting to the named buck → his timeline
     observations.push(obs);
     try{ await saveObservation(obs); }catch(e){ console.error('Outdoor Companion: failed to save observation', e); }
 
@@ -12043,8 +12048,10 @@
     renderObsMarkers();
     if (activeTab === 'log') renderLogList();
     var t = getActiveObsTypes()[type];
-    var msg = t.label + ' logged' + (match ? ' near ' + match.site.name : '') + (approx ? ' (approx. location)' : '');
+    var _bp = (type === 'buck' && obs.buckProfileId) ? (buckProfiles.filter(function(b){ return b.id === obs.buckProfileId; })[0]) : null;
+    var msg = t.label + (_bp ? ' — ' + _bp.name : '') + ' logged' + (match ? ' near ' + match.site.name : '') + (approx ? ' (approx. location)' : '');
     showToast(msg);
+    _logBuckId = null;   // consumed
     // Always fly to and confirm the new pin — GPS accuracy varies a lot, so don't
     // assume it landed somewhere already visible on screen.
     if (obsMarkers[obs.id]){
@@ -12080,6 +12087,26 @@
   // one-tap fast path for the common case of logging right where you're standing, but lets
   // you pan the map to the true spot when it isn't.
   var pendingLogType = null;
+  // Quick-Log buck tagging: when you log a Buck sighting, pick which named buck right in the confirm step so it
+  // lands on his movement timeline in the same breath (no separate open-it-later step you'd skip on stand).
+  var _logBuckId = null;
+  function renderLogBuckChips(){
+    var wrap = document.getElementById('logBuckChips'); if (!wrap) return;
+    wrap.innerHTML = '';
+    (typeof buckProfiles !== 'undefined' ? buckProfiles : []).forEach(function(b){
+      var chip = document.createElement('button');
+      chip.type = 'button'; chip.className = 'chip' + (_logBuckId === b.id ? ' active' : '');
+      chip.textContent = '🦌 ' + b.name;
+      chip.addEventListener('click', function(){ _logBuckId = (_logBuckId === b.id) ? null : b.id; renderLogBuckChips(); });
+      wrap.appendChild(chip);
+    });
+  }
+  function _showLogBuckRow(type){
+    var row = document.getElementById('logBuckRow'); if (!row) return;
+    var isBuck = (type === 'buck') && (typeof buckProfiles !== 'undefined') && buckProfiles.length > 0;
+    row.style.display = isBuck ? 'block' : 'none';
+    if (isBuck) renderLogBuckChips();
+  }
   var logLocationMap = null;
   var logLocationPos = null;
 
@@ -12119,7 +12146,7 @@
     var o = observations.filter(function(x){ return x.id === obsId; })[0];
     if (!o) return;
     pendingRepositionObsId = obsId;
-    pendingLogType = null;
+    pendingLogType = null; _logBuckId = null; _showLogBuckRow(null);
     document.getElementById('logLocationTypeName').textContent = 'Adjust Location';
     logLocationPos = {lat: o.lat, lng: o.lng};
     document.getElementById('logLocationCoords').textContent = fmtCoord(o.lat) + ', ' + fmtCoord(o.lng);
@@ -12180,6 +12207,7 @@
 
   function logObservation(type){
     pendingLogType = type;
+    _logBuckId = null; _showLogBuckRow(type);   // offer the "which buck?" tag right here for a Buck sighting
     var t = getActiveObsTypes()[type];
     document.getElementById('logLocationTypeName').textContent = t.label;
     var pos = lastKnownPos || (function(){ var c = map.getCenter(); return {lat:c.lat, lng:c.lng}; })();
@@ -12218,7 +12246,7 @@
     if (!s) return;
     pendingRepositionSiteId = siteId;
     pendingRepositionObsId = null;
-    pendingLogType = null;
+    pendingLogType = null; _logBuckId = null; _showLogBuckRow(null);
     var tl = getActiveTypes()[s.type];
     document.getElementById('logLocationTypeName').textContent = 'Move ' + (tl ? tl.label : 'Stand');
     logLocationPos = {lat: s.lat, lng: s.lng};
