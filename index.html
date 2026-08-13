@@ -1797,7 +1797,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 265</div>
+    <div id="buildBadge">BUILD 266</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9886,9 +9886,23 @@
   // For the hunter who can't picture high vs low from contour lines: draw a line and see the ground from the SIDE
   // (a plain up/down graph), or tap a spot and get its height — tap a second and get the difference. Same 3DEP
   // getSamples the thermals use; feet, because that's how topo reads on the ground.
-  var _elevMode = null, _elevStart = null, _elevLastSpot = null, _elevLayer = null;
+  var _elevMode = null, _elevPathPts = [], _elevDraft = null, _elevLastSpot = null, _elevLayer = null;
   function _elevGroup(){ if (!_elevLayer) _elevLayer = L.layerGroup().addTo(map); return _elevLayer; }
-  function clearElevLayer(){ if (_elevLayer){ map.removeLayer(_elevLayer); _elevLayer = null; } var ep = document.getElementById('elevProfilePanel'); if (ep) ep.remove(); _elevLastSpot = null; }
+  function _elevClearDraft(){ if (_elevDraft){ map.removeLayer(_elevDraft); _elevDraft = null; } }
+  // redraw the in-progress profile path (line through the clicked points + a dot at each) as you build the curve
+  function _elevRedrawDraft(){
+    _elevClearDraft(); if (!_elevPathPts.length) return; _elevDraft = L.layerGroup().addTo(map);
+    if (_elevPathPts.length > 1) L.polyline(_elevPathPts.map(function(p){ return [p.lat, p.lng]; }), { color: '#E8823F', weight: 3, dashArray: '5 5', interactive: false }).addTo(_elevDraft);
+    _elevPathPts.forEach(function(p, i){ L.circleMarker([p.lat, p.lng], { radius: i === 0 ? 6 : 4, color: '#fff', weight: 2, fillColor: '#E8823F', fillOpacity: 1, interactive: false }).addTo(_elevDraft); });
+  }
+  function clearElevLayer(){ if (_elevLayer){ map.removeLayer(_elevLayer); _elevLayer = null; } _elevClearDraft(); _elevPathPts = []; var ep = document.getElementById('elevProfilePanel'); if (ep) ep.remove(); _elevLastSpot = null; }
+  // sample N points spread EVENLY BY DISTANCE along a multi-point path (so a curved line's x-axis stays true distance)
+  function _elevSamplePath(path, N){
+    var segLens = [], total = 0; for (var i = 1; i < path.length; i++){ var d = distMeters(path[i-1].lat, path[i-1].lng, path[i].lat, path[i].lng); segLens.push(d); total += d; }
+    function at(target){ if (target <= 0 || total === 0) return path[0]; var acc = 0; for (var j = 1; j < path.length; j++){ var L = segLens[j-1]; if (acc + L >= target){ var f = L > 0 ? (target - acc) / L : 0; return { lat: path[j-1].lat + (path[j].lat - path[j-1].lat) * f, lng: path[j-1].lng + (path[j].lng - path[j-1].lng) * f }; } acc += L; } return path[path.length - 1]; }
+    var pts = []; for (var k = 0; k < N; k++){ var ll = at(total * (k / (N - 1))); pts.push([ll.lng, ll.lat]); }
+    return { pts: pts, total: total };
+  }
   function m2ft(m){ return m * 3.28084; }
   async function sampleElevPoints(pts){
     try {
@@ -9902,17 +9916,19 @@
   function setElevMode(mode){
     _elevMode = mode;
     try { map.getContainer().style.cursor = mode ? 'crosshair' : ''; } catch (e) {}
-    ['epProfileBtn', 'epSpotBtn'].forEach(function(id){ var b = document.getElementById(id); if (b){ var on = (mode === (id === 'epProfileBtn' ? 'profile-a' : 'spot')) || (id === 'epProfileBtn' && mode === 'profile-b'); b.style.background = on ? '#3c6d42' : '#26332b'; b.style.color = on ? '#fff' : '#dff0e4'; } });
+    ['epProfileBtn', 'epSpotBtn'].forEach(function(id){ var b = document.getElementById(id); if (b){ var on = (id === 'epProfileBtn' && mode === 'profile') || (id === 'epSpotBtn' && mode === 'spot'); b.style.background = on ? '#3c6d42' : '#26332b'; b.style.color = on ? '#fff' : '#dff0e4'; } });
+    var fin = document.getElementById('epFinishBtn'); if (fin) fin.style.display = (mode === 'profile') ? 'inline-block' : 'none';
   }
-  async function drawElevProfile(a, b){
-    var N = 64, pts = []; for (var i = 0; i < N; i++){ var f = i / (N - 1); pts.push([a.lng + (b.lng - a.lng) * f, a.lat + (b.lat - a.lat) * f]); }
+  async function drawElevProfile(path){
+    if (!path || path.length < 2) return;
+    var sp = _elevSamplePath(path, 72);
     showToast('Reading the ground…');
-    var vals = await sampleElevPoints(pts); if (!vals){ showToast('Couldn\'t read the elevation — try again.'); return; }
+    var vals = await sampleElevPoints(sp.pts); if (!vals){ showToast('Couldn\'t read the elevation — try again.'); return; }
     var g = _elevGroup();
-    L.polyline([[a.lat, a.lng], [b.lat, b.lng]], { color: '#E8823F', weight: 3, dashArray: '5 5', interactive: false }).addTo(g);
-    L.circleMarker([a.lat, a.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#E8823F', fillOpacity: 1, interactive: false }).addTo(g);
-    L.circleMarker([b.lat, b.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#D94A2E', fillOpacity: 1, interactive: false }).addTo(g);
-    showElevProfilePanel(vals, distMeters(a.lat, a.lng, b.lat, b.lng));
+    L.polyline(path.map(function(p){ return [p.lat, p.lng]; }), { color: '#E8823F', weight: 3, dashArray: '5 5', interactive: false }).addTo(g);
+    L.circleMarker([path[0].lat, path[0].lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#E8823F', fillOpacity: 1, interactive: false }).addTo(g);
+    L.circleMarker([path[path.length - 1].lat, path[path.length - 1].lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#D94A2E', fillOpacity: 1, interactive: false }).addTo(g);
+    showElevProfilePanel(vals, sp.total);
   }
   function showElevProfilePanel(valsM, totalM){
     var ft = valsM.map(function(v){ return isFinite(v) ? m2ft(v) : NaN; });
@@ -9956,8 +9972,7 @@
       L.marker([e.latlng.lat, e.latlng.lng], { interactive: false, icon: L.divIcon({ className: '', html: '<div style="transform:translate(10px,-50%);white-space:nowrap;background:rgba(15,20,17,0.92);color:#fff;font:700 11px sans-serif;padding:2px 7px;border-radius:6px;border:1px solid #E8823F;">' + label + '</div>', iconSize: [0, 0] }) }).addTo(g);
       _elevLastSpot = ftv; return;
     }
-    if (_elevMode === 'profile-a'){ _elevStart = e.latlng; setElevMode('profile-b'); L.circleMarker([e.latlng.lat, e.latlng.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#E8823F', fillOpacity: 1, interactive: false }).addTo(_elevGroup()); showToast('…now click the END of the line.'); return; }
-    if (_elevMode === 'profile-b'){ var a = _elevStart; setElevMode(null); drawElevProfile(a, e.latlng); return; }
+    if (_elevMode === 'profile'){ _elevPathPts.push(e.latlng); _elevRedrawDraft(); showToast(_elevPathPts.length + ' point' + (_elevPathPts.length === 1 ? ' — click more to bend the line' : 's — keep clicking, then tap ✓ Finish') + '.'); return; }
   });
   (function(){
     var btn = document.getElementById('elevToolBtn'); if (!btn) return;
@@ -9970,12 +9985,14 @@
       bar.style.cssText = 'position:fixed;left:50%;bottom:110px;transform:translateX(-50%);z-index:100013;background:#14201a;border:1px solid #2c3f34;border-radius:12px;padding:9px 11px;color:#e8f0ea;box-shadow:0 10px 30px rgba(0,0,0,.55);font-family:inherit;display:flex;align-items:center;gap:7px;';
       bar.innerHTML = '<span style="font-size:11px;color:#8aa596;margin-right:2px;">📈 Elevation:</span>' +
         '<button id="epProfileBtn" style="font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;">Draw profile</button>' +
+        '<button id="epFinishBtn" style="display:none;font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid #63C6FF;background:#22323b;color:#dff0e4;cursor:pointer;font-weight:700;">✓ Finish</button>' +
         '<button id="epSpotBtn" style="font-size:12px;padding:6px 10px;border-radius:8px;border:1px solid #3c6d42;background:#26332b;color:#dff0e4;cursor:pointer;">Tap for height</button>' +
         '<button id="epClearBtn" style="font-size:12px;padding:6px 9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#9db0a3;cursor:pointer;">Clear</button>' +
         '<button id="epCloseBtn" style="background:transparent;border:none;color:#9db0a3;font-size:19px;cursor:pointer;line-height:1;">×</button>';
       document.body.appendChild(bar);
-      bar.querySelector('#epProfileBtn').addEventListener('click', function(){ _elevStart = null; setElevMode('profile-a'); showToast('📈 Click the START of your line (across a draw or ridge), then the END.'); });
-      bar.querySelector('#epSpotBtn').addEventListener('click', function(){ setElevMode('spot'); _elevLastSpot = null; showToast('📍 Tap any spot to read its height. Tap a second to see the difference.'); });
+      bar.querySelector('#epProfileBtn').addEventListener('click', function(){ _elevPathPts = []; _elevClearDraft(); setElevMode('profile'); showToast('📈 Click along your line — across a draw or ridge, bend it however you want — then tap ✓ Finish.'); });
+      bar.querySelector('#epFinishBtn').addEventListener('click', function(){ if (_elevPathPts.length < 2){ showToast('Click at least 2 points first.'); return; } var path = _elevPathPts.slice(); _elevPathPts = []; _elevClearDraft(); setElevMode(null); drawElevProfile(path); });
+      bar.querySelector('#epSpotBtn').addEventListener('click', function(){ _elevPathPts = []; _elevClearDraft(); setElevMode('spot'); _elevLastSpot = null; showToast('📍 Tap any spot to read its height. Tap a second to see the difference.'); });
       bar.querySelector('#epClearBtn').addEventListener('click', function(){ clearElevLayer(); setElevMode(null); showToast('Cleared.'); });
       bar.querySelector('#epCloseBtn').addEventListener('click', function(){ clearElevLayer(); closeBar(); });
     });
