@@ -1795,7 +1795,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 262</div>
+    <div id="buildBadge">BUILD 263</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6952,7 +6952,7 @@
     });
   }
   // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
-  var coverEditMode = false, _coverDrawer = null, _coverUndo = null, _coverLineRadius = 2;   // drain corridor radius in cells (1≈narrow / 2≈med / 3≈wide)
+  var coverEditMode = false, _coverDrawer = null, _coverUndo = null, _coverLineRadius = 2, _coverPaint = null;   // drain corridor radius in cells (1≈narrow / 2≈med / 3≈wide); _coverPaint = active brush stroke
   function propWithCoverAt(lat, lng){
     var list = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return (!p.module || p.module === activeModule) && p.landcover && p.landcover.grid; });
     function inb(p){ var b = p.landcover.bbox; return lat <= b.n && lat >= b.s && lng <= b.e && lng >= b.w; }
@@ -6981,7 +6981,35 @@
     saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: undo save failed', e); }); renderLandcoverOverlay(); updateCoverUndoBtn(); showToast('Undid the last cover change.');
   }
   function updateCoverUndoBtn(){ var b = document.getElementById('lcUndoBtn'); if (b) b.style.display = _coverUndo ? 'inline-block' : 'none'; }
-  function setActiveCoverTool(id){ ['lcBoxBtn','lcLineBtn','lcDrawBtn'].forEach(function(bid){ var el = document.getElementById(bid); if (el){ var on = (bid === id); el.style.background = on ? '#3c6d42' : '#26332b'; el.style.color = on ? '#fff' : '#dff0e4'; } }); }
+  function setActiveCoverTool(id){ ['lcBoxBtn','lcLineBtn','lcDrawBtn','lcPaintBtn'].forEach(function(bid){ var el = document.getElementById(bid); if (el){ var on = (bid === id); el.style.background = on ? '#3c6d42' : '#22323b'; el.style.color = on ? '#fff' : '#dff0e4'; } }); }
+  // ---- 🖌 PAINT brush: the dead-simple way — drag over the ground and it paints, release to apply. No vertices,
+  // no double-click, no flood-fill. Bounded to the brush width. One stroke = one ↩ Undo. This is the drain tool. ----
+  function _coverPaintAt(ll){
+    var p = _coverPaint; if (!p) return; if (!p.prop) p.prop = propWithCoverAt(ll.lat, ll.lng); var prop = p.prop; if (!prop || !prop.landcover) return;
+    var lc = prop.landcover, x = Math.floor((ll.lng - lc.bbox.w) / (lc.bbox.e - lc.bbox.w) * lc.cols), y = Math.floor((lc.bbox.n - ll.lat) / (lc.bbox.n - lc.bbox.s) * lc.rows);
+    var R = Math.max(0, _coverLineRadius | 0), R2 = R * R + 0.001, added = false;
+    for (var dy = -R; dy <= R; dy++) for (var dx = -R; dx <= R; dx++){ if (dx * dx + dy * dy > R2) continue; var xx = x + dx, yy = y + dy; if (xx < 0 || yy < 0 || xx >= lc.cols || yy >= lc.rows) continue; var idx = yy * lc.cols + xx; if (!p.cellSet[idx]){ p.cellSet[idx] = 1; p.cells.push(idx); added = true; } }
+    if (added && p.cells.length - (p._drawn || 0) >= 3){ p._drawn = p.cells.length; showCoverSelection(prop, p.cells); }   // throttle the live preview
+  }
+  function startCoverPaint(){
+    if (_coverPaint){ stopCoverPaint(); return; }                       // tap again = stop
+    if (!coverEditMode) setCoverEditMode(true);
+    if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; }
+    pickCoverType(function(code){
+      _coverPaint = { type: code, prop: null, cellSet: {}, cells: [], painting: false };
+      try { map.dragging.disable(); } catch (e) {}
+      try { map.getContainer().style.cursor = 'crosshair'; } catch (e) {}
+      setActiveCoverTool('lcPaintBtn');
+      var wName = _coverLineRadius <= 1 ? 'narrow' : (_coverLineRadius >= 3 ? 'wide' : 'medium');
+      showToast('🖌 Paint ON — drag over the drain to paint ' + COVER_TYPES[code].label + ' (' + wName + ' brush). Let go to apply; drag again for more. Tap 🖌 to stop.');
+    }, 'Paint which cover? (pick Drainage for a bottom)');
+  }
+  function stopCoverPaint(){ _coverPaint = null; try { map.dragging.enable(); } catch (e) {} try { map.getContainer().style.cursor = coverEditMode ? 'crosshair' : ''; } catch (e) {} setActiveCoverTool(null); clearCoverSelection(); showToast('🖌 Paint off.'); }
+  map.on('mousedown', function(e){ if (!_coverPaint) return; _coverPaint.painting = true; _coverPaint.prop = null; _coverPaint.cellSet = {}; _coverPaint.cells = []; _coverPaintAt(e.latlng); });
+  map.on('mousemove', function(e){ if (_coverPaint && _coverPaint.painting) _coverPaintAt(e.latlng); });
+  map.on('mouseup', function(){ if (!_coverPaint || !_coverPaint.painting) return; _coverPaint.painting = false; var p = _coverPaint;
+    if (p.prop && p.cells.length){ applyTypeToCells(p.prop, p.cells, p.type); showToast('Painted ~' + acresOf(p.prop.landcover, p.cells.length).toFixed(1) + ' ac ' + COVER_TYPES[p.type].label + '. ↩ Undo if it slipped.'); }
+    clearCoverSelection(); p.cells = []; p.cellSet = {}; });
   // ---- 🌿 SMZ (Streamside Management Zone) auto-fill: grow the Drainage corridor to the real stream BOTTOM ----
   // A drainage isn't a hairline — it's the creek plus its wooded bottom (the loggers' un-cut hardwood buffer through
   // the pine). We anchor on the NHD drainage cells already in the grid, read the LiDAR elevation, and grow Drainage
@@ -7086,7 +7114,7 @@
     try { map.getContainer().style.cursor = v ? 'crosshair' : ''; } catch (e) {}
     var eb = document.getElementById('lcEditBtn'); if (eb){ eb.textContent = v ? '✓ Done' : '✏️ Edit'; eb.style.background = v ? '#2E4636' : 'transparent'; }
     ['lcDrawBtn', 'lcBoxBtn', 'lcLineBtn', 'lcWidthBtn'].forEach(function(idd){ var bx = document.getElementById(idd); if (bx) bx.style.display = v ? 'inline-block' : 'none'; });
-    if (!v){ if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; } clearCoverSelection(); setActiveCoverTool(null); }
+    if (!v){ if (_coverDrawer){ try { _coverDrawer.disable(); } catch (e) {} _coverDrawer = null; } if (_coverPaint) stopCoverPaint(); clearCoverSelection(); setActiveCoverTool(null); }
     updateCoverUndoBtn();
     if (v) showToast('Tap a block to relabel it · ▭ box · ▱ area · 〰 line (for drains). Tap ✓ Done when finished.');
   }
@@ -7149,7 +7177,7 @@
     });
   }
   map.on('click', function(e){
-    if (!coverEditMode || _coverDrawer) return;
+    if (!coverEditMode || _coverDrawer || _coverPaint) return;
     var prop = propWithCoverAt(e.latlng.lat, e.latlng.lng); if (!prop){ showToast('Tap inside a scanned property to relabel a block.'); return; }
     var lc = prop.landcover, idx = cellIndexAt(lc, e.latlng.lat, e.latlng.lng); if (idx < 0) return;
     var cells = floodFillRegion(lc, idx), cur = COVER_TYPES[ensureTypes(lc).charAt(idx)];
@@ -7167,7 +7195,8 @@
         '<span style="white-space:nowrap;">' + toolBtn('lcUndoBtn', '↩', 'Undo last change') + toolBtn('lcWidthBtn', '〰 med', 'Drain corridor width — tap to cycle narrow/med/wide') + toolBtn('lcBoxBtn', '▭', 'Box-select a patch') + toolBtn('lcLineBtn', '〰', 'Trace a line (drains)') + toolBtn('lcDrawBtn', '▱', 'Draw an area') +
         '<button id="lcEditBtn" style="font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c4d42;background:transparent;color:#cfe0d6;cursor:pointer;">✏️ Edit</button></span></div>' +
         ['R','A','F','H','P','W','C','D','S','O'].map(sw).join('') +
-        '<button id="lcSmzBtn" title="Auto-fill the wooded stream bottoms (SMZ) from the LiDAR low ground + your NHD drains" style="width:100%;margin-top:7px;font-size:10.5px;padding:4px 6px;border-radius:6px;border:1px solid #3c6d42;background:#22323b;color:#dff0e4;cursor:pointer;">🌿 Fill drain bottoms (SMZ)</button>' +
+        '<button id="lcPaintBtn" title="Drag over the ground to paint a cover type — the simple brush (great for drains)" style="width:100%;margin-top:8px;font-size:11.5px;font-weight:700;padding:6px;border-radius:7px;border:1px solid #3c6d42;background:#2E4636;color:#dff0e4;cursor:pointer;">🖌 Paint (drag to fill)</button>' +
+        '<button id="lcSmzBtn" title="Auto-fill the wooded stream bottoms (SMZ) from the LiDAR low ground + your NHD drains" style="width:100%;margin-top:6px;font-size:10.5px;padding:4px 6px;border-radius:6px;border:1px solid #3c6d42;background:#22323b;color:#dff0e4;cursor:pointer;">🌿 Fill drain bottoms (SMZ)</button>' +
         '<div style="display:flex;align-items:center;gap:6px;margin-top:7px;border-top:1px solid #2c3f34;padding-top:6px;"><span style="font-size:10px;color:#8aa596;">Fade</span><input id="lcOpacity" type="range" min="15" max="100" value="' + Math.round(landcoverOpacity * 100) + '" style="flex:1;accent-color:#7CCB7C;cursor:pointer;"></div>';
       document.body.appendChild(el);
       el.querySelector('#lcEditBtn').addEventListener('click', function(){ setCoverEditMode(!coverEditMode); });
@@ -7175,6 +7204,7 @@
       el.querySelector('#lcBoxBtn').addEventListener('click', function(){ startCoverBox(); });
       el.querySelector('#lcLineBtn').addEventListener('click', function(){ startCoverLine(); });
       el.querySelector('#lcUndoBtn').addEventListener('click', function(){ undoCoverEdit(); });
+      el.querySelector('#lcPaintBtn').addEventListener('click', function(){ startCoverPaint(); });
       el.querySelector('#lcSmzBtn').addEventListener('click', function(){ fillSMZ(); });
       el.querySelector('#lcWidthBtn').addEventListener('click', function(){ _coverLineRadius = _coverLineRadius >= 3 ? 1 : _coverLineRadius + 1; this.textContent = '〰 ' + (_coverLineRadius <= 1 ? 'narrow' : _coverLineRadius >= 3 ? 'wide' : 'med'); showToast('Drain corridor width: ' + (_coverLineRadius <= 1 ? 'narrow (~1 cell)' : _coverLineRadius >= 3 ? 'wide (~7 cells)' : 'medium (~5 cells)') + '. Now trace the 〰 line.'); });
       el.querySelector('#lcOpacity').addEventListener('input', function(){ landcoverOpacity = this.value / 100; renderLandcoverOverlay(); });
