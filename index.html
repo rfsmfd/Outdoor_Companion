@@ -1699,19 +1699,25 @@
     <div id="actions">
       <button class="btn-primary" id="addSiteBtn">+ Add Site</button>
       <button class="btn-primary" id="gpsSiteBtn" style="background:#3B9EFF;color:#0A1A2E;">📍 My Location</button>
-      <button class="btn-ghost" id="exportBtn">Export</button>
-      <button class="btn-ghost" id="importWaypointsBtn" title="Import stands, markers & trails from onX, HuntStand, Google Earth, Garmin or ArcGIS — or any GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import from other apps</button>
-      <input type="file" id="waypointFileInput" accept=".kml,.kmz,.gpx,.geojson,.json,.csv,.txt" style="display:none;" />
-      <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
-      <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
-      <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
-      <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
+      <!-- FIELD FLOW — the daily-drivers up front (hunting only; hidden in fishing) -->
       <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:700;">🗓 Plan a Hunt — when &amp; where</button>
       <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt</button>
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
-      <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
+      <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
+      <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
+      <button class="btn-ghost" id="toolsToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
+      <div id="toolsGroup" style="display:none;">
+        <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
+        <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
+        <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
+        <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
+        <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
+        <button class="btn-ghost" id="importWaypointsBtn" title="Import stands, markers & trails from onX, HuntStand, Google Earth, Garmin or ArcGIS — or any GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import from other apps</button>
+        <input type="file" id="waypointFileInput" accept=".kml,.kmz,.gpx,.geojson,.json,.csv,.txt" style="display:none;" />
+        <button class="btn-ghost" id="exportBtn">Export</button>
+      </div>
     </div>
 
     <div id="propertyRow">
@@ -1824,7 +1830,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 270</div>
+    <div id="buildBadge">BUILD 271</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10873,6 +10879,16 @@
       t.classList.toggle('on', open);
       t.setAttribute('aria-expanded', open ? 'true' : 'false');
     });
+  })();
+
+  // 🧰 Tools & Data group: field flow stays up top, utilities tuck one tap away. display:contents keeps the buttons
+  // as full-width flex children of #actions when open. Default: open on desktop, collapsed on the phone.
+  (function(){
+    var tb = document.getElementById('toolsToggleBtn'), tg = document.getElementById('toolsGroup');
+    if (!tb || !tg) return;
+    function setOpen(open){ tg.style.display = open ? 'contents' : 'none'; tb.setAttribute('aria-expanded', open ? 'true' : 'false'); tb.innerHTML = '🧰 Tools &amp; Data ' + (open ? '▴' : '▾'); }
+    tb.addEventListener('click', function(){ setOpen(tg.style.display === 'none'); });
+    setOpen(window.innerWidth > 820);   // desktop: expanded as before · phone: tucked
   })();
 
   // Resilience: some networks (ISP/router-level filtering, certain mobile carriers or
