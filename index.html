@@ -1844,7 +1844,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 279</div>
+    <div id="buildBadge">BUILD 280</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1918,6 +1918,10 @@
       <div id="logBuckRow" style="display:none;margin-bottom:10px;">
         <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:6px;">Which buck? <span style="opacity:.65;">optional — tags this sighting to him so it lands on his timeline</span></div>
         <div id="logBuckChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+      </div>
+      <div id="logDirRow" style="display:none;margin-bottom:10px;">
+        <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:6px;">Heading which way? <span style="opacity:.65;">optional — the direction he was traveling</span></div>
+        <div id="logDirChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
       </div>
       <button class="btn-primary" id="logLocationUseMyLocationBtn" style="width:100%;margin-bottom:8px;background:#3B9EFF;color:#0A1A2E;">📍 Use My Location (fast)</button>
       <button class="btn-primary" id="logLocationConfirmBtn" style="width:100%;margin-bottom:8px;">Confirm This Spot</button>
@@ -3774,10 +3778,31 @@
     var t = getActiveObsTypes()[type] || getFallbackTypeEntry(true);
     return '<span style="display:inline-flex;box-sizing:border-box;width:'+px+'px;height:'+px+'px;border-radius:50%;background:#fff;border:2px solid '+t.color+';align-items:center;justify-content:center;overflow:hidden;vertical-align:middle;">'+obsTypeInner(type, px)+'</span>';
   }
-  function obsMarkerIcon(type){
+  // ---------- Sighting travel direction ----------
+  // Which way an animal was HEADING when you saw it — real stand-placement intel (are they moving
+  // to feed at dusk, back to bed at dawn?). Optional, and only offered for animals that travel
+  // (buck/doe/bear/turkey); sign like a scrape or rub doesn't "head" anywhere. Stored as a compass
+  // point on obs.headingDir; drawn as a small arrow riding the edge of the map marker.
+  var DIR_TYPES = { buck:1, doe:1, bear:1, turkey:1 };
+  var DIR_LIST = ['N','NE','E','SE','S','SW','W','NW'];
+  var DIR_DEG = { N:0, NE:45, E:90, SE:135, S:180, SW:225, W:270, NW:315 };
+  var DIR_ARROW = { N:'↑', NE:'↗', E:'→', SE:'↘', S:'↓', SW:'↙', W:'←', NW:'↖' };
+  function obsTypeMoves(type){ return !!DIR_TYPES[type]; }
+  // Little textual heading tag (arrow + label) reused by the info card, list, and popup.
+  function headingTag(dir){ return (dir && DIR_ARROW[dir]) ? (DIR_ARROW[dir] + ' heading ' + dir) : ''; }
+  function obsMarkerIcon(type, heading){
     var t = getActiveObsTypes()[type] || getFallbackTypeEntry(true);
     var d = 38;
-    return L.divIcon({ className:'', html:'<div style="box-sizing:border-box;width:'+d+'px;height:'+d+'px;border-radius:50%;background:#fff;border:2px solid '+t.color+';box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;overflow:hidden;">'+obsTypeInner(type, d)+'</div>', iconSize:[d,d], iconAnchor:[d/2,d/2], popupAnchor:[0,-d/2-3] });
+    // Heading arrow: an overlay the size of the marker, rotated to the compass bearing, with a
+    // triangle pinned to its top — so after rotating it sits just outside the ring at the right
+    // clock position and points the way the animal was traveling.
+    var arrow = '';
+    if (heading && DIR_DEG.hasOwnProperty(heading)){
+      arrow = '<div style="position:absolute;inset:0;transform:rotate(' + DIR_DEG[heading] + 'deg);pointer-events:none;">' +
+                '<div style="position:absolute;top:-11px;left:50%;transform:translateX(-50%);font-size:15px;line-height:1;color:' + t.color + ';text-shadow:0 0 2px #000,0 0 3px #000;">▲</div>' +
+              '</div>';
+    }
+    return L.divIcon({ className:'', html:'<div style="position:relative;width:'+d+'px;height:'+d+'px;"><div style="box-sizing:border-box;width:'+d+'px;height:'+d+'px;border-radius:50%;background:#fff;border:2px solid '+t.color+';box-shadow:0 1px 3px rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;overflow:hidden;">'+obsTypeInner(type, d)+'</div>'+arrow+'</div>', iconSize:[d,d], iconAnchor:[d/2,d/2], popupAnchor:[0,-d/2-3] });
   }
 
   // Distance in meters between two lat/lng points (haversine)
@@ -8095,6 +8120,12 @@
         '<div id="o_buckprofile_list"></div>' +
         '<input type="hidden" id="o_buckprofile" value="'+(o.buckProfileId || '')+'" />' +
         '<button class="btn-ghost" id="o_newbuckprofile_btn" type="button" style="width:100%;margin-top:6px;font-size:11px;">+ New Buck Profile</button>' +
+        (obsTypeMoves(o.type) ?
+          '<label style="margin-top:8px;">Heading <span style="font-weight:400;color:var(--text-dim);">(optional — which way he was traveling)</span></label>' +
+          '<div id="o_dir_chips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;">' +
+            DIR_LIST.map(function(dir){ return '<button type="button" class="chip'+(o.headingDir===dir?' active':'')+'" data-dir="'+dir+'" style="font-size:12px;padding:3px 9px;">'+DIR_ARROW[dir]+' '+dir+'</button>'; }).join('') +
+          '</div>'
+        : '') +
         '<button class="btn-ghost" id="o_reposition_btn" type="button" style="width:100%;margin-top:6px;font-size:11px;">📍 Set / Adjust Location on Map</button>';
     }
     return '' +
@@ -8249,6 +8280,23 @@
     if (notesEl) notesEl.addEventListener('blur', function(){
       autoSaveField(function(o){ o.notes = notesEl.value.trim(); });
     });
+
+    // Heading chips (animal sightings only) — tap to set travel direction, tap the active one to clear.
+    // Updates the marker's arrow in place via setIcon so it never disturbs the open popup you're editing.
+    var dirChips = node.querySelector('#o_dir_chips');
+    if (dirChips){
+      Array.prototype.forEach.call(dirChips.querySelectorAll('[data-dir]'), function(btn){
+        btn.addEventListener('click', function(){
+          var o = observations.filter(function(x){ return x.id === id; })[0];
+          if (!o) return;
+          var dir = btn.getAttribute('data-dir');
+          var next = (o.headingDir === dir) ? null : dir;
+          autoSaveField(function(oo){ oo.headingDir = next; });
+          Array.prototype.forEach.call(dirChips.querySelectorAll('[data-dir]'), function(b){ b.classList.toggle('active', b.getAttribute('data-dir') === next); });
+          if (obsMarkers[id]) obsMarkers[id].setIcon(obsMarkerIcon(o.type, next));
+        });
+      });
+    }
 
     var weightEl = node.querySelector('#o_weight');
     var lengthEl = node.querySelector('#o_length');
@@ -8451,6 +8499,7 @@
     if (o.photoThumb) html += '<img src="'+o.photoThumb+'" alt="" style="width:100%;max-width:160px;height:96px;object-fit:cover;border-radius:4px;display:block;margin-bottom:5px;">';
     html += '<div style="font-weight:700;">'+escapeHtml(t.label)+(buck ? ' — 🦌 '+escapeHtml(buck.name) : '')+'</div>';
     html += '<div style="opacity:.85;">'+escapeHtml(when)+(site ? ' · '+escapeHtml(site.name) : '')+'</div>';
+    if (o.headingDir && DIR_ARROW[o.headingDir]) html += '<div style="opacity:.9;margin-top:2px;color:'+t.color+';font-weight:600;">'+headingTag(o.headingDir)+'</div>';
     if (o.notes) html += '<div style="opacity:.9;font-style:italic;margin-top:2px;">'+escapeHtml(o.notes)+'</div>';
     if (o.weatherStatus === 'ok' && o.weather) html += '<div style="opacity:.7;font-size:11px;margin-top:3px;">'+escapeHtml(formatWeatherLine(o.weather))+'</div>';
     return html;
@@ -8465,7 +8514,7 @@
       if (!activeObsFilters.has(o.type)) return;
       var _ps = obsPeriodStart(o.type);                       // per-type MAP period (does NOT affect analytics/lists)
       if (_ps !== null && o.createdAt < _ps) return;
-      var m = L.marker([o.lat,o.lng], {icon: obsMarkerIcon(o.type)}).addTo(map);
+      var m = L.marker([o.lat,o.lng], {icon: obsMarkerIcon(o.type, o.headingDir)}).addTo(map);
       if (IS_TOUCH){
         // No hover on touch — TAP shows the info card with an Edit button (which swaps to the edit form).
         m.bindPopup('<div style="max-width:190px;">'+obsInfoBody(o)+'<button data-act="obs-edit" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">✏️ Edit details</button></div>');
@@ -8527,9 +8576,10 @@
       if (o.weatherStatus === 'ok' && o.weather){
         envTxt = ' · ' + formatWeatherLine(o.weather);
       }
+      var dirTxt = (o.headingDir && DIR_ARROW[o.headingDir]) ? ' · <span style="color:'+t.color+';font-weight:600;">'+headingTag(o.headingDir)+'</span>' : '';
       row.innerHTML =
         '<div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">'+obsGlyphInline(o.type, 28)+'</div>' +
-        '<div class="obs-meta"><div class="nm">'+countTxt+t.label+'</div><div class="ty">'+relTime(o.createdAt)+(site ? ' · <span class="site-link">'+escapeHtml(site.name)+'</span>' : '')+envTxt+detailTxt+'</div></div>';
+        '<div class="obs-meta"><div class="nm">'+countTxt+t.label+'</div><div class="ty">'+relTime(o.createdAt)+(site ? ' · <span class="site-link">'+escapeHtml(site.name)+'</span>' : '')+dirTxt+envTxt+detailTxt+'</div></div>';
       row.addEventListener('click', function(){
         map.flyTo([o.lat, o.lng], Math.max(map.getZoom(), 16));
         if (obsMarkers[o.id]) obsMarkers[o.id].openPopup();
@@ -12085,6 +12135,7 @@
       weatherStatus: 'pending' // 'pending' | 'ok' | 'unavailable'
     };
     if (type === 'buck' && _logBuckId) obs.buckProfileId = _logBuckId;   // tag the sighting to the named buck → his timeline
+    if (obsTypeMoves(type) && _logDir) obs.headingDir = _logDir;         // which way he was traveling
     observations.push(obs);
     try{ await saveObservation(obs); }catch(e){ console.error('Outdoor Companion: failed to save observation', e); }
 
@@ -12107,7 +12158,7 @@
     var _bp = (type === 'buck' && obs.buckProfileId) ? (buckProfiles.filter(function(b){ return b.id === obs.buckProfileId; })[0]) : null;
     var msg = t.label + (_bp ? ' — ' + _bp.name : '') + ' logged' + (match ? ' near ' + match.site.name : '') + (approx ? ' (approx. location)' : '');
     showToast(msg);
-    _logBuckId = null;   // consumed
+    _logBuckId = null; _logDir = null;   // consumed
     // Always fly to and confirm the new pin — GPS accuracy varies a lot, so don't
     // assume it landed somewhere already visible on screen.
     if (obsMarkers[obs.id]){
@@ -12163,6 +12214,26 @@
     row.style.display = isBuck ? 'block' : 'none';
     if (isBuck) renderLogBuckChips();
   }
+  // Quick-Log travel direction: for a moving animal (buck/doe/bear/turkey), pick which way it was heading
+  // right in the confirm step — captured in the moment while you still remember, not reconstructed later.
+  var _logDir = null;
+  function renderLogDirChips(){
+    var wrap = document.getElementById('logDirChips'); if (!wrap) return;
+    wrap.innerHTML = '';
+    DIR_LIST.forEach(function(dir){
+      var chip = document.createElement('button');
+      chip.type = 'button'; chip.className = 'chip' + (_logDir === dir ? ' active' : '');
+      chip.textContent = DIR_ARROW[dir] + ' ' + dir;
+      chip.addEventListener('click', function(){ _logDir = (_logDir === dir) ? null : dir; renderLogDirChips(); });
+      wrap.appendChild(chip);
+    });
+  }
+  function _showLogDirRow(type){
+    var row = document.getElementById('logDirRow'); if (!row) return;
+    var moves = obsTypeMoves(type) && activeModule === 'hunting';
+    row.style.display = moves ? 'block' : 'none';
+    if (moves) renderLogDirChips();
+  }
   var logLocationMap = null;
   var logLocationPos = null;
 
@@ -12203,6 +12274,7 @@
     if (!o) return;
     pendingRepositionObsId = obsId;
     pendingLogType = null; _logBuckId = null; _showLogBuckRow(null);
+    _logDir = null; _showLogDirRow(null);
     document.getElementById('logLocationTypeName').textContent = 'Adjust Location';
     logLocationPos = {lat: o.lat, lng: o.lng};
     document.getElementById('logLocationCoords').textContent = fmtCoord(o.lat) + ', ' + fmtCoord(o.lng);
@@ -12264,6 +12336,7 @@
   function logObservation(type){
     pendingLogType = type;
     _logBuckId = null; _showLogBuckRow(type);   // offer the "which buck?" tag right here for a Buck sighting
+    _logDir = null; _showLogDirRow(type);       // and "which way heading?" for a moving animal
     var t = getActiveObsTypes()[type];
     document.getElementById('logLocationTypeName').textContent = t.label;
     var pos = lastKnownPos || (function(){ var c = map.getCenter(); return {lat:c.lat, lng:c.lng}; })();
@@ -12303,6 +12376,7 @@
     pendingRepositionSiteId = siteId;
     pendingRepositionObsId = null;
     pendingLogType = null; _logBuckId = null; _showLogBuckRow(null);
+    _logDir = null; _showLogDirRow(null);
     var tl = getActiveTypes()[s.type];
     document.getElementById('logLocationTypeName').textContent = 'Move ' + (tl ? tl.label : 'Stand');
     logLocationPos = {lat: s.lat, lng: s.lng};
