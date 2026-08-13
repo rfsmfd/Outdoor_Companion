@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 285</div>
+    <div id="buildBadge">BUILD 286</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2169,8 +2169,8 @@
   <!-- Photo Gallery — browse, filter, view (and delete) all cloud trail-cam photos -->
   <div class="oc-modal-backdrop" id="photoGalleryModalBackdrop">
     <div class="oc-modal" id="photoGalleryModal">
-      <h3>📸 Photo Gallery <button class="close-x" id="photoGalleryClose">&times;</button></h3>
-      <div class="photo-gallery-filters">
+      <h3><span id="galleryTitle">📸 Photo Gallery</span> <button class="close-x" id="photoGalleryClose">&times;</button></h3>
+      <div class="photo-gallery-filters" id="galleryFiltersRow">
         <select id="gallerySiteFilter"><option value="">📍 All locations</option></select>
         <select id="galleryCameraFilter"><option value="">All cameras</option></select>
         <select id="gallerySpeciesFilter"><option value="">All photos</option></select>
@@ -2179,7 +2179,7 @@
           <option value="oldest">Oldest first</option>
         </select>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 4px 0;">
+      <div id="galleryGroupRow" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 4px 0;">
         <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;" title="Group photos into sections by location (site). Each spot shows every photo ever taken there — no matter which camera was on it.">
           <input type="checkbox" id="galleryGroupByLocation"> 📍 Group by location
         </label>
@@ -4176,7 +4176,47 @@
       var prevSp = spSel.value; spSel.innerHTML = spOpts.join(''); spSel.value = prevSp;
     }
   }
+  // Fishing has no trail cameras — its photos live on the catches you log. So in Fishing mode the Photo
+  // Gallery becomes a CATCH gallery: every catch you snapped a photo of, newest first, tap to view full.
+  function renderFishGallery(){
+    var grid = document.getElementById('galleryGrid');
+    var empty = document.getElementById('galleryEmpty');
+    var count = document.getElementById('galleryCount');
+    if (!grid) return;
+    grid.innerHTML = '';
+    var list = observations.filter(function(o){ return o.photoThumb && typeIsInActiveModule(o.type, true); })
+      .sort(function(a, b){ return (b.createdAt || 0) - (a.createdAt || 0); });
+    if (list.length === 0){
+      count.textContent = '';
+      empty.style.display = 'block';
+      empty.textContent = 'No catch photos yet — snap a photo when you log a catch (in the catch’s details) and it’ll show up here.';
+      return;
+    }
+    empty.style.display = 'none';
+    count.textContent = list.length + ' catch photo' + (list.length === 1 ? '' : 's');
+    var srcs = list.map(function(o){ return o.photoThumb; });
+    list.forEach(function(o, idx){
+      var t = getActiveObsTypes()[o.type] || getFallbackTypeEntry(true);
+      var site = o.siteId ? sites.filter(function(s){ return s.id === o.siteId; })[0] : null;
+      var dateStr = new Date(o.createdAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'});
+      var specs = [];
+      if (o.weight) specs.push(o.weight + ' lb');
+      if (o.length) specs.push(o.length + '"');
+      var card = document.createElement('div');
+      card.className = 'import-photo-card';
+      card.innerHTML =
+        '<img src="' + o.photoThumb + '" alt="">' +
+        '<div class="meta">' +
+          '<div class="sp" style="font-weight:700;">' + escapeHtml(t.label) + (specs.length ? ' · ' + escapeHtml(specs.join(' · ')) : '') + '</div>' +
+          (site ? '<div class="loc">📍 ' + escapeHtml(site.name) + '</div>' : '') +
+          '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
+        '</div>';
+      card.addEventListener('click', function(){ showPhotoLightbox(srcs, idx); });
+      grid.appendChild(card);
+    });
+  }
   function renderGallery(){
+    if (activeModule === 'fishing'){ renderFishGallery(); return; }
     var grid = document.getElementById('galleryGrid');
     var empty = document.getElementById('galleryEmpty');
     var count = document.getElementById('galleryCount');
@@ -5703,9 +5743,23 @@
     showToast('Photo deleted');
   });
   function openPhotoGallery(){
-    populateGalleryFilters();
-    renderGallery();
-    refreshTagAllButton();
+    var fishing = activeModule === 'fishing';
+    // Fishing mode hides every trail-cam-only control (camera/species filters, group-by, the whole AI
+    // buck-tagging funnel) — none of it applies to catch photos — and retitles the modal accordingly.
+    document.getElementById('galleryTitle').textContent = fishing ? '🎣 Catch Photos' : '📸 Photo Gallery';
+    var filtersRow = document.getElementById('galleryFiltersRow');
+    var groupRow = document.getElementById('galleryGroupRow');
+    var aiRow = document.getElementById('galleryAiRow');
+    if (filtersRow) filtersRow.style.display = fishing ? 'none' : '';
+    if (groupRow) groupRow.style.display = fishing ? 'none' : '';
+    if (aiRow) aiRow.style.display = fishing ? 'none' : '';
+    if (fishing){
+      renderGallery();
+    } else {
+      populateGalleryFilters();
+      renderGallery();
+      refreshTagAllButton();
+    }
     closeAllModals();
     document.getElementById('photoGalleryModalBackdrop').classList.add('show');
   }
