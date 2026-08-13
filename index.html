@@ -795,6 +795,8 @@
   .place-cam-flag{ height:30px; display:flex; align-items:center; justify-content:center; }
   .cam-svg{ filter:drop-shadow(0 1px 3px rgba(0,0,0,0.55)); }
   .place-dot{ width:13px;height:13px;border-radius:50%;background:#FF6A13;border:2px solid rgba(20,26,20,0.85);box-shadow:0 1px 4px rgba(0,0,0,0.5); }
+  /* Empty camera spot — no photos collected yet: a hollow orange ring instead of a filled dot. */
+  .place-dot.hollow{ background:rgba(20,26,20,0.45);border:2px solid #FF6A13; }
   .place-label{ margin-top:2px;font-size:10px;font-weight:600;color:#fff;background:rgba(18,28,22,0.82);padding:1px 6px;border-radius:8px;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,0.5);max-width:130px;overflow:hidden;text-overflow:ellipsis; }
 
   /* Stand/site name labels: shown only when zoomed in to a readable level (body.oc-zlabels,
@@ -1836,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 284</div>
+    <div id="buildBadge">BUILD 285</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2617,7 +2619,6 @@
   var markers = {};
   var activeFilters = new Set(Object.keys(TYPES_HUNTING));
   var showCameraFlags = false;  // the orange camera ICONS on deployed spots — OFF by default; the place dots+names stay. Flip on when working with cameras.
-  var showHistCamFlags = true;  // the MUTED "history" camera icons on inactive spots that still have photos — its OWN toggle, separate from live cameras; ON by default (founder wants to always see where he's had cameras).
   var activeObsFilters = new Set(Object.keys(OBS_TYPES_HUNTING).concat(Object.keys(OBS_TYPES_FISHING)));
   var placing = false;
   var tempMarker = null;
@@ -3709,36 +3710,28 @@
     if (type === 'camera'){
       var cam = siteId ? cameras.filter(function(c){ return c.currentSiteId === siteId; })[0] : null;
       var nameLabel = siteName ? '<div class="place-label">' + escapeHtml(siteName) + '</div>' : '';
-      var dot = '<div class="place-dot"></div>';
-      // The little camera flag, in whatever color. Lens shows the camera NUMBER (or, for a non-numeric
-      // name like GardePro "FLCR", its first two letters), so a camera is never a blank lens.
-      function camFlagSvg(lens, color){
-        var lensFont = lens.length >= 2 ? 8 : 10;
-        return '<div class="place-cam-flag"><svg class="cam-svg" width="36" height="30" viewBox="0 0 36 30" aria-hidden="true">' +
-            '<rect x="12" y="2" width="12" height="7" rx="2" fill="' + color + '" stroke="#14201A" stroke-width="2"/>' +
-            '<rect x="1.5" y="7" width="33" height="21" rx="4" fill="' + color + '" stroke="#14201A" stroke-width="2"/>' +
-            '<circle cx="18" cy="18.5" r="6.5" fill="#14201A"/>' +
-            '<text x="18" y="21.7" text-anchor="middle" fill="' + color + '" font-size="' + lensFont + '" font-weight="700" font-family="IBM Plex Mono,monospace">' + escapeHtml(lens) + '</text>' +
-          '</svg></div>';
-      }
-      // The DOT is the true location anchor + the name. A camera flag rides above it, controlled by TWO
-      // independent toggles: BRIGHT orange for a camera that's live on the spot right now (Camera-icons
-      // layer, off by default — light it up when working cameras), or a MUTED tan one (last camera's
-      // number) for a spot with no camera now but with photo history (Camera-history layer, ON by
-      // default — so you always see where you've had cameras). Each flag only shows when its own layer is on.
-      var camLens = null, camColor = null;
+      // The DOT is the true location anchor + the name, and it's the PERMANENT quiet marker for a camera
+      // spot — SOLID when the spot has photos, HOLLOW when it's an empty spot with nothing collected yet.
+      // (Camera spots become the most numerous markers fast, so they stay dots, not icons.)
+      var hasPics = !!(siteId && _camSiteHasPics[siteId]);
+      var dot = '<div class="place-dot' + (hasPics ? '' : ' hollow') + '"></div>';
+      // When you're actively working cameras (Camera-icons layer on), a bright camera flag rides above the
+      // dot on a spot that has one deployed right now — its lens showing the camera NUMBER (or, for a
+      // non-numeric name like GardePro "FLCR", its first two letters). OFF by default to keep the map clean.
       if (cam && showCameraFlags){
         var numMatch = cam.name ? cam.name.match(/\d+/) : null;
-        camLens = numMatch ? numMatch[0] : (cam.name ? cam.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() : '');
-        camColor = '#FF6A13';
-      } else if (!cam && showHistCamFlags && siteId && _camSitePicLens.hasOwnProperty(siteId)){
-        camLens = _camSitePicLens[siteId];
-        camColor = '#A98A5C';
-      }
-      if (camLens !== null){
+        var lens = numMatch ? numMatch[0] : (cam.name ? cam.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() : '');
+        var lensFont = lens.length >= 2 ? 8 : 10;
+        var flag =
+          '<div class="place-cam-flag"><svg class="cam-svg" width="36" height="30" viewBox="0 0 36 30" aria-hidden="true">' +
+            '<rect x="12" y="2" width="12" height="7" rx="2" fill="#FF6A13" stroke="#14201A" stroke-width="2"/>' +
+            '<rect x="1.5" y="7" width="33" height="21" rx="4" fill="#FF6A13" stroke="#14201A" stroke-width="2"/>' +
+            '<circle cx="18" cy="18.5" r="6.5" fill="#14201A"/>' +
+            '<text x="18" y="21.7" text-anchor="middle" fill="#FF6A13" font-size="' + lensFont + '" font-weight="700" font-family="IBM Plex Mono,monospace">' + escapeHtml(lens) + '</text>' +
+          '</svg></div>';
         return L.divIcon({
           className: '',
-          html: '<div class="place-pin">' + camFlagSvg(camLens, camColor) + dot + nameLabel + '</div>',
+          html: '<div class="place-pin">' + flag + dot + nameLabel + '</div>',
           iconSize: [120, 64], iconAnchor: [60, 37], popupAnchor: [0, -34] // anchor = the dot
         });
       }
@@ -6654,17 +6647,6 @@
     row.querySelector('.toggle-switch').addEventListener('click', function(){ showCameraFlags = !showCameraFlags; renderChips(); renderMarkers(); });
     return row;
   }
-  // The MUTED "history" camera flags on inactive spots that still have photos — its own toggle, ON by
-  // default so you always see where you've had cameras (the way it originally worked).
-  function trayHistCamRow(){
-    var row = document.createElement('div');
-    row.className = 'toggle-row';
-    row.innerHTML =
-      '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">📷</span> Camera history spots</div>' +
-      '<div class="toggle-switch' + (showHistCamFlags ? ' on' : '') + '"><div class="knob"></div></div>';
-    row.querySelector('.toggle-switch').addEventListener('click', function(){ showHistCamFlags = !showHistCamFlags; renderChips(); renderMarkers(); });
-    return row;
-  }
   function traySiteRow(key){
     var t = getActiveTypes()[key]; if (!t || t.hidden) return null;   // retired types never get a toggle
     var isOn = activeFilters.has(key);
@@ -6720,7 +6702,7 @@
       container.appendChild(traySection('Catches', typeVisibleKeys(getActiveObsTypes()).map(trayObsRow)));
       return;
     }
-    container.appendChild(traySection('Stands & Cameras', [trayCamIconsRow(), trayHistCamRow()].concat(['camera','stand','access'].map(traySiteRow))));
+    container.appendChild(traySection('Stands & Cameras', [trayCamIconsRow()].concat(['camera','stand','access'].map(traySiteRow))));
     container.appendChild(traySection('Habitat', ['bedding','feeding','water'].map(traySiteRow)));
     container.appendChild(traySection('Sign &amp; Sightings', ['buck','doe','bear','turkey','scrape','rub','track','trail','hunt','custom'].map(trayObsRow)));
     container.appendChild(traySection('Other Markers', ['sighting','custom'].map(traySiteRow)));   // 'sighting' is retired (hidden) → only Custom Point shows
@@ -7509,36 +7491,13 @@
     return site.propertyId === activePropertyId;
   }
 
-  // For every camera SITE that has photos but no camera deployed on it right now, remember the last
-  // camera's lens (number/initials) so its map pin can show a muted "history" camera instead of a bare
-  // dot. Recomputed once per marker redraw so a per-camera-site lookup isn't O(photos) each pin.
-  var _camSitePicLens = {};
+  // Which camera SITES have any photos attached — so a camera dot reads SOLID (pictures here) vs HOLLOW
+  // (empty spot, nothing collected yet). Recomputed once per marker redraw so it isn't O(photos) each pin.
+  var _camSiteHasPics = {};
   function computeCamSitePics(){
-    _camSitePicLens = {};
-    if (typeof importedPhotos === 'undefined' || !importedPhotos.length) return;
-    var hasPics = {};
-    importedPhotos.forEach(function(p){ if (p && p.matchedSiteId) hasPics[p.matchedSiteId] = true; });
-    Object.keys(hasPics).forEach(function(sid){
-      // A live camera on the spot is handled elsewhere (bright flag); only remember inactive sites here.
-      var live = cameras.filter(function(c){ return c.currentSiteId === sid; })[0];
-      if (live) return;
-      var lens = '';
-      var deps = (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId === sid; })
-        .sort(function(a, b){ return (b.deployedAt || 0) - (a.deployedAt || 0); });
-      var camId = deps[0] ? deps[0].cameraId : null;
-      var cam = camId ? cameras.filter(function(c){ return c.id === camId; })[0] : null;
-      if (!cam){
-        var ph = importedPhotos.filter(function(p){ return p.matchedSiteId === sid && p.cameraId; })
-          .sort(function(a, b){ return (b.timestamp || 0) - (a.timestamp || 0); })[0];
-        var cid = ph ? ph.cameraId : null;
-        cam = cid ? cameras.filter(function(c){ return c.id === cid; })[0] : null;
-      }
-      if (cam){
-        var m = cam.name ? cam.name.match(/\d+/) : null;
-        lens = m ? m[0] : (cam.name ? cam.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() : '');
-      }
-      _camSitePicLens[sid] = lens;
-    });
+    _camSiteHasPics = {};
+    if (typeof importedPhotos === 'undefined') return;
+    importedPhotos.forEach(function(p){ if (p && p.matchedSiteId) _camSiteHasPics[p.matchedSiteId] = true; });
   }
   function renderMarkers(){
     computeCamSitePics();
