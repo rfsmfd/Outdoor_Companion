@@ -1686,6 +1686,7 @@
       <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt</button>
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
+      <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
       <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
     </div>
 
@@ -1795,7 +1796,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 263</div>
+    <div id="buildBadge">BUILD 264</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7010,76 +7011,6 @@
   map.on('mouseup', function(){ if (!_coverPaint || !_coverPaint.painting) return; _coverPaint.painting = false; var p = _coverPaint;
     if (p.prop && p.cells.length){ applyTypeToCells(p.prop, p.cells, p.type); showToast('Painted ~' + acresOf(p.prop.landcover, p.cells.length).toFixed(1) + ' ac ' + COVER_TYPES[p.type].label + '. ↩ Undo if it slipped.'); }
     clearCoverSelection(); p.cells = []; p.cellSet = {}; });
-  // ---- 🌿 SMZ (Streamside Management Zone) auto-fill: grow the Drainage corridor to the real stream BOTTOM ----
-  // A drainage isn't a hairline — it's the creek plus its wooded bottom (the loggers' un-cut hardwood buffer through
-  // the pine). We anchor on the NHD drainage cells already in the grid, read the LiDAR elevation, and grow Drainage
-  // to every nearby cell that's LOW relative to the creek — HAND = Height Above Nearest Drainage — fused with the
-  // hardwood signal (the SMZ often reads as hardwood-through-pine on the aerial), which rescues it where the flat
-  // coastal-plain ground makes elevation alone marginal. Bounded by a max horizontal distance so it never floods a stand.
-  function currentCoverProp(){
-    var list = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return (!p.module || p.module === activeModule) && p.landcover && p.landcover.grid; });
-    return list.filter(function(p){ return p.id === activePropertyId; })[0] || list[0] || null;
-  }
-  // Sample 3DEP elevation on a coarse lattice over the cover bbox → bilinear source for HAND. Chunked getSamples.
-  async function sampleElevLattice(lc){
-    var bb = lc.bbox, midLat = (bb.n + bb.s) / 2;
-    var wM = (bb.e - bb.w) * 111320 * Math.cos(midLat * Math.PI / 180), hM = (bb.n - bb.s) * 111320;
-    var gw = Math.max(8, Math.min(44, Math.round(wM / 22) + 1)), gh = Math.max(8, Math.min(44, Math.round(hM / 22) + 1));
-    var pts = [];
-    for (var r = 0; r < gh; r++){ var lat = bb.n - (bb.n - bb.s) * (r / (gh - 1)); for (var c = 0; c < gw; c++){ pts.push([bb.w + (bb.e - bb.w) * (c / (gw - 1)), lat]); } }
-    var vals = new Array(pts.length); for (var z = 0; z < vals.length; z++) vals[z] = NaN;
-    var CH = 220;
-    for (var off = 0; off < pts.length; off += CH){
-      var chunk = pts.slice(off, off + CH);
-      try {
-        var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: chunk, spatialReference: { wkid: 4326 } })) +
-          '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
-        var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
-        var data = await resp.json();
-        if (data && data.samples){ data.samples.forEach(function(s, i){ var li = (s.locationId != null) ? s.locationId : i; var v = (s && s.value != null) ? parseFloat(s.value) : NaN; if (off + li < vals.length) vals[off + li] = v; }); }
-      } catch (e){ /* leave that chunk NaN */ }
-    }
-    return { gw: gw, gh: gh, vals: vals };
-  }
-  async function fillSMZ(prop){
-    prop = prop || currentCoverProp();
-    if (!prop || !prop.landcover || !prop.landcover.grid){ showToast('Scan a property first (Property Setup → Scan field vs woods).'); return; }
-    var lc = prop.landcover, types = ensureTypes(lc), conf = ensureConfirmed(lc), cols = lc.cols, rows = lc.rows, N = cols * rows, cellM = lc.cellM || 6;
-    var Dcells = []; for (var i = 0; i < N; i++){ if (types.charAt(i) === 'D') Dcells.push(i); }
-    if (!Dcells.length){ showToast('No drainage lines yet — Rescan to pull the NHD streams, or trace a drain with 〰 first.'); return; }
-    showToast('Reading the low ground along your drains (LiDAR)…');
-    var el = await sampleElevLattice(lc); if (!el){ showToast('Elevation read failed — try again.'); return; }
-    var gw = el.gw, gh = el.gh, vals = el.vals;
-    function elevCell(x, y){
-      var u = ((x + 0.5) / cols) * (gw - 1), v = ((y + 0.5) / rows) * (gh - 1);
-      var c0 = Math.max(0, Math.min(gw - 1, Math.floor(u))), r0 = Math.max(0, Math.min(gh - 1, Math.floor(v)));
-      var c1 = Math.min(gw - 1, c0 + 1), r1 = Math.min(gh - 1, r0 + 1), fu = u - c0, fv = v - r0;
-      var a = vals[r0 * gw + c0], b = vals[r0 * gw + c1], cc = vals[r1 * gw + c0], d = vals[r1 * gw + c1];
-      var cand = [a, b, cc, d].filter(function(z){ return isFinite(z); });
-      if (!cand.length) return NaN;
-      if (![a, b, cc, d].every(isFinite)) return cand.reduce(function(s, z){ return s + z; }, 0) / cand.length;   // partial → mean of valid corners
-      return a * (1 - fu) * (1 - fv) + b * fu * (1 - fv) + cc * (1 - fu) * fv + d * fu * fv;
-    }
-    // multi-source BFS from the drainage cells, carrying each source's elevation to its nearest neighbours
-    var maxCells = Math.max(4, Math.round(75 / cellM)), dist = new Int16Array(N), srcE = new Float32Array(N);
-    for (var q0 = 0; q0 < N; q0++) dist[q0] = -1;
-    var queue = []; Dcells.forEach(function(k){ dist[k] = 0; srcE[k] = elevCell(k % cols, (k / cols) | 0); queue.push(k); });
-    var head = 0;
-    while (head < queue.length){ var k = queue[head++]; var dd = dist[k]; if (dd >= maxCells) continue; var kx = k % cols, ky = (k / cols) | 0;
-      var nb = [k - 1, k + 1, k - cols, k + cols], nbx = [kx - 1, kx + 1, kx, kx], nby = [ky, ky, ky - 1, ky + 1];
-      for (var n = 0; n < 4; n++){ var nk = nb[n]; if (nbx[n] < 0 || nbx[n] >= cols || nby[n] < 0 || nby[n] >= rows) continue; if (dist[nk] !== -1) continue; dist[nk] = dd + 1; srcE[nk] = srcE[k]; queue.push(nk); } }
-    // classify: within the corridor, LOW ground (HAND ≤ ~1.5 m) OR a hardwood strip → the SMZ bottom
-    var HAND = 1.5, add = [];
-    for (var m = 0; m < N; m++){ if (dist[m] <= 0 || dist[m] > maxCells) continue;
-      var t = types.charAt(m); if (t === 'D' || t === 'O' || t === 'F' || t === 'R' || t === 'A') continue;   // keep water/open field; skip existing drain
-      if (conf.charAt(m) === '1') continue;   // respect cells you've already confirmed by hand
-      var e = elevCell(m % cols, (m / cols) | 0), low = isFinite(e) && isFinite(srcE[m]) && (e - srcE[m]) <= HAND;
-      if (low || t === 'H') add.push(m);
-    }
-    if (!add.length){ showToast('No new stream bottom found near your drains — they may already be filled.'); return; }
-    applyTypeToCells(prop, add, 'D');
-    showToast('Filled ~' + acresOf(lc, add.length).toFixed(1) + ' ac of stream bottom (SMZ) as Drainage. ↩ Undo if it overreached.');
-  }
   // Show the exact cells about to change — a white outline + faint fill — so you SEE the selection while you pick.
   function clearCoverSelection(){ if (_coverSelOverlay){ map.removeLayer(_coverSelOverlay); _coverSelOverlay = null; } }
   function showCoverSelection(prop, cells){
@@ -7196,7 +7127,6 @@
         '<button id="lcEditBtn" style="font-size:10px;padding:2px 6px;border-radius:5px;border:1px solid #3c4d42;background:transparent;color:#cfe0d6;cursor:pointer;">✏️ Edit</button></span></div>' +
         ['R','A','F','H','P','W','C','D','S','O'].map(sw).join('') +
         '<button id="lcPaintBtn" title="Drag over the ground to paint a cover type — the simple brush (great for drains)" style="width:100%;margin-top:8px;font-size:11.5px;font-weight:700;padding:6px;border-radius:7px;border:1px solid #3c6d42;background:#2E4636;color:#dff0e4;cursor:pointer;">🖌 Paint (drag to fill)</button>' +
-        '<button id="lcSmzBtn" title="Auto-fill the wooded stream bottoms (SMZ) from the LiDAR low ground + your NHD drains" style="width:100%;margin-top:6px;font-size:10.5px;padding:4px 6px;border-radius:6px;border:1px solid #3c6d42;background:#22323b;color:#dff0e4;cursor:pointer;">🌿 Fill drain bottoms (SMZ)</button>' +
         '<div style="display:flex;align-items:center;gap:6px;margin-top:7px;border-top:1px solid #2c3f34;padding-top:6px;"><span style="font-size:10px;color:#8aa596;">Fade</span><input id="lcOpacity" type="range" min="15" max="100" value="' + Math.round(landcoverOpacity * 100) + '" style="flex:1;accent-color:#7CCB7C;cursor:pointer;"></div>';
       document.body.appendChild(el);
       el.querySelector('#lcEditBtn').addEventListener('click', function(){ setCoverEditMode(!coverEditMode); });
@@ -7205,7 +7135,6 @@
       el.querySelector('#lcLineBtn').addEventListener('click', function(){ startCoverLine(); });
       el.querySelector('#lcUndoBtn').addEventListener('click', function(){ undoCoverEdit(); });
       el.querySelector('#lcPaintBtn').addEventListener('click', function(){ startCoverPaint(); });
-      el.querySelector('#lcSmzBtn').addEventListener('click', function(){ fillSMZ(); });
       el.querySelector('#lcWidthBtn').addEventListener('click', function(){ _coverLineRadius = _coverLineRadius >= 3 ? 1 : _coverLineRadius + 1; this.textContent = '〰 ' + (_coverLineRadius <= 1 ? 'narrow' : _coverLineRadius >= 3 ? 'wide' : 'med'); showToast('Drain corridor width: ' + (_coverLineRadius <= 1 ? 'narrow (~1 cell)' : _coverLineRadius >= 3 ? 'wide (~7 cells)' : 'medium (~5 cells)') + '. Now trace the 〰 line.'); });
       el.querySelector('#lcOpacity').addEventListener('input', function(){ landcoverOpacity = this.value / 100; renderLandcoverOverlay(); });
     }
@@ -8602,6 +8531,7 @@
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _wib = document.getElementById('walkInBtn'); if (_wib) _wib.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _slb = document.getElementById('sitLogBtn'); if (_slb) _slb.style.display = activeModule === 'hunting' ? 'block' : 'none';
   }
 
   // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
@@ -11048,7 +10978,81 @@
     updateActiveHuntBar();
     var endEventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
     showToast((activeModule === 'fishing' ? 'Trip' : 'Hunt') + ' ended · ' + duration + ' · ' + hunt.observationIds.length + ' ' + pluralizeEventNoun(hunt.observationIds.length, endEventNoun));
+    if (activeModule === 'hunting') showSitLog(hunt);   // close the loop: log what the sit produced → feeds the ranking
   });
+
+  // ---------- 📓 LOG A SIT — the feedback loop that closes the funnel ----------
+  // The last step of the hunt flow (When→Where→Which→Walk-in→Hunt→LOG→Walk-out). Turn a sit into structured
+  // sightings: what you saw (does / named bucks / unknown bucks), how the movement was, any harvest, and a note.
+  // Each becomes an observation at the stand — timestamped, property/stand/buck-linked — so it flows straight back
+  // into the cross-property ranker, the stand ranking, bucks-in-play, and each buck's movement timeline. Camera-
+  // optional by design: this IS the sightings data the whole planner leans on when cameras are thin.
+  var SITLOG_ACT = [{ k: 'dead', label: '💤 Dead' }, { k: 'slow', label: '🐾 Slow' }, { k: 'steady', label: '🦌 Steady' }, { k: 'hot', label: '🔥 Hot' }];
+  function _logHuntStands(){ return (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && (typeof passesPropertyFilter !== 'function' || passesPropertyFilter(s)); }); }
+  function _logPropIdFor(stand){ if (stand.propertyId) return stand.propertyId; var p = (typeof properties !== 'undefined' ? properties : []).filter(function(x){ return (!x.module || x.module === activeModule) && pointInProperty(stand.lat, stand.lng, x); })[0]; return p ? p.id : null; }
+  function showSitLog(hunt){
+    var old = document.getElementById('sitLogPanel'); if (old) old.remove();
+    var stands = _logHuntStands();
+    if (!stands.length){ showToast('No hunt spots yet — drop a Tree Stand (or flag a site 🏹 I hunt here) first, then log the sit against it.'); return; }
+    var stand = (hunt && hunt.siteId) ? stands.filter(function(s){ return s.id === hunt.siteId; })[0] : null;
+    if (!stand) stand = (lastKnownPos ? stands.slice().sort(function(a, b){ return distMeters(lastKnownPos.lat, lastKnownPos.lng, a.lat, a.lng) - distMeters(lastKnownPos.lat, lastKnownPos.lng, b.lat, b.lng); })[0] : stands[0]) || stands[0];
+    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: null, does: 0, unknown: 0, bucks: {}, harvest: null };
+    var back = document.createElement('div'); back.id = 'sitLogPanel'; back.style.cssText = 'position:fixed;inset:0;z-index:100012;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;overflow:auto;';
+    var card = document.createElement('div'); card.style.cssText = 'background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;width:440px;max-width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 14px 44px rgba(0,0,0,.6);';
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) back.remove(); });
+    function step(id, label, min){ return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#1c2b23;border-radius:10px;padding:8px 11px;"><span style="font-size:12.5px;">' + label + '</span><span style="display:flex;align-items:center;gap:10px;"><button class="sl-dec" data-t="' + id + '" style="width:30px;height:30px;border-radius:8px;border:1px solid #3c4d42;background:#26332b;color:#e8f0ea;font-size:18px;cursor:pointer;line-height:1;">−</button><span id="sl-' + id + '" style="min-width:20px;text-align:center;font-weight:800;font-size:15px;">0</span><button class="sl-inc" data-t="' + id + '" style="width:30px;height:30px;border-radius:8px;border:1px solid #3c4d42;background:#26332b;color:#e8f0ea;font-size:18px;cursor:pointer;line-height:1;">+</button></span></div>'; }
+    var standOpts = stands.map(function(s){ return '<option value="' + escapeHtml(s.id) + '"' + (s.id === st.standId ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>'; }).join('');
+    var buckChips = (typeof buckProfiles !== 'undefined' && buckProfiles.length) ? buckProfiles.map(function(b){ return '<button class="sl-buck" data-bid="' + escapeHtml(b.id) + '" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;">🦌 ' + escapeHtml(b.name) + '</button>'; }).join('') : '<span style="font-size:11px;color:#8aa596;">No named bucks yet — use Unknown, or name them on the board later.</span>';
+    var dLbl = fcDayLabel(st.sitTime);
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;"><div><div style="font-weight:800;font-size:16px;">📓 Log the sit</div><div style="font-size:11px;color:#8aa596;margin-top:2px;">' + escapeHtml(dLbl) + ' · feeds your rankings</div></div><button id="slX" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Stand you sat</div>' +
+      '<select id="slStand" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;margin-bottom:12px;">' + standOpts + '</select>' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">How was the movement?</div>' +
+      '<div style="display:flex;gap:6px;margin-bottom:13px;">' + SITLOG_ACT.map(function(a){ return '<button class="sl-act" data-k="' + a.k + '" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">' + a.label + '</button>'; }).join('') + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:13px;">' + step('does', '🦌 Does seen', 0) + step('unknown', '🦌 Bucks (unnamed)', 0) + '</div>' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">Named bucks you saw</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:13px;">' + buckChips + '</div>' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">Harvest?</div>' +
+      '<div style="display:flex;gap:6px;margin-bottom:13px;">' +
+        '<button class="sl-harv" data-h="" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #63C6FF;background:#22323b;color:#e8f0ea;cursor:pointer;font-size:11.5px;">None</button>' +
+        '<button class="sl-harv" data-h="buck" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">🎯 Buck</button>' +
+        '<button class="sl-harv" data-h="doe" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">🎯 Doe</button>' +
+      '</div>' +
+      '<textarea id="slNotes" placeholder="Notes — wind reality, what spooked, time of movement, direction they came from…" style="width:100%;box-sizing:border-box;min-height:64px;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:9px;padding:9px;font-size:12.5px;font-family:inherit;resize:vertical;margin-bottom:13px;"></textarea>' +
+      '<div style="display:flex;gap:9px;"><button id="slSave" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;">Save the sit</button><button id="slCancel" style="background:transparent;border:1px solid #3c4d42;color:#9db0a3;border-radius:9px;padding:11px 14px;cursor:pointer;">Cancel</button></div>';
+    function close(){ back.remove(); }
+    card.querySelector('#slX').addEventListener('click', close);
+    card.querySelector('#slCancel').addEventListener('click', close);
+    card.querySelector('#slStand').addEventListener('change', function(){ st.standId = this.value; });
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(b){ b.addEventListener('click', function(){ st.activity = b.getAttribute('data-k'); Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(x){ var on = x.getAttribute('data-k') === st.activity; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-buck'), function(b){ b.addEventListener('click', function(){ var id = b.getAttribute('data-bid'); st.bucks[id] = !st.bucks[id]; var on = st.bucks[id]; b.style.border = '1px solid ' + (on ? '#E8B04B' : '#3c4d42'); b.style.background = on ? '#3a3320' : '#1E2B23'; }); });
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(b){ b.addEventListener('click', function(){ st.harvest = b.getAttribute('data-h') || null; Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(x){ var on = (x.getAttribute('data-h') || null) === st.harvest; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
+    function bump(t, d){ st[t] = Math.max(0, (st[t] || 0) + d); var el = card.querySelector('#sl-' + t); if (el) el.textContent = st[t]; }
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-inc'), function(b){ b.addEventListener('click', function(){ bump(b.getAttribute('data-t'), 1); }); });
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-dec'), function(b){ b.addEventListener('click', function(){ bump(b.getAttribute('data-t'), -1); }); });
+    card.querySelector('#slSave').addEventListener('click', function(){
+      var stand = _logHuntStands().filter(function(s){ return s.id === st.standId; })[0]; if (!stand){ showToast('Pick a stand.'); return; }
+      var notes = (card.querySelector('#slNotes').value || '').trim(), pid = _logPropIdFor(stand), created = [];
+      function mk(type, buckId, count, harv){ var o = { id: uid(), type: type, lat: stand.lat, lng: stand.lng, approx: false, siteId: stand.id, propertyId: pid, createdAt: st.sitTime, moonPhase: getMoonPhase(new Date(st.sitTime)), solunarPeriod: classifyEventSolunarPeriod(new Date(st.sitTime), stand.lat, stand.lng), weather: null, weatherStatus: 'pending', fromSit: true, activity: st.activity }; if (buckId) o.buckProfileId = buckId; if (count && count > 1) o.count = count; if (harv) o.harvest = true; if (notes) o.note = notes; return o; }
+      if (st.does > 0) created.push(mk('doe', null, st.does, st.harvest === 'doe'));
+      var namedSeen = Object.keys(st.bucks).filter(function(b){ return st.bucks[b]; });
+      namedSeen.forEach(function(bid){ created.push(mk('buck', bid, 1, false)); });
+      if (st.unknown > 0) created.push(mk('buck', null, st.unknown, false));
+      if (st.harvest === 'buck' && !namedSeen.length && st.unknown === 0) created.push(mk('buck', null, 1, true));
+      if (st.harvest === 'doe' && st.does === 0) created.push(mk('doe', null, 1, true));
+      if (!created.length && !st.activity && !notes){ showToast('Nothing logged yet — set the movement, deer seen, or a note.'); return; }
+      created.forEach(function(o){ observations.push(o); saveObservation(o).catch(function(e){ console.error('Outdoor Companion: sit-log obs save failed', e); }); });
+      if (st.hunt){ st.hunt.observationIds = (st.hunt.observationIds || []).concat(created.map(function(o){ return o.id; })); st.hunt.sitLog = { activity: st.activity, does: st.does, buckIds: namedSeen, unknownBucks: st.unknown, harvest: st.harvest, notes: notes, loggedAt: Date.now() }; saveHuntEvent(st.hunt).catch(function(e){ console.error('Outdoor Companion: sit-log hunt save failed', e); }); }
+      try { renderObsMarkers(); } catch (e) {}
+      if (typeof activeTab !== 'undefined' && activeTab === 'log' && typeof renderLogList === 'function') renderLogList();
+      var seen = st.does + st.unknown + namedSeen.length;
+      showToast('Sit logged' + (seen ? ' — ' + seen + ' deer now feeding your maps' : '') + (st.harvest ? ' · 🎯 harvest recorded' : '') + '. It weighs into your rankings.');
+      close();
+    });
+  }
+  (function(){ var b = document.getElementById('sitLogBtn'); if (b) b.addEventListener('click', function(){ var h = activeHuntId ? huntEvents.filter(function(x){ return x.id === activeHuntId; })[0] : null; showSitLog(h || null); }); })();
 
   // Returns {start, end} timestamps for the currently selected Journal filter, or null for
   // "all time" (no filtering). Week/Month are calendar-based (start of week/month through
