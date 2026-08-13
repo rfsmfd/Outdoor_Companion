@@ -1836,7 +1836,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 282</div>
+    <div id="buildBadge">BUILD 283</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2535,8 +2535,8 @@
     scrape:   {label:'Scrape',        abbrev:'SCR', color:'#8B5E3C', hidden:true},
     rub:      {label:'Rub',           abbrev:'RUB', color:'#C9A03C', hidden:true},
     trail:    {label:'Trail',         abbrev:'TRL', color:'#7A8A94', hidden:true},
-    feeding:  {label:'Feeding Area',  abbrev:'FD',  color:'#8FA05C'},
-    bedding:  {label:'Bedding Area',  abbrev:'BED', color:'#4A7A6C'},
+    feeding:  {label:'Feeding Area',  abbrev:'FD',  color:'#8FA05C', emoji:'🌾'},
+    bedding:  {label:'Bedding Area',  abbrev:'BED', color:'#4A7A6C', emoji:'💤'},
     water:    {label:'Water Source',  abbrev:'H2O', color:'#4A7AA8'},
     sighting: {label:'Wildlife Sighting', abbrev:'SGT', color:'#D94A2E', hidden:true},
     custom:   {label:'Custom Point',  abbrev:'PIN', color:'#B8AF9C'}
@@ -3738,6 +3738,17 @@
       });
     }
     var siteNm = (siteName || '').trim();
+    // Habitat types (bedding 💤, feeding 🌾) carry an emoji so they read as themselves at a glance —
+    // the recognizable icon they had as sightings, kept now that they live as Sites. Rendered in a white
+    // disc with the type's colored ring (same visual language as the sighting glyphs).
+    if (t.emoji){
+      return L.divIcon({
+        className: '',
+        html: '<div class="site-badge-pin"><div class="site-marker" style="background:#fff;border-color:'+t.color+';font-size:16px;">'+t.emoji+'</div>' +
+              (siteNm ? '<div class="site-name-label">'+escapeHtml(siteNm)+'</div>' : '') + '</div>',
+        iconSize: [150,46], iconAnchor: [75,14], popupAnchor: [0,-16]
+      });
+    }
     return L.divIcon({
       className: '',
       html: '<div class="site-badge-pin"><div class="site-marker" style="--mc:'+t.color+'">'+t.abbrev+'</div>' +
@@ -6636,10 +6647,15 @@
     var t = getActiveTypes()[key]; if (!t || t.hidden) return null;   // retired types never get a toggle
     var isOn = activeFilters.has(key);
     var lbl = (key === 'camera') ? 'Camera Locations' : t.label;   // the dots/names (places), not the camera icons
+    // Types with a glyph (bedding 💤, feeding 🌾) show it here too, so the tray matches the map; the rest
+    // keep the simple colored dot (a blue dot is plenty for Water, etc.).
+    var icon = t.emoji
+      ? '<span style="display:inline-flex;box-sizing:border-box;width:20px;height:20px;border-radius:50%;background:#fff;border:2px solid '+t.color+';align-items:center;justify-content:center;vertical-align:middle;margin-right:3px;font-size:12px;line-height:1;">'+t.emoji+'</span>'
+      : '<span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>';
     var row = document.createElement('div');
     row.className = 'toggle-row';
     row.innerHTML =
-      '<div class="toggle-row-label"><span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>' + lbl + '</div>' +
+      '<div class="toggle-row-label">' + icon + lbl + '</div>' +
       '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>';
     row.querySelector('.toggle-switch').addEventListener('click', function(){
       if (activeFilters.has(key)) activeFilters.delete(key); else activeFilters.add(key);
