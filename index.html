@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 286</div>
+    <div id="buildBadge">BUILD 287</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4655,7 +4655,7 @@
       back.style.cssText = 'position:fixed;inset:0;z-index:100007;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
       var card = document.createElement('div');
       card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:20px;max-width:430px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
-      var __props = (typeof properties !== 'undefined' && properties) ? properties.slice().sort(function(a, b){ return (a.name||'').localeCompare(b.name||''); }) : [];
+      var __props = (typeof propsForModule === 'function') ? propsForModule().sort(function(a, b){ return (a.name||'').localeCompare(b.name||''); }) : [];
       var __defProps = Array.isArray(defaults.propertyIds) ? defaults.propertyIds : (defaults.propertyId ? [defaults.propertyId] : []);
       var propField = __props.length ? (
         '<label style="display:block;font-size:12px;color:#9db0a3;margin-bottom:6px;">Home farm(s) <span style="opacity:.7;">— where he lives; pick any he ranges (optional)</span></label>' +
@@ -6579,6 +6579,33 @@
     renderPropertySelect();
   }
 
+  // One-time cleanup for FULL module separation: older properties predate the `module` field, so a lake
+  // could show up under Hunting and vice-versa. Give any property missing a module a definite one, inferred
+  // (in order of confidence) from: the sites inside it (site type keys are module-unique — the reliable
+  // signal), then the NAME (the founder's water is named Pond/Lake/etc.), then defaulting to Hunting (the
+  // primary module). Already-assigned properties are never touched, so this is idempotent. The Manage
+  // Properties list has a per-property "move to the other module" button to correct any mistake by hand.
+  function inferPropertyModule(p){
+    var inSites = sites.filter(function(s){
+      return s.propertyId === p.id || (typeof s.lat === 'number' && pointInProperty(s.lat, s.lng, p));
+    });
+    var fish = 0, hunt = 0;
+    inSites.forEach(function(s){ if (Object.prototype.hasOwnProperty.call(TYPES_FISHING, s.type)) fish++; else hunt++; });
+    if (fish > 0 || hunt > 0) return fish >= hunt ? (fish === hunt ? 'hunting' : 'fishing') : 'hunting';
+    if (/\b(lake|pond|reservoir|river|creek|marsh|impoundment|slough|bayou)\b/i.test(p.name || '')) return 'fishing';
+    return 'hunting';
+  }
+  async function migratePropertyModules(){
+    var changed = [];
+    properties.forEach(function(p){
+      if (p.module === 'hunting' || p.module === 'fishing') return;   // already assigned — leave it
+      p.module = inferPropertyModule(p);
+      changed.push(p);
+    });
+    for (var i = 0; i < changed.length; i++){ try{ await saveProperty(changed[i]); }catch(e){} }
+    if (changed.length) renderPropertySelect();
+  }
+
   async function saveProperty(prop){
     if (hasChatStorage){
       await window.storage.set('prop:'+prop.id, JSON.stringify(prop), false);
@@ -6772,14 +6799,14 @@
     allOpt.value = '';
     allOpt.textContent = 'All Properties';
     sel.appendChild(allOpt);
-    properties.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); }).forEach(function(p){
+    propsForModule().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); }).forEach(function(p){
       var opt = document.createElement('option');
       opt.value = p.id;
       opt.textContent = p.name + ((p.boundary && p.boundary.length >= 3) ? '  ·  ' + acresLabel(polygonAcres(p.boundary)) : '');
       sel.appendChild(opt);
     });
-    // Restore previous selection if it still exists, else fall back to "All Properties"
-    if (properties.some(function(p){ return p.id === prevValue; })){
+    // Restore previous selection if it still exists IN THIS MODULE, else fall back to "All Properties"
+    if (propsForModule().some(function(p){ return p.id === prevValue; })){
       sel.value = prevValue;
     } else {
       sel.value = '';
@@ -6815,24 +6842,34 @@
 
   function renderPropertiesManageList(){
     var list = document.getElementById('propertiesList');
-    if (properties.length === 0){
-      list.innerHTML = '<div class="empty" style="padding:14px 0;">No properties yet — add one below.</div>';
+    var mine = propsForModule();
+    if (mine.length === 0){
+      list.innerHTML = '<div class="empty" style="padding:14px 0;">No ' + (activeModule === 'fishing' ? 'lakes' : 'properties') + ' yet — add one below.</div>';
       return;
     }
     list.innerHTML = '';
-    properties.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); }).forEach(function(p){
+    mine.sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); }).forEach(function(p){
       var siteCount = sites.filter(function(s){ return s.propertyId === p.id; }).length;
       var row = document.createElement('div');
       row.className = 'property-row';
       var stx = propSetupStatus(p), doneN = (stx.boundary?1:0) + (stx.stands>0?1:0) + (stx.entries>0?1:0) + (stx.paths>0?1:0) + (stx.feeding>0?1:0) + (stx.bedding>0?1:0);
+      var otherMod = activeModule === 'fishing' ? 'hunting' : 'fishing';
+      var otherLabel = otherMod === 'fishing' ? '🎣 Fishing' : '🏹 Hunting';
       row.innerHTML =
         '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + ' · setup ' + doneN + '/6</div></div>' +
-        '<div style="display:flex;gap:6px;flex-shrink:0;">' +
+        '<div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
           '<button class="btn-ghost" data-act="setup-prop" data-id="' + p.id + '" style="font-size:11px;padding:5px 10px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;">🗺 Set up</button>' +
+          '<button class="btn-ghost" data-act="move-prop" data-id="' + p.id + '" title="Wrong list? Move this to the other module" style="font-size:11px;padding:5px 9px;">→ ' + otherLabel + '</button>' +
           '<button class="btn-ghost" data-act="delete-prop" data-id="' + p.id + '" style="color:#D94A2E;font-size:11px;padding:5px 9px;">Delete</button>' +
         '</div>';
       list.appendChild(row);
       row.querySelector('[data-act="setup-prop"]').addEventListener('click', function(){ document.getElementById('managePropertiesModalBackdrop').classList.remove('show'); showPropertySetup(p); });
+      row.querySelector('[data-act="move-prop"]').addEventListener('click', async function(){
+        p.module = otherMod;
+        try{ await saveProperty(p); }catch(e){ console.error('Outdoor Companion: failed to move property', e); }
+        renderPropertiesManageList(); renderPropertySelect(); renderMarkers();
+        showToast('“' + p.name + '” moved to ' + (otherMod === 'fishing' ? 'Fishing' : 'Hunting'));
+      });
       row.querySelector('[data-act="delete-prop"]').addEventListener('click', async function(){
         var sure = confirm('Delete "' + p.name + '"?\n\nSites assigned to it will NOT be deleted — they\'ll just become Unassigned.');
         if (!sure) return;
@@ -9956,7 +9993,7 @@
     tempMarker = L.marker(latlng, {icon: markerIcon('custom')}).addTo(map);
 
     var propertyOptions = '<option value="">Unassigned</option>' +
-      properties.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
+      propsForModule().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
         .map(function(p){ return '<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>'; }).join('');
 
     var formHtml =
@@ -12686,6 +12723,7 @@
     await loadCameras();
     await loadDeployments();
     await loadProperties();
+    await migratePropertyModules();   // stamp a module on any legacy property missing one (sites → name → default)
     await loadHuntEvents();
     await loadTrails();
     await loadBuckProfiles();
