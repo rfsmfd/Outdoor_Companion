@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 288</div>
+    <div id="buildBadge">BUILD 289</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2076,7 +2076,9 @@
     <div class="oc-modal">
       <h3>Properties <button class="close-x" id="managePropertiesClose">&times;</button></h3>
       <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Organize your Sites by property (e.g. different leases or land parcels). Sites keep their data if you delete a property — they just become Unassigned again.</p>
-      <div id="propertiesList" style="margin-bottom:14px;"></div>
+      <div id="propertiesList" style="margin-bottom:10px;"></div>
+      <button class="btn-ghost" id="sortPropertiesBtn" style="width:100%;margin-bottom:12px;font-size:12px;">🔀 Sort properties: Hunting ⇄ Fishing</button>
+      <div id="propertySortView" style="display:none;margin-bottom:14px;"></div>
       <div class="form-pop">
         <label>Add New Property</label>
         <p style="font-size:11px;color:var(--accent);margin:0 0 8px 0;">📍 First, pan/zoom the map (behind this window) to frame the whole property — that exact view gets saved, so selecting this property later flies you straight back to it.</p>
@@ -6826,6 +6828,51 @@
         if (window.innerWidth <= 820) closeSidebar();
       }
     }
+  });
+
+  // The founder-facing "sort my properties" tool: every property, grouped into Hunting vs Fishing by its
+  // (best-guessed) module, with a one-tap switch to move any that's in the wrong list. Opening it also
+  // force-assigns a module to anything still ambiguous, so no property can keep showing in both lists.
+  async function renderPropertySortView(){
+    var v = document.getElementById('propertySortView');
+    if (!v) return;
+    var stamped = [];
+    properties.forEach(function(p){
+      if (p.module !== 'hunting' && p.module !== 'fishing'){ p.module = inferPropertyModule(p); stamped.push(p); }
+    });
+    for (var i = 0; i < stamped.length; i++){ try{ await saveProperty(stamped[i]); }catch(e){} }
+    if (stamped.length){ renderPropertySelect(); renderMarkers(); }
+
+    function groupHtml(mod){
+      var rows = properties.filter(function(p){ return p.module === mod; })
+        .sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); });
+      var other = mod === 'hunting' ? 'fishing' : 'hunting';
+      var otherLabel = other === 'fishing' ? '🎣 Fishing' : '🏹 Hunting';
+      var body = rows.length ? rows.map(function(p){
+        return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;margin-bottom:5px;">' +
+          '<span style="font-size:12.5px;">' + escapeHtml(p.name) + '</span>' +
+          '<button class="btn-ghost prop-sort-move" data-id="' + p.id + '" data-to="' + other + '" style="font-size:11px;padding:4px 8px;white-space:nowrap;">→ ' + otherLabel + '</button>' +
+        '</div>';
+      }).join('') : '<div style="font-size:11px;color:var(--text-dim);padding:2px 0 6px;">None</div>';
+      return '<div style="margin-bottom:12px;"><div style="font-weight:700;font-size:12.5px;margin-bottom:6px;">' + (mod === 'hunting' ? '🏹 Hunting' : '🎣 Fishing') + '</div>' + body + '</div>';
+    }
+    v.innerHTML = '<p style="font-size:11px;color:var(--text-dim);margin:0 0 10px;">Every property, sorted by module. Tap → to move any that\'s in the wrong list.</p>' + groupHtml('hunting') + groupHtml('fishing');
+    Array.prototype.forEach.call(v.querySelectorAll('.prop-sort-move'), function(btn){
+      btn.addEventListener('click', async function(){
+        var p = properties.filter(function(x){ return x.id === btn.getAttribute('data-id'); })[0];
+        if (!p) return;
+        p.module = btn.getAttribute('data-to');
+        try{ await saveProperty(p); }catch(e){}
+        renderPropertySortView(); renderPropertySelect(); renderPropertiesManageList(); renderMarkers();
+      });
+    });
+  }
+  document.getElementById('sortPropertiesBtn').addEventListener('click', function(){
+    var v = document.getElementById('propertySortView');
+    var opening = v.style.display === 'none';
+    v.style.display = opening ? 'block' : 'none';
+    this.textContent = opening ? '🔀 Hide sorter' : '🔀 Sort properties: Hunting ⇄ Fishing';
+    if (opening) renderPropertySortView();
   });
 
   document.getElementById('managePropertiesBtn').addEventListener('click', function(){
