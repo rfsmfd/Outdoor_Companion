@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 287</div>
+    <div id="buildBadge">BUILD 288</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8775,6 +8775,10 @@
   // ---------- Buck Gallery ----------
   function updateBuckGalleryButtonVisibility(){
     document.getElementById('buckGalleryBtn').style.display = activeModule === 'hunting' ? 'block' : 'none';
+    // Trail cameras are a hunting concept — the Cameras tab (register/deploy/import/history) has no place
+    // in Fishing mode. Hide the tab there entirely.
+    var _camTab = document.querySelector('.tab-btn[data-tab="cameras"]');
+    if (_camTab) _camTab.style.display = activeModule === 'hunting' ? '' : 'none';
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
@@ -12239,6 +12243,11 @@
     renderActiveList();
     updateTagHistoryButtonVisibility();
     updateBuckGalleryButtonVisibility();
+    // If we were sitting on the (now hidden) Cameras tab when switching to Fishing, bounce to Sites.
+    if (activeModule === 'fishing' && activeTab === 'cameras'){
+      var _sitesTab = document.querySelector('.tab-btn[data-tab="sites"]');
+      if (_sitesTab) _sitesTab.click();
+    }
     updateActiveHuntBar();
     document.getElementById('huntLogBtn').textContent = '📋 ' + (activeModule === 'fishing' ? 'Fish' : 'Hunt') + ' Journal';
     updateWindButtonTitle();
