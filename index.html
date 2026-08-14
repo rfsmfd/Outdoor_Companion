@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 307</div>
+    <div id="buildBadge">BUILD 308</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7317,14 +7317,12 @@
     try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: failed to save bathy', e); }
     return prop.bathy;
   }
-  function bathyDepthColor(ft){
-    // Pale cyan (shallow) → vivid cobalt (deep). Kept BRIGHT and saturated end-to-end so it reads over the
-    // dark pond water — the old ramp bottomed out near-black and vanished into the water at depth.
-    var t = Math.max(0, Math.min(1, ft / DEPTH_MAX_FT)), c;
-    if (t < 0.5){ var u = t / 0.5; c = [195 + (60 - 195) * u, 242 + (150 - 242) * u, 255 + (248 - 255) * u]; }
-    else { var u2 = (t - 0.5) / 0.5; c = [60 + (22 - 60) * u2, 150 + (60 - 150) * u2, 248 + (190 - 248) * u2]; }
-    return c;
-  }
+  // Depth BANDS (like a lake chart): each range is a flat shade, with a contour line drawn between bands.
+  var DEPTH_BAND_FT = [3, 6, 10, 15, 20, 30];            // contour lines fall at these depths
+  var DEPTH_BAND_COLORS = [
+    [200, 244, 255], [130, 210, 252], [80, 175, 245], [50, 135, 232], [38, 98, 210], [28, 65, 185], [20, 42, 150]
+  ];                                                       // shallow → deep (one more color than lines)
+  function depthBand(ft){ for (var i = 0; i < DEPTH_BAND_FT.length; i++){ if (ft < DEPTH_BAND_FT[i]) return i; } return DEPTH_BAND_FT.length; }
   function renderBathyOverlay(){
     if (!map.getPane('bathyPane')){ map.createPane('bathyPane'); map.getPane('bathyPane').style.zIndex = 413; map.getPane('bathyPane').style.pointerEvents = 'none'; }
     bathyOverlays.forEach(function(o){ map.removeLayer(o); }); bathyOverlays = [];
@@ -7333,9 +7331,20 @@
       if ((p.module || activeModule) !== 'fishing') return; var b = p.bathy; if (!b || !b.depthFt) return;
       var cols = b.cols, rows = b.rows;
       var cv = document.createElement('canvas'); cv.width = cols; cv.height = rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(cols, rows);
-      // Pure depth shading — the outer edge of the shaded area IS the detected waterline (no gold fill, which
-      // swallowed a narrow pond where every cell touches land).
-      for (var k = 0; k < cols * rows; k++){ var ft = b.depthFt[k], o = k * 4; if (ft > 0){ var col = bathyDepthColor(ft); id.data[o] = Math.round(col[0]); id.data[o+1] = Math.round(col[1]); id.data[o+2] = Math.round(col[2]); id.data[o+3] = 240; } else { id.data[o+3] = 0; } }
+      // Banded depth shading with a contour line between bands (and the waterline as the outer contour).
+      var df = b.depthFt;
+      function bandAt(idx){ return (idx >= 0 && idx < cols * rows && df[idx] > 0) ? depthBand(df[idx]) : -1; }
+      for (var k = 0; k < cols * rows; k++){
+        var ft = df[k], o = k * 4;
+        if (!(ft > 0)){ id.data[o+3] = 0; continue; }
+        var band = depthBand(ft), col = DEPTH_BAND_COLORS[band] || DEPTH_BAND_COLORS[DEPTH_BAND_COLORS.length - 1];
+        var x = k % cols, y = (k / cols) | 0;
+        // A cell whose neighbor is a DEEPER band gets the contour line (dark edge of its band). The waterline
+        // isn't line-filled (that swallows a narrow pond) — the outer edge of the shading IS the waterline.
+        var deeperNbr = (x+1<cols && bandAt(k+1) > band) || (x>0 && bandAt(k-1) > band) || (y+1<rows && bandAt(k+cols) > band) || (y>0 && bandAt(k-cols) > band);
+        if (deeperNbr){ id.data[o] = Math.round(col[0]*0.42); id.data[o+1] = Math.round(col[1]*0.42); id.data[o+2] = Math.round(col[2]*0.42); id.data[o+3] = 255; } // depth contour = dark line
+        else { id.data[o] = col[0]; id.data[o+1] = col[1]; id.data[o+2] = col[2]; id.data[o+3] = 235; }        // band fill
+      }
       ctx.putImageData(id, 0, 0);
       var bb = b.bbox; bathyOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'bathyPane', opacity: 0.82, interactive: false }).addTo(map));
     });
@@ -7351,7 +7360,9 @@
   function ensureBathyLegend(){
     var el = document.getElementById('bathyLegend');
     if (!el){ el = document.createElement('div'); el.id = 'bathyLegend'; el.style.cssText = 'position:absolute;bottom:70px;left:10px;z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:8px;padding:7px 9px;font-size:11px;display:none;';
-      el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth</div><div style="width:120px;height:10px;border-radius:3px;background:linear-gradient(90deg,rgb(195,242,255),rgb(60,150,248),rgb(22,60,190));"></div><div style="display:flex;justify-content:space-between;font-size:9px;margin-top:2px;color:#9db0a3;"><span>shallow</span><span>' + DEPTH_MAX_FT + ' ft+</span></div>';
+      var sw = DEPTH_BAND_COLORS.map(function(c){ return '<span style="flex:1;height:11px;background:rgb(' + c.join(',') + ');"></span>'; }).join('');
+      var bounds = [0].concat(DEPTH_BAND_FT), lbl = bounds.map(function(v, i){ return '<span>' + v + (i === bounds.length - 1 ? '+' : '') + '</span>'; }).join('');
+      el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth (ft)</div><div style="display:flex;width:154px;border-radius:3px;overflow:hidden;">' + sw + '</div><div style="display:flex;justify-content:space-between;width:154px;font-size:8px;margin-top:2px;color:#9db0a3;">' + lbl + '</div>';
       document.getElementById('map').appendChild(el); }
     return el;
   }
