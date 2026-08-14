@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 303</div>
+    <div id="buildBadge">BUILD 304</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7247,7 +7247,14 @@
   var bathyVisible = false, bathyOverlays = [], _bathyTapHandler = null;
   var DEPTH_MAX_FT = 30; // color-scale ceiling; deeper reads as "deepest"
   async function scanBathymetry(prop, onStatus){
-    var bb = propBBox(prop); if (!bb) throw new Error('no-area');
+    var bb = propBBox(prop);
+    if (!bb){
+      // Older/imported lakes never got a saved area. You're framing the pond on screen to scan it anyway —
+      // so use the CURRENT MAP VIEW as its area, and save it, so the lake has a real area from now on.
+      var mb = map.getBounds();
+      bb = { n: mb.getNorth(), s: mb.getSouth(), e: mb.getEast(), w: mb.getWest() };
+      prop.bounds = { north: bb.n, south: bb.s, east: bb.e, west: bb.w };
+    }
     var mPerLat = 111320, mPerLng = 111320 * Math.cos((bb.n + bb.s) / 2 * Math.PI / 180);
     var widthM = (bb.e - bb.w) * mPerLng, heightM = (bb.n - bb.s) * mPerLat;
     var degW = bb.e - bb.w, degH = bb.n - bb.s, LONG = 56, cols, rows;
