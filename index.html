@@ -1842,7 +1842,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 314</div>
+    <div id="buildBadge">BUILD 315</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6830,7 +6830,7 @@
     if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries();
     if (typeof renderBathyOverlay === 'function' && bathyVisible) renderBathyOverlay();   // swap to the newly-selected lake's depth map
     if (typeof renderBottomOverlay === 'function' && bottomVisible) renderBottomOverlay();
-    if (typeof renderMapOverlay === 'function' && mapOverlayVisible) renderMapOverlay();  // swap to the newly-selected lake's imported map
+    if (typeof renderMapOverlay === 'function' && mapOverlayVisible){ renderMapOverlay(); ensureMapOverlayControls().style.display = mapOverlayVisible ? 'block' : 'none'; }  // swap to the newly-selected lake's imported map
     if (typeof ensureBathyLegend === 'function' && bathyVisible) ensureBathyLegend();
     if (typeof ensureBottomLegend === 'function' && bottomVisible) ensureBottomLegend();
     if (activePropertyId){
@@ -7723,10 +7723,11 @@
     ctx.setTransform((ptr[0]-ptl[0])/iw, (ptr[1]-ptl[1])/iw, (pbl[0]-ptl[0])/ih, (pbl[1]-ptl[1])/ih, ptl[0], ptl[1]);
     ctx.drawImage(im, 0, 0);
     ctx.restore();
-    prop.mapOverlay = { img: c.toDataURL('image/jpeg', 0.82), bbox: bb, opacity: 0.9, clipped: !!clipRings, source: nhd ? ('NHD: ' + (nhd.name || 'lake')) : 'traced', v: MAPOV_V, createdAt: Date.now() };
+    prop.mapOverlay = { img: c.toDataURL('image/jpeg', 0.82), bbox: bb, opacity: 0.9, clipped: !!clipRings, name: (nhd && nhd.name) || null, source: nhd ? ('NHD: ' + (nhd.name || 'lake')) : 'traced', v: MAPOV_V, createdAt: Date.now() };
     if (nhd && nhd.acres > 0 && !prop.boundary && typeof prop.acresManual !== 'number'){ prop.nhdAcres = nhd.acres; }   // offer for catch-per-acre
     try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: save map overlay failed', e); }
     mapOverlayVisible = true; renderMapOverlay();
+    ensureMapOverlayControls().style.display = 'block';
     document.getElementById('mapOverlayToggleBtn').classList.add('active');
     renderPropertySelect();
     showToast(clipRings ? ('Map saved, clipped to the shoreline' + (nhd ? ' (NHD — ' + (nhd.acres || '?') + ' ac)' : '') + '. Toggle with 🗺 Map.') : 'Map saved — no shoreline found to clip to; trace it in Set up for a clean clip.');
@@ -7739,6 +7740,21 @@
     var m = prop.mapOverlay, bb = m.bbox;
     _mapOverlayLayer = L.imageOverlay(m.img, [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'mapOvPane', opacity: m.opacity || 0.9, interactive: false }).addTo(map);
   }
+  // Manage a saved overlay after the one-time fit: fade it to see your pins through it, replace, or remove.
+  function ensureMapOverlayControls(){
+    var el = document.getElementById('mapOvControls');
+    if (!el){ el = document.createElement('div'); el.id = 'mapOvControls'; el.style.cssText = 'position:absolute;bottom:96px;right:12px;z-index:1200;background:rgba(20,26,30,.93);color:#eef;border:1px solid #3c5a6d;border-radius:8px;padding:8px 10px;font-size:11px;display:none;'; document.getElementById('map').appendChild(el); }
+    var prop = activeFishingProp(), m = prop && prop.mapOverlay;
+    if (!m){ el.innerHTML = ''; return el; }
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:5px;">🗺 ' + (m.name ? m.name : 'Lake map') + '</div>' +
+      '<label style="display:flex;align-items:center;gap:6px;">Fade <input id="mapOvOpacity" type="range" min="20" max="100" value="' + Math.round((m.opacity || 0.9) * 100) + '" style="width:92px;accent-color:#4aa3ff;cursor:pointer;"></label>' +
+      '<div style="display:flex;gap:6px;margin-top:6px;"><button id="mapOvReplace" style="flex:1;background:#33506b;color:#dff;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;">Replace</button><button id="mapOvRemove" style="flex:1;background:#5a2f2f;color:#fdd;border:none;border-radius:6px;padding:5px 8px;cursor:pointer;">Remove</button></div>';
+    document.getElementById('mapOvOpacity').oninput = function(){ var o = this.value / 100; if (prop.mapOverlay){ prop.mapOverlay.opacity = o; } if (_mapOverlayLayer) _mapOverlayLayer.setOpacity(o); };
+    document.getElementById('mapOvOpacity').onchange = function(){ saveProperty(prop).catch(function(){}); };
+    document.getElementById('mapOvReplace').onclick = function(){ importLakeMap(prop); };
+    document.getElementById('mapOvRemove').onclick = async function(){ if (!(await showConfirm('Remove the imported map for ' + (prop.name || 'this lake') + '?'))) return; delete prop.mapOverlay; try { await saveProperty(prop); } catch (e){} mapOverlayVisible = false; renderMapOverlay(); el.style.display = 'none'; document.getElementById('mapOverlayToggleBtn').classList.remove('active'); showToast('Map removed.'); };
+    return el;
+  }
   document.getElementById('mapOverlayToggleBtn').addEventListener('click', function(){
     var btn = this, prop = activeFishingProp();
     if (!prop){ showToast('Pick your lake in the property dropdown first, then tap 🗺 Map.'); return; }
@@ -7747,6 +7763,7 @@
     mapOverlayVisible = !mapOverlayVisible;
     btn.classList.toggle('active', mapOverlayVisible);
     renderMapOverlay();
+    ensureMapOverlayControls().style.display = mapOverlayVisible ? 'block' : 'none';
   });
 
   // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
@@ -9425,7 +9442,7 @@
     if (_mo) _mo.style.display = activeModule === 'fishing' ? '' : 'none';
     if (activeModule !== 'fishing'){
       if (typeof _mapEditor !== 'undefined' && _mapEditor && typeof exitMapGeoref === 'function') exitMapGeoref();
-      if (typeof mapOverlayVisible !== 'undefined' && mapOverlayVisible){ mapOverlayVisible = false; if (typeof renderMapOverlay === 'function') renderMapOverlay(); if (_mo) _mo.classList.remove('active'); }
+      if (typeof mapOverlayVisible !== 'undefined' && mapOverlayVisible){ mapOverlayVisible = false; if (typeof renderMapOverlay === 'function') renderMapOverlay(); if (_mo) _mo.classList.remove('active'); var _moc = document.getElementById('mapOvControls'); if (_moc) _moc.style.display = 'none'; }
       if (typeof bathyVisible !== 'undefined' && bathyVisible){
         bathyVisible = false; if (typeof renderBathyOverlay === 'function') renderBathyOverlay();
         var _lg = document.getElementById('bathyLegend'); if (_lg) _lg.style.display = 'none';
