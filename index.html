@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 320</div>
+    <div id="buildBadge">BUILD 321</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6932,11 +6932,13 @@
         '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + catchChip + (propAcresLabel(p) ? ' · ' + propAcresLabel(p) : '') + ' · setup ' + doneN + '/' + totalN + '</div></div>' +
         '<div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
           '<button class="btn-ghost" data-act="setup-prop" data-id="' + p.id + '" style="font-size:11px;padding:5px 10px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;">🗺 Set up</button>' +
+          ((myGroups && myGroups.length && (!p.__ownerUid || p.__ownerUid === (firebase.auth().currentUser && firebase.auth().currentUser.uid))) ? '<button class="btn-ghost" data-act="share-prop" data-id="' + p.id + '" title="Share this whole farm with a group" style="font-size:11px;padding:5px 10px;background:#243b52;color:#dbeafe;border-color:#2f5573;">' + ((p.__sharedGroups || []).length ? '🤝 Shared (' + p.__sharedGroups.length + ')' : '🤝 Share') + '</button>' : '') +
           '<button class="btn-ghost" data-act="move-prop" data-id="' + p.id + '" title="Wrong list? Move this to the other module" style="font-size:11px;padding:5px 9px;">→ ' + otherLabel + '</button>' +
           '<button class="btn-ghost" data-act="delete-prop" data-id="' + p.id + '" style="color:#D94A2E;font-size:11px;padding:5px 9px;">Delete</button>' +
         '</div>';
       list.appendChild(row);
       row.querySelector('[data-act="setup-prop"]').addEventListener('click', function(){ document.getElementById('managePropertiesModalBackdrop').classList.remove('show'); showPropertySetup(p); });
+      var _shb = row.querySelector('[data-act="share-prop"]'); if (_shb) _shb.addEventListener('click', function(){ sharePropertyFlow(p); });
       row.querySelector('[data-act="move-prop"]').addEventListener('click', async function(){
         p.module = otherMod;
         try{ await saveProperty(p); }catch(e){ console.error('Outdoor Companion: failed to move property', e); }
@@ -10843,6 +10845,7 @@
         }catch(err){
           console.error('Outdoor Companion: failed to save site', err);
         }
+        autoShareToPropertyGroups('site', site.id, site.propertyId);   // new stand on a shared farm → shared too
         if (tempMarker){ map.removeLayer(tempMarker); tempMarker = null; }
         map.closePopup();
         exitPlacing();
@@ -13120,6 +13123,7 @@
     if (activeModule === 'fishing' && resolvedProperty && typeof fishingDepthAt === 'function'){ var _dft = fishingDepthAt(resolvedProperty, lat, lng); if (_dft != null) obs.depthFt = _dft; }
     observations.push(obs);
     try{ await saveObservation(obs); }catch(e){ console.error('Outdoor Companion: failed to save observation', e); }
+    autoShareToPropertyGroups('obs', obs.id, obs.propertyId);   // if this farm is shared, the new sighting/catch is too
 
     // Dual-linking: this observation keeps its own real map location (set above,
     // independent of the hunter's position) AND separately gets tagged to whichever
@@ -13580,7 +13584,7 @@
   // `cache` is a fresh closure per adapter, so rebuilding the adapter on a scope
   // switch guarantees no stale records bleed across from the previous scope.
   // Collections that can be shared into a group (Phase 3b-1: sites only; extend later).
-  var SHAREABLE_COLLECTIONS = { sites: true };
+  var SHAREABLE_COLLECTIONS = { sites: true, properties: true, observations: true, trails: true };   // cameras/deployments/bucks: rules ready, client wiring next
 
   function makeCloudStorage(scope){
     // Back-compat: a bare uid string means the user's private scope.
@@ -13934,10 +13938,70 @@
       }catch(e){ alert('Could not update sharing:\n' + ((e && e.message) || e)); this.disabled = false; }
     });
   }
+  // Share a whole FARM with group(s): stamp the property + every record attributed to it (stands,
+  // sightings/catches, trails) so the group sees the whole place at once. The natural unit of sharing.
+  async function sharePropertyFlow(prop){
+    if (!myGroups.length){ showToast('Create or join a group first, then you can share a farm.'); return; }
+    var pid = prop.id, current = {}; (prop.__sharedGroups || []).forEach(function(g){ current[g] = true; });
+    var siteKeys = sites.filter(function(s){ return s.propertyId === pid; });
+    var obsKeys = (typeof observations !== 'undefined' ? observations : []).filter(function(o){ return o.propertyId === pid; });
+    var trailKeys = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ return t.propertyId === pid; });
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100003;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:340px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    var rows = myGroups.map(function(g){
+      return '<label style="display:flex;align-items:center;gap:9px;padding:7px 0;cursor:pointer;font-size:14px;"><input type="checkbox" data-gid="' + g.id + '"' + (current[g.id] ? ' checked' : '') + ' style="width:18px;height:18px;accent-color:#FF6A13;">🤝 ' + escapeHtml(g.name) + '</label>';
+    }).join('');
+    function nphr(n, one, many){ return n + ' ' + (n === 1 ? one : many); }
+    card.innerHTML =
+      '<div style="font-weight:700;margin-bottom:4px;">Share “' + escapeHtml(prop.name) + '” with a group</div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">The group will see this farm read-only — its boundary, ' + nphr(siteKeys.length, 'stand', 'stands') + ', ' + nphr(obsKeys.length, 'sighting', 'sightings') + ', and ' + nphr(trailKeys.length, 'trail', 'trails') + '. It stays yours; uncheck to make it private again. <em>(Cameras come next.)</em></div>' +
+      rows +
+      '<div style="display:flex;gap:8px;margin-top:14px;"><button id="spCancel" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button><button id="spSave" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">Share</button></div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.querySelector('#spCancel').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('#spSave').addEventListener('click', async function(){
+      var chosen = []; Array.prototype.forEach.call(card.querySelectorAll('input[data-gid]'), function(cb){ if (cb.checked) chosen.push(cb.getAttribute('data-gid')); });
+      this.disabled = true; this.textContent = 'Sharing…';
+      try {
+        var keys = ['prop:' + pid];
+        siteKeys.forEach(function(s){ keys.push('site:' + s.id); });
+        obsKeys.forEach(function(o){ keys.push('obs:' + o.id); });
+        trailKeys.forEach(function(t){ keys.push('trail:' + t.id); });
+        for (var i = 0; i < keys.length; i++){ try { await window.storage.setSharing(keys[i], chosen); } catch (e){ console.error('Outdoor Companion: share farm item failed', keys[i], e); } }
+        close();
+        await reloadAllShareable();
+        renderAll(); renderPropertiesManageList(); if (typeof renderPropertySelect === 'function') renderPropertySelect();
+        showToast(chosen.length ? ('“' + prop.name + '” shared with ' + chosen.length + ' group' + (chosen.length > 1 ? 's' : '')) : ('“' + prop.name + '” made private again'));
+      } catch (e){ alert('Could not share the farm:\n' + ((e && e.message) || e)); this.disabled = false; this.textContent = 'Share'; }
+    });
+  }
+  // When a NEW record lands on a farm that's already shared, it inherits that farm's groups —
+  // so a stand or catch you add later shows up for the group without re-sharing the whole farm.
+  async function autoShareToPropertyGroups(prefix, id, propertyId){
+    if (!propertyId || !id || !window.storage || typeof window.storage.setSharing !== 'function') return;
+    var prop = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === propertyId; })[0];
+    var groups = prop && prop.__sharedGroups;
+    if (!groups || !groups.length) return;
+    try { await window.storage.setSharing(prefix + ':' + id, groups); } catch (e){ console.error('Outdoor Companion: auto-share new ' + prefix + ' failed', e); }
+  }
   async function reloadAfterSharing(storageKey){
     var prefix = String(storageKey).split(':')[0];
     if (prefix === 'site'){ await loadSites(); }
-    // Phase 3b-2: cameras / trails / bucks reload branches here.
+    else if (prefix === 'obs'){ await loadObservations(); }
+    else if (prefix === 'trail'){ await loadTrails(); }
+    else if (prefix === 'prop'){ await loadProperties(); }
+    // Phase 3b-2: cameras / deployments / bucks reload branches here.
+  }
+  // Reload everything a shared farm can carry (used after a bulk "share this farm").
+  async function reloadAllShareable(){
+    try { await loadProperties(); } catch (e) {}
+    try { await loadSites(); } catch (e) {}
+    try { await loadObservations(); } catch (e) {}
+    try { await loadTrails(); } catch (e) {}
   }
 
   // One-time import of anything already in THIS browser's localStorage into the user's cloud
