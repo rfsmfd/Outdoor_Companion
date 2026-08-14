@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 295</div>
+    <div id="buildBadge">BUILD 296</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -11477,7 +11477,7 @@
       showToast('No GPS fix yet — using the map\'s current view instead, so double-check the Property matched correctly');
     }
 
-    var match = nearestSite(lat, lng, NEAREST_SITE_RADIUS_M);
+    var match = nearestSite(lat, lng, nearestSiteRadiusM());
     var noun = activeModule === 'fishing' ? 'Lake' : 'Property';
 
     // Resolve which Property/Lake (if any) this location falls inside — handles the
@@ -12393,12 +12393,15 @@
   document.getElementById('sheetClose').addEventListener('click', closeSheet);
   document.getElementById('sheetBackdrop').addEventListener('click', closeSheet);
 
-  var NEAREST_SITE_RADIUS_M = 75; // auto-associate an observation with a site within this range
+  var NEAREST_SITE_RADIUS_M = 75; // hunting: auto-associate an observation with a site within this range (stands/cameras sit far apart)
+  // Fishing structure sits much closer together — a catch beyond ~25 yards is on the NEXT brush pile, so
+  // use a tight radius there (23 m ≈ 25 yd) instead of the hunting 75 m, per the founder.
+  function nearestSiteRadiusM(){ return activeModule === 'fishing' ? 23 : NEAREST_SITE_RADIUS_M; }
 
   // Core observation creation — takes explicit coordinates so it can be called either
   // from the fast "use my location now" path or after a crosshair location correction.
   async function createAndSaveObservation(type, lat, lng, approx){
-    var match = nearestSite(lat, lng, NEAREST_SITE_RADIUS_M);
+    var match = nearestSite(lat, lng, nearestSiteRadiusM());
     // Same universal rule as Hunt Start, but without the extra confirm step — a single
     // match auto-attributes silently to preserve fast field logging; only a genuine
     // 2+ overlap (rare) stops to ask, since that's the actual double-counting risk.
