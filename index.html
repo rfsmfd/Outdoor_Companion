@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 310</div>
+    <div id="buildBadge">BUILD 311</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7378,7 +7378,7 @@
   function activeFishingProp(){ if (!activePropertyId) return null; var p = properties.filter(function(x){ return x.id === activePropertyId; })[0]; return (p && (p.module || activeModule) === 'fishing') ? p : null; }
   function ensureBathyLegend(){
     var el = document.getElementById('bathyLegend');
-    if (!el){ el = document.createElement('div'); el.id = 'bathyLegend'; el.style.cssText = 'position:absolute;bottom:70px;left:10px;z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:8px;padding:7px 9px;font-size:11px;display:none;';
+    if (!el){ el = document.createElement('div'); el.id = 'bathyLegend'; el.style.cssText = 'position:absolute;bottom:96px;left:64px;z-index:1200;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:8px;padding:7px 9px;font-size:11px;display:none;';
       document.getElementById('map').appendChild(el); }
     // Rebuild every time off the active pond's OWN band edges so the scale ties to that pond's real depths.
     var p = activeFishingProp(), b = p && p.bathy, edges = b ? bathyEdges(b) : DEPTH_BAND_FT;
@@ -7436,6 +7436,12 @@
     renderBathyOverlay();
     ensureBathyLegend().style.display = 'block';
     setBathyTap(true);
+    // Unmissable calibration offer — the legend's 📏 link can hide behind the map buttons, so ask outright
+    // the first time a pond is scanned. You know the real depth; anchor the map to it now.
+    if (!b.knownMaxFt && mx > 0){
+      var setNow = await showConfirm('Depth scanned — the LiDAR reads deepest ≈ ' + (mx >= 1 ? Math.round(mx) : mx) + ' ft.\n\nYou fish this water — is it actually deeper than that? Tap OK to enter your real max depth and the whole map scales to it. (You can change it anytime from 📏 in the depth legend.)');
+      if (setNow) calibrateBathyDepth();
+    }
     return true;
   }
   document.getElementById('depthToggleBtn').addEventListener('click', async function(){
