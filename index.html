@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 317</div>
+    <div id="buildBadge">BUILD 318</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13776,6 +13776,7 @@
       var isSel = (activeScope.type === 'group' && activeScope.id === g.id) ? ' selected' : '';
       opts.push('<option value="' + v + '"' + isSel + '>🤝 ' + escapeHtml(g.name || 'Group') + '</option>');
     });
+    if (activeScope.type === 'group') opts.push('<option value="__manage__">⚙ Group info &amp; invite code…</option>');
     opts.push('<option value="__create__">＋ Create a group…</option>');
     opts.push('<option value="__join__">🔑 Join with a code…</option>');
     if (activeScope.type === 'group') opts.push('<option value="__leave__">🚪 Leave this group…</option>');
@@ -13787,6 +13788,7 @@
     var v = sel.value;
     var uid = firebase.auth().currentUser && firebase.auth().currentUser.uid;
     if (!uid){ return; }
+    if (v === '__manage__'){ sel.value = currentScopeValue(); await showGroupPanel(activeScope.id); return; }
     if (v === '__create__'){ sel.value = currentScopeValue(); await doCreateGroup(uid); return; }
     if (v === '__join__'){ sel.value = currentScopeValue(); await doJoinGroup(uid); return; }
     if (v === '__leave__'){ sel.value = currentScopeValue(); await doLeaveGroup(uid); return; }
@@ -13801,7 +13803,8 @@
       var res = await createGroup(name, uid);
       await loadMyGroups(uid);
       await applyScope({ type: 'group', id: res.gid });
-      window.prompt('Group "' + name + '" created!\n\nShare this invite code with your group so they can join (tap and copy):', res.code);
+      showToast('Group "' + name + '" created');
+      await showGroupPanel(res.gid);   // shows the invite code (with Copy) + members, and it's re-openable anytime
     }catch(e){ alert('Could not create the group:\n' + ((e && e.message) || e)); }
   }
 
@@ -13829,6 +13832,62 @@
       await applyScope({ type: 'user', id: uid });
       showToast('Left the group');
     }catch(e){ alert('Could not leave the group:\n' + ((e && e.message) || e)); }
+  }
+
+  // ---- Group info panel: the invite code (re-showable!) + member list + rename/leave ----
+  // Closes the gap that blocked two-account testing: after a group is created the code was only
+  // shown once. Now any member can re-open it to see the code (to invite someone) and who's in.
+  async function showGroupPanel(gid){
+    var uid = firebase.auth().currentUser && firebase.auth().currentUser.uid;
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:360px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);max-height:85vh;overflow:auto;';
+    card.innerHTML = '<div style="color:#9db0a3;">Loading group…</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    var g;
+    try { var snap = await firebase.firestore().collection('groups').doc(gid).get(); if (!snap.exists){ card.innerHTML = '<div>Group not found.</div>'; return; } g = snap.data() || {}; }
+    catch (e){ card.innerHTML = '<div style="color:#e8a;">Couldn\'t load this group.<br>' + escapeHtml((e && e.message) || '') + '</div>'; return; }
+    var isOwner = g.ownerUid === uid, members = g.members || {}, mkeys = Object.keys(members);
+    var memRows = mkeys.map(function(mu){
+      var m = members[mu] || {}, who = escapeHtml(m.name || mu.slice(0, 6)), role = (mu === g.ownerUid) ? 'owner' : (m.role || 'member');
+      var youTag = (mu === uid) ? ' <span style="color:#7fd6a0;">(you)</span>' : '';
+      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid #33443a;font-size:14px;"><span>' + who + youTag + '</span><span style="color:#9db0a3;font-size:12px;">' + role + '</span></div>';
+    }).join('') || '<div style="color:#9db0a3;padding:6px 0;">No members listed yet.</div>';
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">' +
+        '<div style="font-weight:700;font-size:16px;">🤝 ' + escapeHtml(g.name || 'Group') + '</div>' +
+        (isOwner ? '<button id="gpRename" style="background:transparent;border:1px solid #3c4d42;color:#c7d4cc;border-radius:7px;padding:4px 8px;font-size:12px;cursor:pointer;">Rename</button>' : '') +
+      '</div>' +
+      '<div style="background:#1c2620;border:1px dashed #3f8f5a;border-radius:10px;padding:10px;margin-bottom:12px;">' +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:5px;">Invite code — give this to whoever you want in the group</div>' +
+        '<div style="display:flex;align-items:center;gap:8px;">' +
+          '<span id="gpCode" style="font-size:22px;font-weight:800;letter-spacing:3px;font-family:monospace;color:#dff1e6;">' + escapeHtml(g.inviteCode || '—') + '</span>' +
+          '<button id="gpCopy" style="background:#2f6b45;color:#eaffef;border:none;border-radius:7px;padding:6px 10px;font-size:12px;cursor:pointer;">Copy</button>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-weight:600;font-size:13px;margin-bottom:2px;">Members (' + mkeys.length + ')</div>' +
+      memRows +
+      '<div style="display:flex;gap:8px;margin-top:16px;">' +
+        '<button id="gpClose" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Close</button>' +
+        '<button id="gpLeave" style="flex:1;padding:9px;border-radius:8px;border:none;background:#7a3b3b;color:#ffe;cursor:pointer;">🚪 Leave</button>' +
+      '</div>';
+    card.querySelector('#gpClose').addEventListener('click', close);
+    card.querySelector('#gpCopy').addEventListener('click', function(){
+      var code = g.inviteCode || '';
+      function fallbackCopy(){ try { var r = document.createRange(); r.selectNodeContents(card.querySelector('#gpCode')); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('copy'); showToast('Invite code copied'); } catch (_){ showToast('Select the code above and copy it'); } }
+      try { if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(code).then(function(){ showToast('Invite code copied'); }, fallbackCopy); } else fallbackCopy(); }
+      catch (e){ fallbackCopy(); }
+    });
+    var rn = card.querySelector('#gpRename');
+    if (rn) rn.addEventListener('click', async function(){
+      var nn = (window.prompt('Rename group', g.name || '') || '').trim(); if (!nn || nn === g.name) return;
+      try { await firebase.firestore().collection('groups').doc(gid).update({ name: nn }); if (uid) await loadMyGroups(uid); renderScopeSwitcher(); close(); showToast('Renamed to "' + nn + '"'); }
+      catch (e){ alert('Could not rename the group:\n' + ((e && e.message) || e)); }
+    });
+    card.querySelector('#gpLeave').addEventListener('click', async function(){ close(); if (uid) await doLeaveGroup(uid); });
   }
 
   // ---- Per-item sharing (Phase 3b): tag an item with the groups it's shared to ----
