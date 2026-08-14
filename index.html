@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 309</div>
+    <div id="buildBadge">BUILD 310</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7316,12 +7316,11 @@
     // deepest reading spreads the full shallow→deep palette across it so the channel actually stands out.
     var dsorted = depthFt.filter(function(v){ return v > 0; }).sort(function(a, b){ return a - b; });
     var maxFt = dsorted.length ? dsorted[Math.floor((dsorted.length - 1) * 0.97)] : 0;   // 97th pct: ignore a lone deep pixel
-    var rstep = maxFt / 6;
-    var step = rstep <= 0 ? 1 : rstep < 0.75 ? 0.5 : rstep < 1.5 ? 1 : rstep < 2.25 ? 2 : rstep < 3.5 ? 2.5 : rstep < 7.5 ? 5 : 10;
-    var bandEdges = []; for (var be = 1; be <= 6; be++) bandEdges.push(Math.round(step * be * 10) / 10);
+    var bandEdges = computeBandEdges(maxFt);
     // Bonus: the water footprint (traced outline or auto) gives an acreage estimate (pond cells × cell area).
     var cellAreaM2 = (widthM / W) * (heightM / H), acres = (pondN * cellAreaM2) / 4046.8564;
-    prop.bathy = { bbox: bb, cols: W, rows: H, poolM: pool, depthFt: depthFt, bandEdges: bandEdges, maxFt: Math.round(maxFt * 10) / 10, traced: !!(prop.boundary && prop.boundary.length >= 3), acres: Math.round(acres * 10) / 10, v: BATHY_V, createdAt: Date.now() };
+    var priorKnown = prop.bathy && prop.bathy.knownMaxFt;   // keep your entered real depth across a rescan
+    prop.bathy = { bbox: bb, cols: W, rows: H, poolM: pool, depthFt: depthFt, bandEdges: bandEdges, maxFt: Math.round(maxFt * 10) / 10, knownMaxFt: priorKnown, traced: !!(prop.boundary && prop.boundary.length >= 3), acres: Math.round(acres * 10) / 10, v: BATHY_V, createdAt: Date.now() };
     try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: failed to save bathy', e); }
     return prop.bathy;
   }
@@ -7331,6 +7330,18 @@
     [200, 244, 255], [130, 210, 252], [80, 175, 245], [50, 135, 232], [38, 98, 210], [28, 65, 185], [20, 42, 150]
   ];                                                       // shallow → deep (one more color than lines)
   function depthBand(ft, edges){ edges = edges || DEPTH_BAND_FT; for (var i = 0; i < edges.length; i++){ if (ft < edges[i]) return i; } return edges.length; }
+  // Size 6 depth bands to a pond's real max, snapped to friendly steps (a 12-ft pond → 2/4/6/8/10/12).
+  function computeBandEdges(maxFt){
+    var rstep = maxFt / 6;
+    var step = rstep <= 0 ? 1 : rstep < 0.75 ? 0.5 : rstep < 1.5 ? 1 : rstep < 2.25 ? 2 : rstep < 3.5 ? 2.5 : rstep < 7.5 ? 5 : 10;
+    var e = []; for (var b = 1; b <= 6; b++) e.push(Math.round(step * b * 10) / 10); return e;
+  }
+  // Calibration: you know your pond's real deepest (you fish it); the LiDAR often under-reads the very bottom
+  // (water sitting in the hole when it flew). knownMaxFt anchors the map — waterline stays 0, the deepest cell
+  // becomes YOUR number, everything scales proportionally between. Absent → the raw LiDAR reading stands.
+  function bathyScale(b){ var raw = b && b.maxFt || 0; return (b && b.knownMaxFt && raw > 0) ? (b.knownMaxFt / raw) : 1; }
+  function bathyMaxFt(b){ return (b && b.knownMaxFt) || (b && b.maxFt) || 0; }
+  function bathyEdges(b){ return computeBandEdges(bathyMaxFt(b)); }
   function renderBathyOverlay(){
     if (!map.getPane('bathyPane')){ map.createPane('bathyPane'); map.getPane('bathyPane').style.zIndex = 413; map.getPane('bathyPane').style.pointerEvents = 'none'; }
     bathyOverlays.forEach(function(o){ map.removeLayer(o); }); bathyOverlays = [];
@@ -7340,10 +7351,10 @@
       var cols = b.cols, rows = b.rows;
       var cv = document.createElement('canvas'); cv.width = cols; cv.height = rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(cols, rows);
       // Banded depth shading with a contour line between bands (and the waterline as the outer contour).
-      var df = b.depthFt, edges = b.bandEdges || DEPTH_BAND_FT;
-      function bandAt(idx){ return (idx >= 0 && idx < cols * rows && df[idx] > 0) ? depthBand(df[idx], edges) : -1; }
+      var df = b.depthFt, edges = bathyEdges(b), scale = bathyScale(b);
+      function bandAt(idx){ return (idx >= 0 && idx < cols * rows && df[idx] > 0) ? depthBand(df[idx] * scale, edges) : -1; }
       for (var k = 0; k < cols * rows; k++){
-        var ft = df[k], o = k * 4;
+        var ft = df[k] * scale, o = k * 4;
         if (!(ft > 0)){ id.data[o+3] = 0; continue; }
         var band = depthBand(ft, edges), col = DEPTH_BAND_COLORS[band] || DEPTH_BAND_COLORS[DEPTH_BAND_COLORS.length - 1];
         var x = k % cols, y = (k / cols) | 0;
@@ -7362,7 +7373,7 @@
     if (lat > bb.n || lat < bb.s || lng > bb.e || lng < bb.w) return null;
     var x = Math.floor((lng - bb.w) / (bb.e - bb.w) * b.cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * b.rows);
     if (x < 0 || y < 0 || x >= b.cols || y >= b.rows) return null;
-    var ft = b.depthFt[y * b.cols + x]; return ft > 0 ? ft : 0;
+    var ft = b.depthFt[y * b.cols + x] * bathyScale(b); return ft > 0 ? ft : 0;
   }
   function activeFishingProp(){ if (!activePropertyId) return null; var p = properties.filter(function(x){ return x.id === activePropertyId; })[0]; return (p && (p.module || activeModule) === 'fishing') ? p : null; }
   function ensureBathyLegend(){
@@ -7370,11 +7381,27 @@
     if (!el){ el = document.createElement('div'); el.id = 'bathyLegend'; el.style.cssText = 'position:absolute;bottom:70px;left:10px;z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:8px;padding:7px 9px;font-size:11px;display:none;';
       document.getElementById('map').appendChild(el); }
     // Rebuild every time off the active pond's OWN band edges so the scale ties to that pond's real depths.
-    var p = activeFishingProp(), edges = (p && p.bathy && p.bathy.bandEdges) || DEPTH_BAND_FT;
+    var p = activeFishingProp(), b = p && p.bathy, edges = b ? bathyEdges(b) : DEPTH_BAND_FT;
     var sw = DEPTH_BAND_COLORS.slice(0, edges.length + 1).map(function(c){ return '<span style="flex:1;height:11px;background:rgb(' + c.join(',') + ');"></span>'; }).join('');
     var bounds = [0].concat(edges), lbl = bounds.map(function(v, i){ return '<span>' + v + (i === bounds.length - 1 ? '+' : '') + '</span>'; }).join('');
-    el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth (ft)</div><div style="display:flex;width:154px;border-radius:3px;overflow:hidden;">' + sw + '</div><div style="display:flex;justify-content:space-between;width:154px;font-size:8px;margin-top:2px;color:#9db0a3;">' + lbl + '</div>';
+    var calTxt = (b && b.knownMaxFt) ? ('📏 set to ' + b.knownMaxFt + ' ft — edit') : '📏 set your real max depth';
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth (ft)</div><div style="display:flex;width:154px;border-radius:3px;overflow:hidden;">' + sw + '</div><div style="display:flex;justify-content:space-between;width:154px;font-size:8px;margin-top:2px;color:#9db0a3;">' + lbl + '</div><div id="bathyCalBtn" style="margin-top:5px;font-size:9px;color:#8fd0ff;cursor:pointer;text-decoration:underline;">' + calTxt + '</div>';
+    var calEl = document.getElementById('bathyCalBtn');
+    if (calEl) calEl.onclick = function(){ calibrateBathyDepth(); };
     return el;
+  }
+  // Let the founder anchor the map to a depth he KNOWS (he fishes it). Scales the whole chart so the deepest
+  // reads his number; blank clears back to the raw LiDAR reading.
+  function calibrateBathyDepth(){
+    var prop = activeFishingProp(); if (!prop || !prop.bathy){ showToast('Scan the pond first (🌊 Depth), then set your known depth.'); return; }
+    var b = prop.bathy, cur = b.knownMaxFt ? String(b.knownMaxFt) : (b.maxFt ? String(b.maxFt) : '');
+    var v = prompt('Deepest known depth of this pond, in feet?\n\nThe LiDAR read ~' + (b.maxFt || 0) + ' ft, but it often under-reads the hole. Your number wins.\n\n(Leave blank to clear and use the raw LiDAR reading.)', cur);
+    if (v === null) return;
+    v = ('' + v).trim();
+    if (v === ''){ delete b.knownMaxFt; showToast('Cleared — showing the raw LiDAR depth (~' + (b.maxFt || 0) + ' ft).'); }
+    else { var n = parseFloat(v); if (!(n > 0)){ showToast('Enter a number of feet, like 11.'); return; } b.knownMaxFt = Math.round(n * 10) / 10; showToast('Calibrated — deepest now reads ' + b.knownMaxFt + ' ft, everything scaled to it.'); }
+    saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: save bathy calibration failed', e); });
+    renderBathyOverlay(); ensureBathyLegend();
   }
   function setBathyTap(on){
     if (on && !_bathyTapHandler){
@@ -7400,9 +7427,9 @@
       console.error('Outdoor Companion: bathy scan failed', e); return false;
     }
     btn.textContent = '🌊 Depth';
-    var b = prop.bathy, mx = b.maxFt || 0;
+    var b = prop.bathy, mx = bathyMaxFt(b);
     var acTxt = b.acres > 0 ? (' · ~' + b.acres + ' acres') : '';
-    var hint = b.traced ? '' : ' (auto — trace the outline for a true waterline)';
+    var hint = b.knownMaxFt ? '' : ' — if that\'s shallow, tap 📏 in the legend to set your real max';
     showToast(mx > 1 ? ('Bottom read — deepest ≈ ' + (mx >= 1 ? Math.round(mx) : mx) + ' ft' + acTxt + hint + '. Tap the water to read a depth.') : ('Scanned' + acTxt + ' — but the LiDAR here reads flat (captured after the pond filled), so there\'s no bottom to show.'));
     renderPropertySelect(); renderPropertiesManageList();   // acreage estimate now shows on the lake
     bathyVisible = true; btn.classList.add('active');
