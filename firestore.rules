@@ -2,32 +2,41 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // A reader may see another member's item if it's shared with a group the reader belongs to.
+    // Membership is checked against the function-only mirror memberships/{uid}. .get(field, [])
+    // everywhere so a missing field can't raise an error — an erroring rule on ANY doc a
+    // collectionGroup query returns fails the whole query.
+    function memberGroups() {
+      return get(/databases/$(database)/documents/memberships/$(request.auth.uid)).data.get('groups', []);
+    }
+    function canReadShared() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/memberships/$(request.auth.uid))
+        && resource.data.get('sharedGroups', []).hasAny(memberGroups());
+    }
+
     // ---- Private per-user data: the owner can do anything with their own tree. ----
     match /users/{uid}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
-    // ---- Cross-member READ of a shared item (Phase 3b) ----
-    // A member may read another member's item if that item is shared with any group the
-    // reader belongs to. Membership is checked against the function-only mirror doc
-    // memberships/{uid}. .get(field, []) everywhere so a missing field can't raise an
-    // error (an erroring rule on any doc a collectionGroup query returns fails the whole
-    // query). CRITICAL: this MUST be a recursive-wildcard path with the LITERAL collection
-    // name ( /{path=**}/sites/... ), NOT a single-segment {coll} wildcard — Firestore only
-    // authorizes a collectionGroup('sites') query against rules that name the collection
-    // group this way; a {coll} wildcard yields permission-denied. One match per shareable
-    // collection (Phase 3b-1: sites only; add cameras/trails/bucks in 3b-2).
-    match /{path=**}/sites/{docId} {
-      allow read: if request.auth != null
-        && exists(/databases/$(database)/documents/memberships/$(request.auth.uid))
-        && resource.data.get('sharedGroups', []).hasAny(
-             get(/databases/$(database)/documents/memberships/$(request.auth.uid)).data.get('groups', []));
-    }
+    // ---- Cross-member READ of shared items (Phase 3b) ----
+    // CRITICAL: each shareable collection needs its OWN recursive-wildcard rule naming the
+    // collection LITERALLY ( /{path=**}/<name>/... ). A single-segment {coll} wildcard does NOT
+    // authorize a collectionGroup(<name>) query — it yields permission-denied. One block per
+    // collection. Writes stay owner-only via the users/{uid} rule above (a member can read a
+    // shared item but never write it — the app also hides edit controls on non-owned items).
+    match /{path=**}/sites/{docId}        { allow read: if canReadShared(); }
+    match /{path=**}/properties/{docId}   { allow read: if canReadShared(); }
+    match /{path=**}/observations/{docId} { allow read: if canReadShared(); }
+    match /{path=**}/trails/{docId}       { allow read: if canReadShared(); }
+    match /{path=**}/cameras/{docId}      { allow read: if canReadShared(); }
+    match /{path=**}/deployments/{docId}  { allow read: if canReadShared(); }
+    match /{path=**}/bucks/{docId}        { allow read: if canReadShared(); }
 
     // ---- Membership mirror: readable by the user, written ONLY by Cloud Functions ----
-    // Must live at the top level (not under users/{uid}) — the recursive owner rule
-    // above would otherwise let a user forge their own group list and read any group's
-    // shared items. Admin SDK (create/join/leave functions) bypasses write:false.
+    // Must live at the top level (not under users/{uid}) — the recursive owner rule above
+    // would otherwise let a user forge their own group list and read any group's shared items.
     match /memberships/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if false;
@@ -38,15 +47,15 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid in resource.data.memberUids;
       allow create: if false; // createGroup function only (also seeds the membership mirror)
       allow delete: if false; // leaveGroup function only
-      // A future owner-side rename could use this; membership/owner/code stay frozen.
+      // Owner-side rename only; membership/owner/code stay frozen.
       allow update: if request.auth != null
                     && request.auth.uid == resource.data.ownerUid
                     && request.resource.data.memberUids == resource.data.memberUids
                     && request.resource.data.ownerUid == resource.data.ownerUid
                     && request.resource.data.inviteCode == resource.data.inviteCode;
 
-      // The Phase-3a shared sub-tree is no longer written, but keep it members-only so
-      // any leftover 3a test data is never world-readable. (Safe to remove later.)
+      // Legacy Phase-3a shared sub-tree (no longer written) — keep members-only so any leftover
+      // test data is never world-readable. (Safe to remove later.)
       match /{coll}/{docId} {
         allow read, write: if request.auth != null
           && request.auth.uid in get(/databases/$(database)/documents/groups/$(gid)).data.memberUids;
