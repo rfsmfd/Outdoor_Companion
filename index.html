@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 292</div>
+    <div id="buildBadge">BUILD 293</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -14834,6 +14834,60 @@
       '<div style="font-size:9.5px;color:#6f8377;margin-top:6px;line-height:1.4;">Solunar feeding times + barometric pressure — a read on the best odds, not a guarantee.</div>' +
     '</div>';
   }
+  // ---------- Bite forecast back-test ----------
+  // Grade every logged CATCH by the same factors the forecast uses, but from the conditions actually
+  // stored on that catch (the solunar period it fell in, moon phase, pressure trend). Lets the tool be
+  // checked against what you really caught. Honest about a thin sample — it only means something once
+  // catches accumulate, exactly the "data's still coming" reality on the hunting side.
+  function catchBiteGrade(o){
+    var moon = o.moonPhase; if (!moon) return null;
+    var moonForce = Math.abs((moon.illumination || 0) - 50) / 50;
+    var sol = (o.solunarPeriod === 'Major Period') ? 1.0 : (o.solunarPeriod === 'Minor Period' ? 0.6 : 0);
+    var pBoost = 0;
+    if (o.weatherStatus === 'ok' && o.weather && o.weather.pressureTrend){
+      var pt = o.weather.pressureTrend;
+      pBoost = (pt === 'Falling') ? 10 : (pt === 'Rising') ? -10 : 0;
+    }
+    var score = Math.max(3, Math.min(99, Math.round(45 + moonForce * 22 + sol * 16 + pBoost)));
+    return score >= 75 ? 'Prime' : score >= 60 ? 'Good' : score >= 45 ? 'Fair' : 'Slow';
+  }
+  function biteBackTest(){
+    var catches = (typeof observations !== 'undefined' ? observations : []).filter(function(o){
+      return o.createdAt && isFishSpeciesType(o.type);
+    });
+    var buckets = { Prime: 0, Good: 0, Fair: 0, Slow: 0 };
+    var solHit = 0, pGood = 0, pKnown = 0;
+    catches.forEach(function(o){
+      if (o.solunarPeriod === 'Major Period' || o.solunarPeriod === 'Minor Period') solHit++;
+      if (o.weatherStatus === 'ok' && o.weather && o.weather.pressureTrend){
+        pKnown++;
+        if (o.weather.pressureTrend === 'Falling' || o.weather.pressureTrend === 'Steady') pGood++;
+      }
+      var g = catchBiteGrade(o); if (g) buckets[g]++;
+    });
+    return { total: catches.length, buckets: buckets, solHit: solHit, pGood: pGood, pKnown: pKnown };
+  }
+  function biteBackTestHtml(){
+    var bt = biteBackTest();
+    if (bt.total === 0){
+      return '<div style="font-size:11.5px;color:#9db0a3;line-height:1.5;">No catches logged yet. As you log fish, this grades the forecast against your real results — what share of your catches actually came during the higher-scoring windows.</div>';
+    }
+    var b = bt.buckets, gp = b.Prime + b.Good;
+    var order = [['Prime','#E8823F'],['Good','#9ED17A'],['Fair','#E8B04B'],['Slow','#7FA8C9']];
+    var maxN = Math.max(1, b.Prime, b.Good, b.Fair, b.Slow);
+    var bars = order.map(function(p){
+      var n = b[p[0]], w = Math.round((n / maxN) * 100);
+      return '<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:11px;">' +
+        '<span style="width:42px;color:#cfe0d6;">' + p[0] + '</span>' +
+        '<span style="flex:1;height:12px;background:#22302a;border-radius:3px;overflow:hidden;"><span style="display:block;height:100%;width:' + w + '%;background:' + p[1] + ';"></span></span>' +
+        '<b style="width:20px;text-align:right;color:#dff0e4;">' + n + '</b></div>';
+    }).join('');
+    var thin = bt.total < 20;
+    return '<div style="font-size:11.5px;color:#cfe0d6;margin-bottom:8px;">Of your <b>' + bt.total + '</b> logged catch' + (bt.total === 1 ? '' : 'es') + ', <b>' + gp + '</b> came during a Good-or-better window (' + Math.round(gp / bt.total * 100) + '%).</div>' +
+      bars +
+      '<div style="font-size:10.5px;color:#9db0a3;margin-top:7px;line-height:1.5;">' + bt.solHit + ' landed in a solunar feeding period' + (bt.pKnown ? '; ' + bt.pGood + ' of ' + bt.pKnown + ' on falling or steady pressure' : '') + '.</div>' +
+      (thin ? '<div style="font-size:10.5px;color:#E8B04B;margin-top:6px;line-height:1.45;">⚠ Only ' + bt.total + ' catch' + (bt.total === 1 ? '' : 'es') + ' so far — too few to judge the model, and any early test entries you made will skew it. Treat this as a placeholder until you\'ve logged a real run of catches.</div>' : '');
+  }
   function renderSolunarTable(){
     var pos = getSolunarViewLocation();
     var dayMs = solunarViewDate.getTime();
@@ -14873,7 +14927,26 @@
     html += '<div class="solunar-row"><div class="lbl">Sunrise / Sunset</div><div class="time">'+fmtClockTime(periods.sunrise)+' / '+fmtClockTime(periods.sunset)+'</div></div>';
     html += '<div class="solunar-row"><div class="lbl">Moonrise / Moonset</div><div class="time">'+fmtClockTime(periods.moonrise)+' / '+fmtClockTime(periods.moonset)+'</div></div>';
 
+    if (isFishing){
+      html += '<div style="margin-top:12px;border-top:1px solid #2a3a30;padding-top:10px;">' +
+        '<button type="button" id="biteBackTestToggle" style="width:100%;background:none;border:none;color:#9ED17A;font-size:12px;font-weight:600;cursor:pointer;text-align:left;padding:0;">📊 How it\'s tracking vs your catches ▸</button>' +
+        '<div id="biteBackTestBody" style="display:none;margin-top:9px;"></div>' +
+      '</div>';
+    }
+
     document.getElementById('solunarContent').innerHTML = html;
+
+    if (isFishing){
+      var tgl = document.getElementById('biteBackTestToggle'), body = document.getElementById('biteBackTestBody');
+      if (tgl && body){
+        tgl.addEventListener('click', function(){
+          var open = body.style.display === 'none';
+          body.style.display = open ? 'block' : 'none';
+          tgl.innerHTML = '📊 How it\'s tracking vs your catches ' + (open ? '▾' : '▸');
+          if (open) body.innerHTML = biteBackTestHtml();
+        });
+      }
+    }
   }
 
   document.getElementById('solunarBtn').addEventListener('click', function(){
