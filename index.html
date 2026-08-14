@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 304</div>
+    <div id="buildBadge">BUILD 305</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7246,6 +7246,7 @@
   // flat (~0) — an honest "no bottom captured here."
   var bathyVisible = false, bathyOverlays = [], _bathyTapHandler = null;
   var DEPTH_MAX_FT = 30; // color-scale ceiling; deeper reads as "deepest"
+  var BATHY_V = 2;       // bump when the scan algorithm changes so existing scans auto-refresh on next tap
   async function scanBathymetry(prop, onStatus){
     var bb = propBBox(prop);
     if (!bb){
@@ -7268,7 +7269,9 @@
     var cx = cv.getContext('2d'); cx.drawImage(bm, 0, 0); var img = cx.getImageData(0, 0, W, H).data;
     // dark pixels ≈ water
     var dark = new Uint8Array(W * H);
-    for (var p = 0; p < W * H; p++){ var ii = p * 4, L = 0.3 * img[ii] + 0.59 * img[ii+1] + 0.11 * img[ii+2]; dark[p] = (L < 78) ? 1 : 0; }
+    // Open water = DARK and NOT green (swamp/dark timber is dark but greenish — the old dark-only test
+    // swallowed the whole bottomland). Tighter darkness + a non-green gate keeps it to actual water.
+    for (var p = 0; p < W * H; p++){ var ii = p * 4, R = img[ii], G = img[ii+1], B = img[ii+2], L = 0.3 * R + 0.59 * G + 0.11 * B, grn = G - (R + B) / 2; dark[p] = (L < 68 && grn < 10) ? 1 : 0; }
     // largest connected dark blob = the pond (drops shadows / dark timber)
     var comp = new Int32Array(W * H); for (var ci = 0; ci < W * H; ci++) comp[ci] = -1;
     var best = [], bestN = 0, cid = 0;
@@ -7297,10 +7300,18 @@
     if (!sv.length) throw new Error('no-elev');
     var pool = sv[Math.floor(sv.length / 2)]; // median shoreline elevation = full-pool level
     var depthFt = new Array(W * H);
-    for (var d = 0; d < W * H; d++){ var dep = (pond[d] && isFinite(elev[d])) ? m2ft(pool - elev[d]) : 0; depthFt[d] = dep > 0.3 ? Math.round(dep * 10) / 10 : 0; }
+    // If you've traced the pond's outline, clip the shading to inside it — the clean, exact escape hatch
+    // when the auto water-read still grabs too much.
+    var hasBnd = prop.boundary && prop.boundary.length >= 3;
+    for (var d = 0; d < W * H; d++){
+      var inWater = pond[d];
+      if (inWater && hasBnd){ var dx = d % W, dy = (d / W) | 0; var la = bb.n - (bb.n - bb.s) * ((dy + 0.5) / H), lo = bb.w + (bb.e - bb.w) * ((dx + 0.5) / W); if (!pointInProperty(la, lo, prop)) inWater = 0; }
+      var dep = (inWater && isFinite(elev[d])) ? m2ft(pool - elev[d]) : 0;
+      depthFt[d] = dep > 0.3 ? Math.round(dep * 10) / 10 : 0;
+    }
     // Bonus: the detected water footprint gives a free acreage estimate (pond cells × cell ground area).
     var cellAreaM2 = (widthM / W) * (heightM / H), acres = (bestN * cellAreaM2) / 4046.8564;
-    prop.bathy = { bbox: bb, cols: W, rows: H, poolM: pool, depthFt: depthFt, acres: Math.round(acres * 10) / 10, createdAt: Date.now() };
+    prop.bathy = { bbox: bb, cols: W, rows: H, poolM: pool, depthFt: depthFt, acres: Math.round(acres * 10) / 10, v: BATHY_V, createdAt: Date.now() };
     try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: failed to save bathy', e); }
     return prop.bathy;
   }
@@ -7346,7 +7357,7 @@
   document.getElementById('depthToggleBtn').addEventListener('click', async function(){
     var btn = this, prop = activeFishingProp();
     if (!prop){ showToast('Pick your lake in the property dropdown first, then tap 🌊 Depth.'); return; }
-    if (!prop.bathy){
+    if (!prop.bathy || prop.bathy.v !== BATHY_V){   // no scan yet, or an older-algorithm scan → (re)scan
       btn.textContent = '🌊 …'; btn.classList.add('active');
       try { await scanBathymetry(prop, function(m){ btn.textContent = '🌊 ' + m; }); }
       catch (e){
