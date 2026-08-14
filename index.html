@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 300</div>
+    <div id="buildBadge">BUILD 301</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7243,7 +7243,7 @@
     var bb = propBBox(prop); if (!bb) throw new Error('no-area');
     var mPerLat = 111320, mPerLng = 111320 * Math.cos((bb.n + bb.s) / 2 * Math.PI / 180);
     var widthM = (bb.e - bb.w) * mPerLng, heightM = (bb.n - bb.s) * mPerLat;
-    var degW = bb.e - bb.w, degH = bb.n - bb.s, LONG = 72, cols, rows;
+    var degW = bb.e - bb.w, degH = bb.n - bb.s, LONG = 56, cols, rows;
     if (degW >= degH){ cols = Math.max(24, Math.min(LONG, Math.round(widthM / 6))); rows = Math.max(16, Math.round(cols * degH / degW)); }
     else { rows = Math.max(24, Math.min(LONG, Math.round(heightM / 6))); cols = Math.max(16, Math.round(rows * degW / degH)); }
     if (onStatus) onStatus('reading water…');
@@ -7276,8 +7276,9 @@
     var pts = new Array(W * H);
     for (var q = 0; q < W * H; q++){ var qx = q % W, qy = (q / W) | 0; pts[q] = [bb.w + (bb.e - bb.w) * ((qx + 0.5) / W), bb.n - (bb.n - bb.s) * ((qy + 0.5) / H)]; }
     var elev = new Array(W * H); for (var z = 0; z < W * H; z++) elev[z] = NaN;
-    var CH = 800;
-    for (var c0 = 0; c0 < pts.length; c0 += CH){ var vals = await sampleElevPoints(pts.slice(c0, c0 + CH)); if (vals){ for (var vi = 0; vi < vals.length; vi++) elev[c0 + vi] = vals[vi]; } if (onStatus) onStatus('reading bottom ' + Math.min(100, Math.round((c0 + CH) / pts.length * 100)) + '%'); }
+    var CH = 250, elevFails = 0, elevReqs = 0;
+    for (var c0 = 0; c0 < pts.length; c0 += CH){ elevReqs++; var vals = await sampleElevPoints(pts.slice(c0, c0 + CH)); if (vals){ for (var vi = 0; vi < vals.length; vi++) elev[c0 + vi] = vals[vi]; } else { elevFails++; } if (onStatus) onStatus('reading bottom ' + Math.min(100, Math.round((c0 + CH) / pts.length * 100)) + '%'); }
+    if (elevReqs && elevFails === elevReqs) throw new Error('no-elev');   // every LiDAR request failed (service/CORS), not just empty coverage
     var sv = shore.map(function(k){ return elev[k]; }).filter(function(v){ return isFinite(v); }).sort(function(a, b){ return a - b; });
     if (!sv.length) throw new Error('no-elev');
     var pool = sv[Math.floor(sv.length / 2)]; // median shoreline elevation = full-pool level
@@ -7334,7 +7335,16 @@
     if (!prop.bathy){
       btn.textContent = '🌊 …'; btn.classList.add('active');
       try { await scanBathymetry(prop, function(m){ btn.textContent = '🌊 ' + m; }); }
-      catch (e){ btn.textContent = '🌊 Depth'; btn.classList.remove('active'); showToast(e && e.message === 'no-water' ? 'Couldn\'t spot open water — frame the pond in view and make sure the lake is selected.' : 'Couldn\'t read the bottom — check your connection and try again.'); console.error('Outdoor Companion: bathy scan failed', e); return; }
+      catch (e){
+        btn.textContent = '🌊 Depth'; btn.classList.remove('active');
+        var em = (e && e.message) || 'unknown', t;
+        if (em === 'no-water') t = 'Couldn\'t spot open water — frame the pond in view and make sure the lake is selected.';
+        else if (em === 'no-area') t = 'This lake has no saved map area yet — re-frame the pond and save it, or draw its outline in ⚙ Set up.';
+        else if (em.indexOf('imagery') === 0) t = 'Couldn\'t load the aerial imagery (service/connection). Try again.';
+        else if (em === 'no-elev') t = 'Read the water fine, but the LiDAR elevation came back empty — the 3DEP service may be busy or not cover this spot. Try again in a moment.';
+        else t = 'Scan failed at: ' + em + '. Try again.';
+        showToast(t); console.error('Outdoor Companion: bathy scan failed', e); return;
+      }
       btn.textContent = '🌊 Depth';
       var mx = 0; prop.bathy.depthFt.forEach(function(f){ if (f > mx) mx = f; });
       var acTxt = prop.bathy.acres > 0 ? (' · ~' + prop.bathy.acres + ' acres') : '';
