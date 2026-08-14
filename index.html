@@ -1830,6 +1830,7 @@
       <button class="layer-btn" id="landcoverToggleBtn" title="Field vs woods — the app's read of your property from the aerial (blue = woods, pink = field, yellow = cutover). Scan/verify it in Property Setup; the Walk-In planner uses it to route through cover.">🌲 Cover</button>
       <button class="layer-btn" id="depthToggleBtn" style="display:none;" title="Depth — reads your pond's bottom from the LiDAR (when the ground was mapped before it filled). Select the lake, then tap to scan. Shallow = light, deep = dark. Tap the water to read a depth.">🌊 Depth</button>
       <button class="layer-btn" id="bottomToggleBtn" style="display:none;" title="Bottom type — the pond's substrate from the USDA soil survey of the basin (mapped before it filled): sand, loam, clay, or soft muck. Select the lake, then tap to scan. Tap the water to read the bottom.">🪨 Bottom</button>
+      <button class="layer-btn" id="mapOverlayToggleBtn" style="display:none;" title="Import a lake map — pin a fishing/depth map or chart image onto the aerial (drag the corners to fit), clipped to the shoreline. Your catches then plot right on the real contours.">🗺 Map</button>
       </div>
       <button id="layersToggleBtn" class="layers-toggle" aria-expanded="false" title="Show / hide the map layers">⛰ Layers</button>
     </div>
@@ -1840,7 +1841,8 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 313</div>
+    <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
+    <div id="buildBadge">BUILD 314</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2508,6 +2510,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/suncalc/1.9.0/suncalc.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/esri-leaflet/3.1.0/esri-leaflet.min.js"></script>
+<!-- Rotated/affine image overlay — lets an imported lake map be georeferenced (3 draggable corners) to the aerial. -->
+<script src="https://unpkg.com/leaflet-imageoverlay-rotated@0.2.1/Leaflet.ImageOverlay.Rotated.js"></script>
 <!-- Firebase (cloud sync) — compat SDK so it works with the app's classic (non-module)
      script below. The config keys are public identifiers, NOT secrets; who can read/write
      is controlled by Firestore security rules, not by hiding these. -->
@@ -6825,6 +6829,10 @@
     renderList();
     if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries();
     if (typeof renderBathyOverlay === 'function' && bathyVisible) renderBathyOverlay();   // swap to the newly-selected lake's depth map
+    if (typeof renderBottomOverlay === 'function' && bottomVisible) renderBottomOverlay();
+    if (typeof renderMapOverlay === 'function' && mapOverlayVisible) renderMapOverlay();  // swap to the newly-selected lake's imported map
+    if (typeof ensureBathyLegend === 'function' && bathyVisible) ensureBathyLegend();
+    if (typeof ensureBottomLegend === 'function' && bottomVisible) ensureBottomLegend();
     if (activePropertyId){
       var prop = properties.filter(function(p){ return p.id === activePropertyId; })[0];
       if (prop && typeof prop.centerLat === 'number'){
@@ -7036,6 +7044,7 @@
     if (prop && typeof prop.acresManual === 'number' && prop.acresManual > 0) return prop.acresManual;   // you typed it
     if (prop && prop.boundary && prop.boundary.length >= 3) return polygonAcres(prop.boundary);            // you traced it
     if (prop && prop.bathy && prop.bathy.acres > 0) return prop.bathy.acres;                                // the depth scan measured the water footprint
+    if (prop && typeof prop.nhdAcres === 'number' && prop.nhdAcres > 0) return prop.nhdAcres;                // official NHD waterbody acreage (auto-pulled)
     return null;
   }
   function propAcresLabel(prop){ var a = propAcres(prop); return a ? acresLabel(a) : ''; }
@@ -7615,6 +7624,129 @@
     renderBottomOverlay();
     ensureBottomLegend().style.display = bottomVisible ? 'block' : 'none';
     setBathyTap(bathyVisible || bottomVisible);
+  });
+
+  // ---------- 🗺 Import a lake map — georeference a chart/fishing-map image onto the aerial, clip to shoreline ----------
+  // The pre-fill LiDAR/soil tricks can't read an established lake. But the founder often HAS a real map (a city
+  // fishing map, or his Garmin/ActiveCaptain chart). This is the ArcGIS "georeference a raster, then clip to the
+  // shoreline" workflow by hand: drop the image, drag its 3 corners to fit the aerial, then BAKE it into a canvas
+  // CLIPPED to the traced outline so it reads like a native map (no floating rectangle, border, or legend).
+  var mapOverlayVisible = false, _mapOverlayLayer = null, _mapEditor = null, MAPOV_V = 1;
+  function loadImageEl(src){ return new Promise(function(res, rej){ var im = new Image(); im.onload = function(){ res(im); }; im.onerror = rej; im.src = src; }); }
+  async function downscaleDataUrl(dataUrl, maxDim, quality){
+    var im = await loadImageEl(dataUrl), w = im.naturalWidth, h = im.naturalHeight, s = Math.min(1, maxDim / Math.max(w, h));
+    var cw = Math.max(1, Math.round(w * s)), ch = Math.max(1, Math.round(h * s));
+    var c = document.createElement('canvas'); c.width = cw; c.height = ch; c.getContext('2d').drawImage(im, 0, 0, cw, ch);
+    return c.toDataURL('image/jpeg', quality || 0.82);
+  }
+  function importLakeMap(prop){
+    var inp = document.getElementById('mapImportInput'); inp.value = '';
+    inp.onchange = function(){
+      var f = inp.files && inp.files[0]; if (!f) return;
+      var rd = new FileReader();
+      rd.onload = async function(){ try { var small = await downscaleDataUrl(rd.result, 2000, 0.85); await enterMapGeoref(prop, small); } catch (e){ showToast('Couldn\'t read that image.'); console.error('Outdoor Companion: map import failed', e); } };
+      rd.readAsDataURL(f);
+    };
+    inp.click();
+  }
+  async function enterMapGeoref(prop, dataUrl){
+    if (_mapEditor) exitMapGeoref();
+    await loadImageEl(dataUrl);
+    var bb = propBBox(prop) || (function(){ var b = map.getBounds(); return { n: b.getNorth(), s: b.getSouth(), e: b.getEast(), w: b.getWest() }; })();
+    if (typeof prop.centerLat === 'number') map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15));
+    var padN = (bb.n - bb.s) * 0.05, padE = (bb.e - bb.w) * 0.05;
+    var tl = L.latLng(bb.n - padN, bb.w + padE), tr = L.latLng(bb.n - padN, bb.e - padE), bl = L.latLng(bb.s + padN, bb.w + padE);
+    var ov = L.imageOverlay.rotated(dataUrl, tl, tr, bl, { opacity: 0.6, interactive: false }).addTo(map);
+    function mk(ll, color){ return L.marker(ll, { draggable: true, zIndexOffset: 1000, icon: L.divIcon({ className: '', iconSize: [20, 20], html: '<div style="width:20px;height:20px;border-radius:50%;background:' + color + ';border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.7);"></div>' }) }).addTo(map); }
+    var mTL = mk(tl, '#3F8CFF'), mTR = mk(tr, '#37c26d'), mBL = mk(bl, '#e8823f');
+    function upd(){ ov.reposition(mTL.getLatLng(), mTR.getLatLng(), mBL.getLatLng()); }
+    mTL.on('drag', upd); mTR.on('drag', upd); mBL.on('drag', upd);
+    var bar = document.createElement('div'); bar.id = 'mapGeorefBar';
+    bar.style.cssText = 'position:absolute;top:66px;left:50%;transform:translateX(-50%);z-index:1400;background:rgba(20,26,20,.96);color:#eef;border:1px solid #4a6b4a;border-radius:10px;padding:9px 12px;font-size:12px;box-shadow:0 3px 12px rgba(0,0,0,.55);display:flex;align-items:center;gap:10px;flex-wrap:wrap;max-width:94vw;';
+    bar.innerHTML = '<span style="font-weight:700;">🗺 Fit the map</span><span style="color:#9db8a3;">drag the 3 dots to line up the shoreline</span>' +
+      '<label style="display:flex;align-items:center;gap:5px;">See-through <input id="mapGeorefOpacity" type="range" min="15" max="100" value="60" style="width:80px;accent-color:#37c26d;cursor:pointer;"></label>' +
+      '<button id="mapGeorefSave" style="background:#37c26d;color:#06210f;border:none;border-radius:7px;padding:6px 13px;font-weight:700;cursor:pointer;">Save</button>' +
+      '<button id="mapGeorefCancel" style="background:#454b45;color:#eee;border:none;border-radius:7px;padding:6px 11px;cursor:pointer;">Cancel</button>';
+    document.getElementById('map').appendChild(bar);
+    document.getElementById('mapGeorefOpacity').oninput = function(){ ov.setOpacity(this.value / 100); };
+    document.getElementById('mapGeorefSave').onclick = function(){ bakeAndSaveMapOverlay(prop, dataUrl, { tl: mTL.getLatLng(), tr: mTR.getLatLng(), bl: mBL.getLatLng() }); exitMapGeoref(); };
+    document.getElementById('mapGeorefCancel').onclick = function(){ exitMapGeoref(); };
+    _mapEditor = { ov: ov, markers: [mTL, mTR, mBL], bar: bar };
+    showToast('Drag the coloured dots onto the map\'s corners so the shoreline matches the aerial, then Save.');
+  }
+  function exitMapGeoref(){
+    if (!_mapEditor) return;
+    try { map.removeLayer(_mapEditor.ov); } catch (e){}
+    _mapEditor.markers.forEach(function(m){ try { map.removeLayer(m); } catch (e){} });
+    if (_mapEditor.bar && _mapEditor.bar.parentNode) _mapEditor.bar.parentNode.removeChild(_mapEditor.bar);
+    _mapEditor = null;
+  }
+  // Pull a lake's shoreline polygon (+ name/acreage) from USGS NHD — so a 500-acre lake never has to be
+  // hand-traced. Returns { name, acres, rings:[[[lat,lng]...]...] } (multi-ring incl. islands) or null.
+  async function fetchNhdWaterbody(lat, lng){
+    var svc = 'https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/12/query';
+    function parse(f){ if (!f) return null; var rings = (f.geometry && f.geometry.rings || []).map(function(r){ return r.map(function(p){ return [p[1], p[0]]; }); }); if (!rings.length) return null; return { name: f.attributes.GNIS_NAME, acres: Math.round((f.attributes.AREASQKM || 0) * 247.105 * 10) / 10, rings: rings }; }
+    try {
+      var pu = svc + '?geometry=' + encodeURIComponent(lng + ',' + lat) + '&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=GNIS_NAME,AREASQKM&returnGeometry=true&outSR=4326&f=json';
+      var pj = await (await fetch(pu)).json();
+      if (pj.features && pj.features.length) return parse(pj.features[0]);
+      // point missed the water (framed on an island/arm) → small envelope, take the largest body
+      var d = 0.01, env = { xmin: lng - d, ymin: lat - d, xmax: lng + d, ymax: lat + d, spatialReference: { wkid: 4326 } };
+      var eu = svc + '?geometry=' + encodeURIComponent(JSON.stringify(env)) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=GNIS_NAME,AREASQKM&returnGeometry=true&outSR=4326&f=json';
+      var ej = await (await fetch(eu)).json();
+      if (ej.features && ej.features.length){ ej.features.sort(function(a, b){ return (b.attributes.AREASQKM || 0) - (a.attributes.AREASQKM || 0); }); return parse(ej.features[0]); }
+    } catch (e){ console.error('Outdoor Companion: NHD waterbody fetch failed', e); }
+    return null;
+  }
+  function ringsBBox(rings){ var n = -90, s = 90, e = -180, w = 180; rings.forEach(function(r){ r.forEach(function(p){ n = Math.max(n, p[0]); s = Math.min(s, p[0]); e = Math.max(e, p[1]); w = Math.min(w, p[1]); }); }); return { n: n, s: s, e: e, w: w }; }
+  async function bakeAndSaveMapOverlay(prop, dataUrl, corners){
+    var im = await loadImageEl(dataUrl), tl = corners.tl, tr = corners.tr, bl = corners.bl;
+    // Clip rings: a hand-traced pond outline if there is one, else the auto-pulled NHD shoreline for the lake.
+    var clipRings = null, nhd = null;
+    if (prop.boundary && prop.boundary.length >= 3){ clipRings = [prop.boundary]; }
+    else {
+      showToast('Pulling the shoreline from USGS NHD…');
+      var ctr = (typeof prop.centerLat === 'number') ? { lat: prop.centerLat, lng: prop.centerLng } : { lat: (tl.lat + bl.lat) / 2, lng: (tl.lng + tr.lng) / 2 };
+      nhd = await fetchNhdWaterbody(ctr.lat, ctr.lng);
+      if (nhd) clipRings = nhd.rings;
+    }
+    var bb;
+    if (clipRings){ bb = ringsBBox(clipRings); }
+    else { var brLat = tr.lat + bl.lat - tl.lat, brLng = tr.lng + bl.lng - tl.lng; bb = { n: Math.max(tl.lat, tr.lat, bl.lat, brLat), s: Math.min(tl.lat, tr.lat, bl.lat, brLat), e: Math.max(tl.lng, tr.lng, bl.lng, brLng), w: Math.min(tl.lng, tr.lng, bl.lng, brLng) }; }
+    var cosLat = Math.cos((bb.n + bb.s) / 2 * Math.PI / 180), Wo = 2000, Ho = Math.max(1, Math.round(Wo * (bb.n - bb.s) / ((bb.e - bb.w) * cosLat)));
+    if (Ho > 2000){ Ho = 2000; Wo = Math.max(1, Math.round(Ho * ((bb.e - bb.w) * cosLat) / (bb.n - bb.s))); }
+    var c = document.createElement('canvas'); c.width = Wo; c.height = Ho; var ctx = c.getContext('2d');
+    function px(lat, lng){ return [ (lng - bb.w) / (bb.e - bb.w) * Wo, (bb.n - lat) / (bb.n - bb.s) * Ho ]; }
+    ctx.save();
+    if (clipRings){ ctx.beginPath(); clipRings.forEach(function(ring){ ring.forEach(function(p, i){ var q = px(p[0], p[1]); if (i) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); }); ctx.clip('evenodd'); }
+    var ptl = px(tl.lat, tl.lng), ptr = px(tr.lat, tr.lng), pbl = px(bl.lat, bl.lng), iw = im.naturalWidth, ih = im.naturalHeight;
+    ctx.setTransform((ptr[0]-ptl[0])/iw, (ptr[1]-ptl[1])/iw, (pbl[0]-ptl[0])/ih, (pbl[1]-ptl[1])/ih, ptl[0], ptl[1]);
+    ctx.drawImage(im, 0, 0);
+    ctx.restore();
+    prop.mapOverlay = { img: c.toDataURL('image/jpeg', 0.82), bbox: bb, opacity: 0.9, clipped: !!clipRings, source: nhd ? ('NHD: ' + (nhd.name || 'lake')) : 'traced', v: MAPOV_V, createdAt: Date.now() };
+    if (nhd && nhd.acres > 0 && !prop.boundary && typeof prop.acresManual !== 'number'){ prop.nhdAcres = nhd.acres; }   // offer for catch-per-acre
+    try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: save map overlay failed', e); }
+    mapOverlayVisible = true; renderMapOverlay();
+    document.getElementById('mapOverlayToggleBtn').classList.add('active');
+    renderPropertySelect();
+    showToast(clipRings ? ('Map saved, clipped to the shoreline' + (nhd ? ' (NHD — ' + (nhd.acres || '?') + ' ac)' : '') + '. Toggle with 🗺 Map.') : 'Map saved — no shoreline found to clip to; trace it in Set up for a clean clip.');
+  }
+  function renderMapOverlay(){
+    if (!map.getPane('mapOvPane')){ map.createPane('mapOvPane'); map.getPane('mapOvPane').style.zIndex = 405; map.getPane('mapOvPane').style.pointerEvents = 'none'; }
+    if (_mapOverlayLayer){ try { map.removeLayer(_mapOverlayLayer); } catch (e){} _mapOverlayLayer = null; }
+    if (!mapOverlayVisible) return;
+    var prop = activeFishingProp(); if (!prop || !prop.mapOverlay || !prop.mapOverlay.img) return;
+    var m = prop.mapOverlay, bb = m.bbox;
+    _mapOverlayLayer = L.imageOverlay(m.img, [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'mapOvPane', opacity: m.opacity || 0.9, interactive: false }).addTo(map);
+  }
+  document.getElementById('mapOverlayToggleBtn').addEventListener('click', function(){
+    var btn = this, prop = activeFishingProp();
+    if (!prop){ showToast('Pick your lake in the property dropdown first, then tap 🗺 Map.'); return; }
+    if (_mapEditor) return;
+    if (!prop.mapOverlay || prop.mapOverlay.v !== MAPOV_V){ importLakeMap(prop); return; }
+    mapOverlayVisible = !mapOverlayVisible;
+    btn.classList.toggle('active', mapOverlayVisible);
+    renderMapOverlay();
   });
 
   // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
@@ -9289,7 +9421,11 @@
     if (_db) _db.style.display = activeModule === 'fishing' ? '' : 'none';
     var _bb = document.getElementById('bottomToggleBtn');
     if (_bb) _bb.style.display = activeModule === 'fishing' ? '' : 'none';
+    var _mo = document.getElementById('mapOverlayToggleBtn');
+    if (_mo) _mo.style.display = activeModule === 'fishing' ? '' : 'none';
     if (activeModule !== 'fishing'){
+      if (typeof _mapEditor !== 'undefined' && _mapEditor && typeof exitMapGeoref === 'function') exitMapGeoref();
+      if (typeof mapOverlayVisible !== 'undefined' && mapOverlayVisible){ mapOverlayVisible = false; if (typeof renderMapOverlay === 'function') renderMapOverlay(); if (_mo) _mo.classList.remove('active'); }
       if (typeof bathyVisible !== 'undefined' && bathyVisible){
         bathyVisible = false; if (typeof renderBathyOverlay === 'function') renderBathyOverlay();
         var _lg = document.getElementById('bathyLegend'); if (_lg) _lg.style.display = 'none';
