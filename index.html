@@ -1829,6 +1829,7 @@
       <button class="layer-btn" id="scentToggleBtn" title="Scent cones — where your scent blows from each hunt spot right now (wind + thermals combined). A wider cone = swirlier, less certain. Red = where a deer would wind you.">🌬 Scent cones</button>
       <button class="layer-btn" id="landcoverToggleBtn" title="Field vs woods — the app's read of your property from the aerial (blue = woods, pink = field, yellow = cutover). Scan/verify it in Property Setup; the Walk-In planner uses it to route through cover.">🌲 Cover</button>
       <button class="layer-btn" id="depthToggleBtn" style="display:none;" title="Depth — reads your pond's bottom from the LiDAR (when the ground was mapped before it filled). Select the lake, then tap to scan. Shallow = light, deep = dark. Tap the water to read a depth.">🌊 Depth</button>
+      <button class="layer-btn" id="bottomToggleBtn" style="display:none;" title="Bottom type — the pond's substrate from the USDA soil survey of the basin (mapped before it filled): sand, loam, clay, or soft muck. Select the lake, then tap to scan. Tap the water to read the bottom.">🪨 Bottom</button>
       </div>
       <button id="layersToggleBtn" class="layers-toggle" aria-expanded="false" title="Show / hide the map layers">⛰ Layers</button>
     </div>
@@ -1839,7 +1840,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 312</div>
+    <div id="buildBadge">BUILD 313</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7245,6 +7246,7 @@
   // the framed area, and shade everything below pool as depth. Where the DEM post-dates the fill it reads
   // flat (~0) — an honest "no bottom captured here."
   var bathyVisible = false, bathyOverlays = [], _bathyTapHandler = null, _bathyPin = null;
+  var bottomVisible = false, bottomOverlays = [], BOTTOM_V = 1;
   var DEPTH_MAX_FT = 30; // color-scale ceiling; deeper reads as "deepest"
   var BATHY_V = 4;       // bump when the scan algorithm changes so existing scans auto-refresh on next tap
   async function scanBathymetry(prop, onStatus){
@@ -7409,10 +7411,13 @@
       // One pin at a time — each tap moves it — so the map stays clean. Cleared when the Depth layer is turned off.
       _bathyTapHandler = function(e){
         if (placing) return; var prop = activeFishingProp(); if (!prop) return;
-        var ft = bathyDepthAtFt(prop, e.latlng.lat, e.latlng.lng); if (ft == null) return;
-        var lbl = (ft >= 1 ? Math.round(ft) : ft.toFixed(1)) + ' ft';
+        var parts = [];
+        if (bathyVisible && prop.bathy){ var ft = bathyDepthAtFt(prop, e.latlng.lat, e.latlng.lng); if (ft != null) parts.push('🌊 ' + (ft >= 1 ? Math.round(ft) : ft.toFixed(1)) + ' ft'); }
+        var bt = bottomTypeAt(prop, e.latlng.lat, e.latlng.lng); if (bt) parts.push(bt);
+        if (!parts.length) return;
+        var lbl = parts.join(' · ');
         var html = '<div style="transform:translate(-50%,-100%);white-space:nowrap;text-align:center;">' +
-          '<div style="display:inline-block;background:#0b2a4a;color:#dff1ff;border:1px solid #3f8cff;border-radius:12px;padding:3px 9px;font-size:12px;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.45);">🌊 ' + lbl + '</div>' +
+          '<div style="display:inline-block;background:#0b2a4a;color:#dff1ff;border:1px solid #3f8cff;border-radius:12px;padding:3px 9px;font-size:12px;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.45);">' + lbl + '</div>' +
           '<div style="width:2px;height:9px;background:#3f8cff;margin:0 auto;"></div></div>';
         if (_bathyPin){ map.removeLayer(_bathyPin); _bathyPin = null; }
         _bathyPin = L.marker(e.latlng, { icon: L.divIcon({ className: 'bathy-pin', iconSize: [0, 0], html: html }), interactive: false, keyboard: false }).addTo(map);
@@ -7476,7 +7481,140 @@
     btn.classList.toggle('active', bathyVisible);
     renderBathyOverlay();
     ensureBathyLegend().style.display = bathyVisible ? 'block' : 'none';
-    setBathyTap(bathyVisible);
+    setBathyTap(bathyVisible || bottomVisible);
+  });
+
+  // ---------- 🪨 Bottom composition — the pond's SUBSTRATE, read from the USDA soil survey of the basin ----------
+  // Same trick as depth: the pond bed was mapped soil BEFORE it filled, so SSURGO over the footprint tells us
+  // sand / loam / clay / soft muck. We pull the soil polygons + their surface texture (CORS-clean SDA REST),
+  // rasterize them to a grid clipped to the pond, store a compact char grid on the property, and paint it back.
+  var SDA_URL = 'https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest';
+  var BOTTOM_CATS = {
+    S: { label: 'Sand (firm)',     color: [232, 214, 150] },
+    L: { label: 'Sandy loam',      color: [204, 178, 120] },
+    M: { label: 'Loam / silt',     color: [150, 148, 112] },
+    C: { label: 'Clay (firm)',     color: [178, 104, 82] },
+    K: { label: 'Muck / soft',     color: [92, 72, 52] },
+    R: { label: 'Rock / gravel',   color: [140, 146, 150] }
+  };
+  var BOTTOM_ORDER = ['S', 'L', 'M', 'C', 'K', 'R'];
+  // Classify a SSURGO surface texture (+ taxonomic order / map-unit name) into a fishing bottom category.
+  function bottomCatOf(tex, taxorder, muname){
+    var t = ('' + (tex || '')).toLowerCase(), n = ('' + (muname || '')).toLowerCase(), o = ('' + (taxorder || '')).toLowerCase();
+    if (o === 'histosols' || /muck|peat|mucky/.test(t) || /muck|peat/.test(n)) return 'K';       // organic soft bottom
+    if (/frequently flooded|frequently ponded|ponded/.test(n) && /loam|silt|mucky/.test(t)) return 'K';  // wet bottomland flats = soft
+    if (/gravel|cobbl|channer|bedrock|stony|boulder|rock/.test(t)) return 'R';
+    if (/clay/.test(t)) return 'C';
+    if (/sandy loam|fine sandy loam|loamy sand|loamy fine sand/.test(t)) return 'L';
+    if (/silt/.test(t) || t === 'loam' || /^loam/.test(t)) return 'M';
+    if (/sand/.test(t)) return 'S';
+    if (/clay/.test(n)) return 'C'; if (/sand/.test(n)) return 'S'; if (/silt|loam/.test(n)) return 'M';
+    return 'L';
+  }
+  async function sdaQuery(sql){
+    var r = await fetch(SDA_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: sql, format: 'JSON+COLUMNNAME' }) });
+    if (!r.ok) throw new Error('soil ' + r.status);
+    var j = await r.json(); var tbl = j && j.Table; if (!tbl || tbl.length < 2) return [];
+    var cols = tbl[0]; return tbl.slice(1).map(function(row){ var obj = {}; for (var i = 0; i < cols.length; i++) obj[cols[i]] = row[i]; return obj; });
+  }
+  // Parse WKT POLYGON / MULTIPOLYGON → array of rings, each ring = [[lat,lng],...]. Holes are treated as
+  // rings too (rare at pond scale; a first-match fill ignores the distinction acceptably for v1).
+  function parseWktRings(wkt){
+    var rings = [], re = /\(([-0-9eE.,\s]+)\)/g, m;
+    while ((m = re.exec(wkt))){
+      var pts = m[1].trim().split(','), ring = [];
+      for (var i = 0; i < pts.length; i++){ var xy = pts[i].trim().split(/\s+/); var lng = parseFloat(xy[0]), lat = parseFloat(xy[1]); if (isFinite(lat) && isFinite(lng)) ring.push([lat, lng]); }
+      if (ring.length >= 3) rings.push(ring);
+    }
+    return rings;
+  }
+  function pointInRings(lat, lng, rings){ var inside = false; for (var r = 0; r < rings.length; r++){ if (pointInPolygon(lat, lng, rings[r])) inside = !inside; } return inside; }
+  async function scanBottom(prop, onStatus){
+    var bb = propBBox(prop); if (!bb){ var mb = map.getBounds(); bb = { n: mb.getNorth(), s: mb.getSouth(), e: mb.getEast(), w: mb.getWest() }; }
+    if (onStatus) onStatus('reading soil…');
+    var wkt = 'POLYGON((' + [[bb.w, bb.s], [bb.e, bb.s], [bb.e, bb.n], [bb.w, bb.n], [bb.w, bb.s]].map(function(p){ return p[0] + ' ' + p[1]; }).join(',') + '))';
+    // Q1: soil polygons touching the pond; Q2: dominant surface texture / taxonomy / name per map unit.
+    var geoRows = await sdaQuery("select mukey, mupolygongeo.STAsText() as geom from mupolygon where mupolygongeo.STIntersects(geometry::STGeomFromText('" + wkt + "',4326))=1");
+    if (!geoRows.length) throw new Error('no-soil');
+    var texRows = await sdaQuery("select m.mukey, m.muname, (select top 1 t.texcl from component c join chorizon h on h.cokey=c.cokey and h.hzdept_r=0 join chtexturegrp g on g.chkey=h.chkey and g.rvindicator='Yes' join chtexture t on t.chtgkey=g.chtgkey where c.mukey=m.mukey order by c.comppct_r desc) as surftex, (select top 1 c.taxorder from component c where c.mukey=m.mukey order by c.comppct_r desc) as taxorder from mapunit m where m.mukey in (select mukey from SDA_Get_Mukey_from_intersection_with_WktWgs84('" + wkt + "'))");
+    var catByMukey = {}, nameByCat = {};
+    texRows.forEach(function(u){ var cat = bottomCatOf(u.surftex, u.taxorder, u.muname); catByMukey[u.mukey] = cat; if (!nameByCat[cat]) nameByCat[cat] = (u.surftex || u.muname || ''); });
+    // Attach parsed rings to each soil polygon
+    var units = geoRows.map(function(g){ return { cat: catByMukey[g.mukey] || 'L', rings: parseWktRings(g.geom) }; }).filter(function(u){ return u.rings.length; });
+    // Rasterize to a grid clipped to the pond (traced boundary if any, else the whole bbox).
+    var LONG = 64, latMid = (bb.n + bb.s) / 2, wM = (bb.e - bb.w) * 111320 * Math.cos(latMid * Math.PI / 180), hM = (bb.n - bb.s) * 110540;
+    var cols = wM >= hM ? LONG : Math.max(8, Math.round(LONG * wM / hM)), rows = wM >= hM ? Math.max(8, Math.round(LONG * hM / wM)) : LONG;
+    var hasBnd = prop.boundary && prop.boundary.length >= 3;
+    var grid = new Array(cols * rows); var have = {};
+    for (var y = 0; y < rows; y++){
+      for (var x = 0; x < cols; x++){
+        var lat = bb.n - (bb.n - bb.s) * ((y + 0.5) / rows), lng = bb.w + (bb.e - bb.w) * ((x + 0.5) / cols);
+        if (hasBnd && !pointInProperty(lat, lng, prop)){ grid[y * cols + x] = '.'; continue; }
+        var code = '.';
+        for (var u = 0; u < units.length; u++){ if (pointInRings(lat, lng, units[u].rings)){ code = units[u].cat; break; } }
+        grid[y * cols + x] = code; if (code !== '.') have[code] = 1;
+      }
+      if (onStatus) onStatus('mapping bottom ' + Math.round((y + 1) / rows * 100) + '%');
+    }
+    prop.bottom = { bbox: bb, cols: cols, rows: rows, grid: grid.join(''), cats: Object.keys(have), names: nameByCat, traced: !!hasBnd, v: BOTTOM_V, createdAt: Date.now() };
+    try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: failed to save bottom', e); }
+    return prop.bottom;
+  }
+  function renderBottomOverlay(){
+    if (!map.getPane('bottomPane')){ map.createPane('bottomPane'); map.getPane('bottomPane').style.zIndex = 412; map.getPane('bottomPane').style.pointerEvents = 'none'; }
+    bottomOverlays.forEach(function(o){ map.removeLayer(o); }); bottomOverlays = [];
+    if (!bottomVisible) return;
+    (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
+      if ((p.module || activeModule) !== 'fishing') return; var b = p.bottom; if (!b || !b.grid) return;
+      var cols = b.cols, rows = b.rows, g = b.grid;
+      var cv = document.createElement('canvas'); cv.width = cols; cv.height = rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(cols, rows);
+      for (var k = 0; k < cols * rows; k++){ var c = g.charAt(k), o = k * 4, cat = BOTTOM_CATS[c]; if (!cat){ id.data[o+3] = 0; continue; } id.data[o] = cat.color[0]; id.data[o+1] = cat.color[1]; id.data[o+2] = cat.color[2]; id.data[o+3] = 235; }
+      ctx.putImageData(id, 0, 0);
+      var bb = b.bbox; bottomOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'bottomPane', opacity: 0.6, interactive: false }).addTo(map));
+    });
+  }
+  function bottomTypeAt(prop, lat, lng){
+    var b = prop && prop.bottom; if (!b || !b.grid) return null; var bb = b.bbox;
+    if (lat > bb.n || lat < bb.s || lng > bb.e || lng < bb.w) return null;
+    var x = Math.floor((lng - bb.w) / (bb.e - bb.w) * b.cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * b.rows);
+    if (x < 0 || y < 0 || x >= b.cols || y >= b.rows) return null;
+    var c = b.grid.charAt(y * b.cols + x); var cat = BOTTOM_CATS[c]; return cat ? cat.label : null;
+  }
+  function ensureBottomLegend(){
+    var el = document.getElementById('bottomLegend');
+    if (!el){ el = document.createElement('div'); el.id = 'bottomLegend'; el.style.cssText = 'position:absolute;bottom:96px;left:230px;z-index:1200;background:rgba(30,26,20,.92);color:#efe6da;border:1px solid #6d5a3c;border-radius:8px;padding:7px 9px;font-size:11px;display:none;';
+      document.getElementById('map').appendChild(el); }
+    var p = activeFishingProp(), b = p && p.bottom, cats = (b && b.cats && b.cats.length) ? b.cats : [];
+    var rows = BOTTOM_ORDER.filter(function(c){ return cats.indexOf(c) >= 0; }).map(function(c){ var cat = BOTTOM_CATS[c]; return '<div style="display:flex;align-items:center;gap:6px;margin:2px 0;"><span style="width:12px;height:12px;border-radius:2px;background:rgb(' + cat.color.join(',') + ');"></span>' + cat.label + '</div>'; }).join('');
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🪨 Bottom</div>' + (rows || '<div style="color:#b6a992;">no soil data</div>');
+    return el;
+  }
+  document.getElementById('bottomToggleBtn').addEventListener('click', async function(){
+    var btn = this, prop = activeFishingProp();
+    if (!prop){ showToast('Pick your lake in the property dropdown first, then tap 🪨 Bottom.'); return; }
+    if (!prop.bottom || prop.bottom.v !== BOTTOM_V){
+      btn.textContent = '🪨 …'; btn.classList.add('active');
+      try { await scanBottom(prop, function(m){ btn.textContent = '🪨 ' + m; }); }
+      catch (e){
+        btn.textContent = '🪨 Bottom'; btn.classList.remove('active');
+        var em = (e && e.message) || 'unknown', t;
+        if (em === 'no-soil') t = 'No soil survey polygons came back for this spot — the pond may be off the mapped area, or the USDA service is down. Frame the pond and try again.';
+        else if (em.indexOf('soil') === 0) t = 'The USDA soil service didn\'t respond (' + em + ').';
+        else t = 'It stopped with: "' + em + '"';
+        try { alert('🪨 Bottom scan didn\'t finish.\n\n' + t + '\n\nTell Claude this exact message and we\'ll fix it.'); } catch (_){ showToast(t); }
+        console.error('Outdoor Companion: bottom scan failed', e); return;
+      }
+      btn.textContent = '🪨 Bottom';
+      var b = prop.bottom, n = (b.cats || []).length;
+      showToast(n ? ('Bottom mapped — ' + n + ' substrate type' + (n === 1 ? '' : 's') + '. Tap the water to read the bottom.') : 'Scanned, but no soil types resolved here.');
+      bottomVisible = true;
+    } else {
+      bottomVisible = !bottomVisible;
+    }
+    btn.classList.toggle('active', bottomVisible);
+    renderBottomOverlay();
+    ensureBottomLegend().style.display = bottomVisible ? 'block' : 'none';
+    setBathyTap(bathyVisible || bottomVisible);
   });
 
   // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
@@ -9146,14 +9284,23 @@
     ['thermalToggleBtn','scentToggleBtn','landcoverToggleBtn'].forEach(function(id){
       var b = document.getElementById(id); if (b) b.style.display = activeModule === 'hunting' ? '' : 'none';
     });
-    // 🌊 Depth is the fishing counterpart — show it only in fishing, and clear its overlay when leaving.
+    // 🌊 Depth & 🪨 Bottom are the fishing counterparts — show only in fishing, and clear their overlays when leaving.
     var _db = document.getElementById('depthToggleBtn');
     if (_db) _db.style.display = activeModule === 'fishing' ? '' : 'none';
-    if (activeModule !== 'fishing' && typeof bathyVisible !== 'undefined' && bathyVisible){
-      bathyVisible = false; if (typeof renderBathyOverlay === 'function') renderBathyOverlay();
+    var _bb = document.getElementById('bottomToggleBtn');
+    if (_bb) _bb.style.display = activeModule === 'fishing' ? '' : 'none';
+    if (activeModule !== 'fishing'){
+      if (typeof bathyVisible !== 'undefined' && bathyVisible){
+        bathyVisible = false; if (typeof renderBathyOverlay === 'function') renderBathyOverlay();
+        var _lg = document.getElementById('bathyLegend'); if (_lg) _lg.style.display = 'none';
+        if (_db) _db.classList.remove('active');
+      }
+      if (typeof bottomVisible !== 'undefined' && bottomVisible){
+        bottomVisible = false; if (typeof renderBottomOverlay === 'function') renderBottomOverlay();
+        var _lg2 = document.getElementById('bottomLegend'); if (_lg2) _lg2.style.display = 'none';
+        if (_bb) _bb.classList.remove('active');
+      }
       if (typeof setBathyTap === 'function') setBathyTap(false);
-      var _lg = document.getElementById('bathyLegend'); if (_lg) _lg.style.display = 'none';
-      if (_db) _db.classList.remove('active');
     }
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
