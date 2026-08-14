@@ -1828,6 +1828,7 @@
       <button class="layer-btn" id="thermalToggleBtn" title="Thermal drift — which way your scent drains at each spot, from the LiDAR slope, flipped by time of day (rising uphill in the morning, falling downhill in the evening)">🌡 Thermals</button>
       <button class="layer-btn" id="scentToggleBtn" title="Scent cones — where your scent blows from each hunt spot right now (wind + thermals combined). A wider cone = swirlier, less certain. Red = where a deer would wind you.">🌬 Scent cones</button>
       <button class="layer-btn" id="landcoverToggleBtn" title="Field vs woods — the app's read of your property from the aerial (blue = woods, pink = field, yellow = cutover). Scan/verify it in Property Setup; the Walk-In planner uses it to route through cover.">🌲 Cover</button>
+      <button class="layer-btn" id="depthToggleBtn" style="display:none;" title="Depth — reads your pond's bottom from the LiDAR (when the ground was mapped before it filled). Select the lake, then tap to scan. Shallow = light, deep = dark. Tap the water to read a depth.">🌊 Depth</button>
       </div>
       <button id="layersToggleBtn" class="layers-toggle" aria-expanded="false" title="Show / hide the map layers">⛰ Layers</button>
     </div>
@@ -1838,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 299</div>
+    <div id="buildBadge">BUILD 300</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6822,6 +6823,7 @@
     renderMarkers();
     renderList();
     if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries();
+    if (typeof renderBathyOverlay === 'function' && bathyVisible) renderBathyOverlay();   // swap to the newly-selected lake's depth map
     if (activePropertyId){
       var prop = properties.filter(function(p){ return p.id === activePropertyId; })[0];
       if (prop && typeof prop.centerLat === 'number'){
@@ -7023,8 +7025,9 @@
   // else it's computed from a drawn boundary if there is one. So a lake can show acreage without ever
   // being traced. Foundation for catch-per-acre and comparing waters.
   function propAcres(prop){
-    if (prop && typeof prop.acresManual === 'number' && prop.acresManual > 0) return prop.acresManual;
-    if (prop && prop.boundary && prop.boundary.length >= 3) return polygonAcres(prop.boundary);
+    if (prop && typeof prop.acresManual === 'number' && prop.acresManual > 0) return prop.acresManual;   // you typed it
+    if (prop && prop.boundary && prop.boundary.length >= 3) return polygonAcres(prop.boundary);            // you traced it
+    if (prop && prop.bathy && prop.bathy.acres > 0) return prop.bathy.acres;                                // the depth scan measured the water footprint
     return null;
   }
   function propAcresLabel(prop){ var a = propAcres(prop); return a ? acresLabel(a) : ''; }
@@ -7227,6 +7230,126 @@
       pushCoverLabels(p, lc, types);
     });
   }
+
+  // ---------- Bathymetry (fishing depth map) ----------
+  // A pond dammed on a stream valley was LiDAR-mapped BEFORE it filled, so the same 3DEP DEM the app draws
+  // contours from holds the BOTTOM. Depth at a point = full-pool water level − ground elevation there. We
+  // estimate pool level from the SHORELINE (where the aerial's dark water meets land), sample the DEM across
+  // the framed area, and shade everything below pool as depth. Where the DEM post-dates the fill it reads
+  // flat (~0) — an honest "no bottom captured here."
+  var bathyVisible = false, bathyOverlays = [], _bathyTapHandler = null;
+  var DEPTH_MAX_FT = 30; // color-scale ceiling; deeper reads as "deepest"
+  async function scanBathymetry(prop, onStatus){
+    var bb = propBBox(prop); if (!bb) throw new Error('no-area');
+    var mPerLat = 111320, mPerLng = 111320 * Math.cos((bb.n + bb.s) / 2 * Math.PI / 180);
+    var widthM = (bb.e - bb.w) * mPerLng, heightM = (bb.n - bb.s) * mPerLat;
+    var degW = bb.e - bb.w, degH = bb.n - bb.s, LONG = 72, cols, rows;
+    if (degW >= degH){ cols = Math.max(24, Math.min(LONG, Math.round(widthM / 6))); rows = Math.max(16, Math.round(cols * degH / degW)); }
+    else { rows = Math.max(24, Math.min(LONG, Math.round(heightM / 6))); cols = Math.max(16, Math.round(rows * degW / degH)); }
+    if (onStatus) onStatus('reading water…');
+    var iurl = IMAGERY_EXPORT + '?bbox=' + [bb.w, bb.s, bb.e, bb.n].join(',') + '&bboxSR=4326&imageSR=4326&size=' + cols + ',' + rows + '&format=png&f=image';
+    var ir = await fetch(iurl); if (!ir.ok) throw new Error('imagery ' + ir.status);
+    var bm = await createImageBitmap(await ir.blob());
+    var W = bm.width, H = bm.height, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    var cx = cv.getContext('2d'); cx.drawImage(bm, 0, 0); var img = cx.getImageData(0, 0, W, H).data;
+    // dark pixels ≈ water
+    var dark = new Uint8Array(W * H);
+    for (var p = 0; p < W * H; p++){ var ii = p * 4, L = 0.3 * img[ii] + 0.59 * img[ii+1] + 0.11 * img[ii+2]; dark[p] = (L < 78) ? 1 : 0; }
+    // largest connected dark blob = the pond (drops shadows / dark timber)
+    var comp = new Int32Array(W * H); for (var ci = 0; ci < W * H; ci++) comp[ci] = -1;
+    var best = [], bestN = 0, cid = 0;
+    for (var s = 0; s < W * H; s++){
+      if (!dark[s] || comp[s] >= 0) continue;
+      var stk = [s], cells = []; comp[s] = cid;
+      while (stk.length){ var k = stk.pop(); cells.push(k); var x = k % W, y = (k / W) | 0;
+        if (x + 1 < W && dark[k+1] && comp[k+1] < 0){ comp[k+1] = cid; stk.push(k+1); }
+        if (x > 0 && dark[k-1] && comp[k-1] < 0){ comp[k-1] = cid; stk.push(k-1); }
+        if (y + 1 < H && dark[k+W] && comp[k+W] < 0){ comp[k+W] = cid; stk.push(k+W); }
+        if (y > 0 && dark[k-W] && comp[k-W] < 0){ comp[k-W] = cid; stk.push(k-W); }
+      }
+      if (cells.length > bestN){ bestN = cells.length; best = cells; } cid++;
+    }
+    if (bestN < 8) throw new Error('no-water');
+    var pond = new Uint8Array(W * H); best.forEach(function(k){ pond[k] = 1; });
+    var shore = []; best.forEach(function(k){ var x = k % W, y = (k / W) | 0; if ((x+1<W&&!pond[k+1])||(x>0&&!pond[k-1])||(y+1<H&&!pond[k+W])||(y>0&&!pond[k-W])) shore.push(k); });
+    // sample the DEM across the whole grid (chunked getSamples)
+    var pts = new Array(W * H);
+    for (var q = 0; q < W * H; q++){ var qx = q % W, qy = (q / W) | 0; pts[q] = [bb.w + (bb.e - bb.w) * ((qx + 0.5) / W), bb.n - (bb.n - bb.s) * ((qy + 0.5) / H)]; }
+    var elev = new Array(W * H); for (var z = 0; z < W * H; z++) elev[z] = NaN;
+    var CH = 800;
+    for (var c0 = 0; c0 < pts.length; c0 += CH){ var vals = await sampleElevPoints(pts.slice(c0, c0 + CH)); if (vals){ for (var vi = 0; vi < vals.length; vi++) elev[c0 + vi] = vals[vi]; } if (onStatus) onStatus('reading bottom ' + Math.min(100, Math.round((c0 + CH) / pts.length * 100)) + '%'); }
+    var sv = shore.map(function(k){ return elev[k]; }).filter(function(v){ return isFinite(v); }).sort(function(a, b){ return a - b; });
+    if (!sv.length) throw new Error('no-elev');
+    var pool = sv[Math.floor(sv.length / 2)]; // median shoreline elevation = full-pool level
+    var depthFt = new Array(W * H);
+    for (var d = 0; d < W * H; d++){ var dep = (pond[d] && isFinite(elev[d])) ? m2ft(pool - elev[d]) : 0; depthFt[d] = dep > 0.3 ? Math.round(dep * 10) / 10 : 0; }
+    // Bonus: the detected water footprint gives a free acreage estimate (pond cells × cell ground area).
+    var cellAreaM2 = (widthM / W) * (heightM / H), acres = (bestN * cellAreaM2) / 4046.8564;
+    prop.bathy = { bbox: bb, cols: W, rows: H, poolM: pool, depthFt: depthFt, acres: Math.round(acres * 10) / 10, createdAt: Date.now() };
+    try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: failed to save bathy', e); }
+    return prop.bathy;
+  }
+  function bathyDepthColor(ft){
+    var t = Math.max(0, Math.min(1, ft / DEPTH_MAX_FT)), c;
+    if (t < 0.5){ var u = t / 0.5; c = [150 + (40 - 150) * u, 220 + (110 - 220) * u, 235 + (200 - 235) * u]; }
+    else { var u2 = (t - 0.5) / 0.5; c = [40 + (12 - 40) * u2, 110 + (30 - 110) * u2, 200 + (90 - 200) * u2]; }
+    return c;
+  }
+  function renderBathyOverlay(){
+    if (!map.getPane('bathyPane')){ map.createPane('bathyPane'); map.getPane('bathyPane').style.zIndex = 413; map.getPane('bathyPane').style.pointerEvents = 'none'; }
+    bathyOverlays.forEach(function(o){ map.removeLayer(o); }); bathyOverlays = [];
+    if (!bathyVisible) return;
+    (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
+      if ((p.module || activeModule) !== 'fishing') return; var b = p.bathy; if (!b || !b.depthFt) return;
+      var cv = document.createElement('canvas'); cv.width = b.cols; cv.height = b.rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(b.cols, b.rows);
+      for (var k = 0; k < b.cols * b.rows; k++){ var ft = b.depthFt[k], o = k * 4; if (ft > 0){ var col = bathyDepthColor(ft); id.data[o] = Math.round(col[0]); id.data[o+1] = Math.round(col[1]); id.data[o+2] = Math.round(col[2]); id.data[o+3] = 205; } else { id.data[o+3] = 0; } }
+      ctx.putImageData(id, 0, 0);
+      var bb = b.bbox; bathyOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'bathyPane', opacity: 0.7, interactive: false }).addTo(map));
+    });
+  }
+  function bathyDepthAtFt(prop, lat, lng){
+    var b = prop && prop.bathy; if (!b || !b.depthFt) return null; var bb = b.bbox;
+    if (lat > bb.n || lat < bb.s || lng > bb.e || lng < bb.w) return null;
+    var x = Math.floor((lng - bb.w) / (bb.e - bb.w) * b.cols), y = Math.floor((bb.n - lat) / (bb.n - bb.s) * b.rows);
+    if (x < 0 || y < 0 || x >= b.cols || y >= b.rows) return null;
+    var ft = b.depthFt[y * b.cols + x]; return ft > 0 ? ft : 0;
+  }
+  function activeFishingProp(){ if (!activePropertyId) return null; var p = properties.filter(function(x){ return x.id === activePropertyId; })[0]; return (p && (p.module || activeModule) === 'fishing') ? p : null; }
+  function ensureBathyLegend(){
+    var el = document.getElementById('bathyLegend');
+    if (!el){ el = document.createElement('div'); el.id = 'bathyLegend'; el.style.cssText = 'position:absolute;bottom:70px;left:10px;z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:8px;padding:7px 9px;font-size:11px;display:none;';
+      el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth</div><div style="width:120px;height:10px;border-radius:3px;background:linear-gradient(90deg,rgb(150,220,235),rgb(40,110,200),rgb(12,30,90));"></div><div style="display:flex;justify-content:space-between;font-size:9px;margin-top:2px;color:#9db0a3;"><span>shallow</span><span>' + DEPTH_MAX_FT + ' ft+</span></div>';
+      document.getElementById('map').appendChild(el); }
+    return el;
+  }
+  function setBathyTap(on){
+    if (on && !_bathyTapHandler){
+      _bathyTapHandler = function(e){ if (placing) return; var prop = activeFishingProp(); if (!prop) return; var ft = bathyDepthAtFt(prop, e.latlng.lat, e.latlng.lng); if (ft == null) return; L.popup().setLatLng(e.latlng).setContent('<b>≈ ' + (ft >= 1 ? Math.round(ft) : ft.toFixed(1)) + ' ft</b> deep').openOn(map); };
+      map.on('click', _bathyTapHandler);
+    } else if (!on && _bathyTapHandler){ map.off('click', _bathyTapHandler); _bathyTapHandler = null; }
+  }
+  document.getElementById('depthToggleBtn').addEventListener('click', async function(){
+    var btn = this, prop = activeFishingProp();
+    if (!prop){ showToast('Pick your lake in the property dropdown first, then tap 🌊 Depth.'); return; }
+    if (!prop.bathy){
+      btn.textContent = '🌊 …'; btn.classList.add('active');
+      try { await scanBathymetry(prop, function(m){ btn.textContent = '🌊 ' + m; }); }
+      catch (e){ btn.textContent = '🌊 Depth'; btn.classList.remove('active'); showToast(e && e.message === 'no-water' ? 'Couldn\'t spot open water — frame the pond in view and make sure the lake is selected.' : 'Couldn\'t read the bottom — check your connection and try again.'); console.error('Outdoor Companion: bathy scan failed', e); return; }
+      btn.textContent = '🌊 Depth';
+      var mx = 0; prop.bathy.depthFt.forEach(function(f){ if (f > mx) mx = f; });
+      var acTxt = prop.bathy.acres > 0 ? (' · ~' + prop.bathy.acres + ' acres') : '';
+      showToast(mx > 1 ? ('Bottom read — deepest ≈ ' + Math.round(mx) + ' ft' + acTxt + '. Tap the water to read a depth.') : ('Scanned' + acTxt + ' — but the LiDAR here reads flat (captured after the pond filled), so there\'s no bottom to show.'));
+      renderPropertySelect(); renderPropertiesManageList();   // acreage estimate now shows on the lake
+      bathyVisible = true;
+    } else {
+      bathyVisible = !bathyVisible;
+    }
+    btn.classList.toggle('active', bathyVisible);
+    renderBathyOverlay();
+    ensureBathyLegend().style.display = bathyVisible ? 'block' : 'none';
+    setBathyTap(bathyVisible);
+  });
+
   // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
   var coverEditMode = false, _coverDrawer = null, _coverUndo = null, _coverLineRadius = 2, _coverPaint = null;   // drain corridor radius in cells (1≈narrow / 2≈med / 3≈wide); _coverPaint = active brush stroke
   function propWithCoverAt(lat, lng){
@@ -8892,6 +9015,15 @@
     ['thermalToggleBtn','scentToggleBtn','landcoverToggleBtn'].forEach(function(id){
       var b = document.getElementById(id); if (b) b.style.display = activeModule === 'hunting' ? '' : 'none';
     });
+    // 🌊 Depth is the fishing counterpart — show it only in fishing, and clear its overlay when leaving.
+    var _db = document.getElementById('depthToggleBtn');
+    if (_db) _db.style.display = activeModule === 'fishing' ? '' : 'none';
+    if (activeModule !== 'fishing' && typeof bathyVisible !== 'undefined' && bathyVisible){
+      bathyVisible = false; if (typeof renderBathyOverlay === 'function') renderBathyOverlay();
+      if (typeof setBathyTap === 'function') setBathyTap(false);
+      var _lg = document.getElementById('bathyLegend'); if (_lg) _lg.style.display = 'none';
+      if (_db) _db.classList.remove('active');
+    }
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
