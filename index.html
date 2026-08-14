@@ -1831,6 +1831,7 @@
       <button class="layer-btn" id="depthToggleBtn" style="display:none;" title="Depth — reads your pond's bottom from the LiDAR (when the ground was mapped before it filled). Select the lake, then tap to scan. Shallow = light, deep = dark. Tap the water to read a depth.">🌊 Depth</button>
       <button class="layer-btn" id="bottomToggleBtn" style="display:none;" title="Bottom type — the pond's substrate from the USDA soil survey of the basin (mapped before it filled): sand, loam, clay, or soft muck. Select the lake, then tap to scan. Tap the water to read the bottom.">🪨 Bottom</button>
       <button class="layer-btn" id="mapOverlayToggleBtn" style="display:none;" title="Import a lake map — pin a fishing/depth map or chart image onto the aerial (drag the corners to fit), clipped to the shoreline. Your catches then plot right on the real contours.">🗺 Map</button>
+      <button class="layer-btn" id="soundingsToggleBtn" style="display:none;" title="Depth points — drop known depths (read off an imported chart, or your sonar) and the app reads a depth anywhere in between. New catches get auto-tagged with their depth.">📏 Depths</button>
       </div>
       <button id="layersToggleBtn" class="layers-toggle" aria-expanded="false" title="Show / hide the map layers">⛰ Layers</button>
     </div>
@@ -1842,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 316</div>
+    <div id="buildBadge">BUILD 317</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4210,6 +4211,7 @@
       var specs = [];
       if (o.weight) specs.push(o.weight + ' lb');
       if (o.length) specs.push(o.length + '"');
+      if (typeof o.depthFt === 'number' && o.depthFt > 0) specs.push((o.depthFt >= 1 ? Math.round(o.depthFt) : o.depthFt) + ' ft deep');
       var card = document.createElement('div');
       card.className = 'import-photo-card';
       card.innerHTML =
@@ -6831,6 +6833,7 @@
     if (typeof renderBathyOverlay === 'function' && bathyVisible) renderBathyOverlay();   // swap to the newly-selected lake's depth map
     if (typeof renderBottomOverlay === 'function' && bottomVisible) renderBottomOverlay();
     if (typeof renderMapOverlay === 'function' && mapOverlayVisible){ renderMapOverlay(); ensureMapOverlayControls().style.display = mapOverlayVisible ? 'block' : 'none'; }  // swap to the newly-selected lake's imported map
+    if (typeof renderSoundings === 'function' && soundingsVisible){ _addSoundingMode = false; renderSoundings(); ensureSoundingsControls().style.display = soundingsVisible ? 'block' : 'none'; }
     if (typeof ensureBathyLegend === 'function' && bathyVisible) ensureBathyLegend();
     if (typeof ensureBottomLegend === 'function' && bottomVisible) ensureBottomLegend();
     if (activePropertyId){
@@ -7420,8 +7423,10 @@
       // One pin at a time — each tap moves it — so the map stays clean. Cleared when the Depth layer is turned off.
       _bathyTapHandler = function(e){
         if (placing) return; var prop = activeFishingProp(); if (!prop) return;
+        if (_addSoundingMode && soundingsVisible){ addSoundingAt(prop, e.latlng.lat, e.latlng.lng); return; }   // dropping a known depth, not reading
         var parts = [];
         if (bathyVisible && prop.bathy){ var ft = bathyDepthAtFt(prop, e.latlng.lat, e.latlng.lng); if (ft != null) parts.push('🌊 ' + (ft >= 1 ? Math.round(ft) : ft.toFixed(1)) + ' ft'); }
+        else if (soundingsVisible){ var sf = soundingDepthAt(prop, e.latlng.lat, e.latlng.lng); if (sf != null) parts.push('🌊 ~' + (sf >= 1 ? Math.round(sf) : sf.toFixed(1)) + ' ft'); }
         var bt = bottomTypeAt(prop, e.latlng.lat, e.latlng.lng); if (bt) parts.push(bt);
         if (!parts.length) return;
         var lbl = parts.join(' · ');
@@ -7490,7 +7495,7 @@
     btn.classList.toggle('active', bathyVisible);
     renderBathyOverlay();
     ensureBathyLegend().style.display = bathyVisible ? 'block' : 'none';
-    setBathyTap(bathyVisible || bottomVisible);
+    setBathyTap(bathyVisible || bottomVisible || soundingsVisible);
   });
 
   // ---------- 🪨 Bottom composition — the pond's SUBSTRATE, read from the USDA soil survey of the basin ----------
@@ -7623,7 +7628,7 @@
     btn.classList.toggle('active', bottomVisible);
     renderBottomOverlay();
     ensureBottomLegend().style.display = bottomVisible ? 'block' : 'none';
-    setBathyTap(bathyVisible || bottomVisible);
+    setBathyTap(bathyVisible || bottomVisible || soundingsVisible);
   });
 
   // ---------- 🗺 Import a lake map — georeference a chart/fishing-map image onto the aerial, clip to shoreline ----------
@@ -7766,6 +7771,64 @@
     btn.classList.toggle('active', mapOverlayVisible);
     renderMapOverlay();
     ensureMapOverlayControls().style.display = mapOverlayVisible ? 'block' : 'none';
+  });
+
+  // ---------- 📏 Depth points — turn a chart (or your sonar) into a queryable depth model ----------
+  // On an established lake the LiDAR can't read the bottom. So the founder supplies the truth: drop known
+  // depths (read off an imported chart, or straight off his depth finder) and we interpolate between them
+  // (inverse-distance weighting) so a tap reads a depth anywhere, and new catches auto-tag with their depth.
+  var soundingsVisible = false, _soundingsLayer = null, _addSoundingMode = false;
+  function _mBetween(aLat, aLng, bLat, bLng){ var dLat = (bLat - aLat) * 110540, dLng = (bLng - aLng) * 111320 * Math.cos((aLat + bLat) / 2 * Math.PI / 180); return Math.sqrt(dLat * dLat + dLng * dLng); }
+  function soundingDepthAt(prop, lat, lng){
+    var pts = prop && prop.soundings; if (!pts || !pts.length) return null;
+    if (prop.boundary && prop.boundary.length >= 3 && !pointInPolygon(lat, lng, prop.boundary)) return null;   // off the water
+    var num = 0, den = 0;
+    for (var i = 0; i < pts.length; i++){ var d = _mBetween(lat, lng, pts[i].lat, pts[i].lng); if (d < 0.5) return pts[i].ft; var w = 1 / (d * d); num += w * pts[i].ft; den += w; }
+    return den > 0 ? Math.round(num / den * 10) / 10 : null;
+  }
+  // Best depth at a spot: a LiDAR bathy reading if we have one, else the interpolated chart/sonar depth.
+  function fishingDepthAt(prop, lat, lng){
+    if (prop && prop.bathy){ var b = bathyDepthAtFt(prop, lat, lng); if (b != null && b > 0) return b; }
+    var s = soundingDepthAt(prop, lat, lng); return (s != null) ? s : null;
+  }
+  function renderSoundings(){
+    if (_soundingsLayer){ try { map.removeLayer(_soundingsLayer); } catch (e){} _soundingsLayer = null; }
+    if (!soundingsVisible) return;
+    var prop = activeFishingProp(); if (!prop || !prop.soundings || !prop.soundings.length) return;
+    _soundingsLayer = L.layerGroup().addTo(map);
+    prop.soundings.forEach(function(s){
+      L.marker([s.lat, s.lng], { interactive: false, keyboard: false, icon: L.divIcon({ className: '', iconSize: [0, 0], html: '<div style="transform:translate(-50%,-50%);background:#0b3a5a;color:#dff1ff;border:1px solid #6fc3ff;border-radius:9px;padding:1px 5px;font-size:10px;font-weight:700;white-space:nowrap;box-shadow:0 1px 3px rgba(0,0,0,.55);">' + (s.ft >= 1 ? Math.round(s.ft) : s.ft) + '</div>' }) }).addTo(_soundingsLayer);
+    });
+  }
+  function addSoundingAt(prop, lat, lng){
+    var v = prompt('Depth here, in feet?\n\nRead it off your imported chart, or straight off your depth finder.', '');
+    if (v == null) return; v = ('' + v).trim(); if (v === '') return;
+    var n = parseFloat(v); if (!(n >= 0)){ showToast('Enter a number of feet, like 8.'); return; }
+    if (!prop.soundings) prop.soundings = [];
+    prop.soundings.push({ lat: lat, lng: lng, ft: Math.round(n * 10) / 10 });
+    saveProperty(prop).catch(function(e){ console.error('Outdoor Companion: save sounding failed', e); });
+    renderSoundings(); ensureSoundingsControls();
+  }
+  function ensureSoundingsControls(){
+    var el = document.getElementById('soundControls');
+    if (!el){ el = document.createElement('div'); el.id = 'soundControls'; el.style.cssText = 'position:absolute;bottom:158px;right:12px;z-index:1200;background:rgba(14,30,38,.93);color:#dff;border:1px solid #2c6a86;border-radius:8px;padding:8px 10px;font-size:11px;display:none;'; document.getElementById('map').appendChild(el); }
+    var prop = activeFishingProp(), n = (prop && prop.soundings && prop.soundings.length) || 0;
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:5px;">📏 Depth points (' + n + ')</div>' +
+      '<button id="soundAdd" style="width:100%;background:' + (_addSoundingMode ? '#e8823f' : '#1f6b8a') + ';color:#fff;border:none;border-radius:6px;padding:6px;cursor:pointer;margin-bottom:5px;">' + (_addSoundingMode ? '✓ Done adding' : '＋ Add depth readings') + '</button>' +
+      '<button id="soundClear" style="width:100%;background:#5a2f2f;color:#fdd;border:none;border-radius:6px;padding:5px;cursor:pointer;">Clear all</button>';
+    document.getElementById('soundAdd').onclick = function(){ _addSoundingMode = !_addSoundingMode; setBathyTap(true); ensureSoundingsControls(); showToast(_addSoundingMode ? 'Tap the water where you know the depth, then type the feet — off your chart or your sonar.' : 'Done adding depth points.'); };
+    document.getElementById('soundClear').onclick = async function(){ if (!prop || !n) return; if (!(await showConfirm('Clear all ' + n + ' depth points for ' + (prop.name || 'this lake') + '?'))) return; prop.soundings = []; try { await saveProperty(prop); } catch (e){} renderSoundings(); ensureSoundingsControls(); };
+    return el;
+  }
+  document.getElementById('soundingsToggleBtn').addEventListener('click', function(){
+    var btn = this, prop = activeFishingProp();
+    if (!prop){ showToast('Pick your lake in the property dropdown first, then tap 📏 Depths.'); return; }
+    soundingsVisible = !soundingsVisible;
+    if (!soundingsVisible) _addSoundingMode = false;
+    btn.classList.toggle('active', soundingsVisible);
+    renderSoundings();
+    ensureSoundingsControls().style.display = soundingsVisible ? 'block' : 'none';
+    setBathyTap(bathyVisible || bottomVisible || soundingsVisible);
   });
 
   // ---- editing: tap a block to relabel it (flood-fills the contiguous same-type region), or draw a custom area ----
@@ -9442,7 +9505,10 @@
     if (_bb) _bb.style.display = activeModule === 'fishing' ? '' : 'none';
     var _mo = document.getElementById('mapOverlayToggleBtn');
     if (_mo) _mo.style.display = activeModule === 'fishing' ? '' : 'none';
+    var _sd = document.getElementById('soundingsToggleBtn');
+    if (_sd) _sd.style.display = activeModule === 'fishing' ? '' : 'none';
     if (activeModule !== 'fishing'){
+      if (typeof soundingsVisible !== 'undefined' && soundingsVisible){ soundingsVisible = false; _addSoundingMode = false; if (typeof renderSoundings === 'function') renderSoundings(); if (_sd) _sd.classList.remove('active'); var _sc = document.getElementById('soundControls'); if (_sc) _sc.style.display = 'none'; }
       if (typeof _mapEditor !== 'undefined' && _mapEditor && typeof exitMapGeoref === 'function') exitMapGeoref();
       if (typeof mapOverlayVisible !== 'undefined' && mapOverlayVisible){ mapOverlayVisible = false; if (typeof renderMapOverlay === 'function') renderMapOverlay(); if (_mo) _mo.classList.remove('active'); var _moc = document.getElementById('mapOvControls'); if (_moc) _moc.style.display = 'none'; }
       if (typeof bathyVisible !== 'undefined' && bathyVisible){
@@ -12298,6 +12364,7 @@
     var parts = [];
     if (o.weight) parts.push(o.weight + ' lbs');
     if (o.length) parts.push(o.length + ' in');
+    if (typeof o.depthFt === 'number' && o.depthFt > 0) parts.push((o.depthFt >= 1 ? Math.round(o.depthFt) : o.depthFt) + ' ft deep');
     if (o.lure) parts.push(o.lure + (o.lureColor ? ' (' + o.lureColor + ')' : ''));
     if (o.tagNumber) parts.push('Tag #' + o.tagNumber);
     var html = '<div style="display:flex;gap:8px;padding:6px 0;border-top:1px solid var(--line);align-items:flex-start;">';
@@ -13044,6 +13111,8 @@
     };
     if (type === 'buck' && _logBuckId) obs.buckProfileId = _logBuckId;   // tag the sighting to the named buck → his timeline
     if (obsTypeMoves(type) && _logDir) obs.headingDir = _logDir;         // which way he was traveling
+    // Auto-tag a fishing catch with the water depth where it happened (LiDAR bathy or the chart/sonar depth model).
+    if (activeModule === 'fishing' && resolvedProperty && typeof fishingDepthAt === 'function'){ var _dft = fishingDepthAt(resolvedProperty, lat, lng); if (_dft != null) obs.depthFt = _dft; }
     observations.push(obs);
     try{ await saveObservation(obs); }catch(e){ console.error('Outdoor Companion: failed to save observation', e); }
 
