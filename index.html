@@ -1842,7 +1842,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 315</div>
+    <div id="buildBadge">BUILD 316</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7733,7 +7733,9 @@
     showToast(clipRings ? ('Map saved, clipped to the shoreline' + (nhd ? ' (NHD — ' + (nhd.acres || '?') + ' ac)' : '') + '. Toggle with 🗺 Map.') : 'Map saved — no shoreline found to clip to; trace it in Set up for a clean clip.');
   }
   function renderMapOverlay(){
-    if (!map.getPane('mapOvPane')){ map.createPane('mapOvPane'); map.getPane('mapOvPane').style.zIndex = 405; map.getPane('mapOvPane').style.pointerEvents = 'none'; }
+    // Sits just above the aerial base but BELOW all vector content (paths 400, markers 600) so catch pins,
+    // trails and boundaries always render ON TOP of the imported chart — no need to fade it to see your pins.
+    if (!map.getPane('mapOvPane')){ map.createPane('mapOvPane'); map.getPane('mapOvPane').style.zIndex = 350; map.getPane('mapOvPane').style.pointerEvents = 'none'; }
     if (_mapOverlayLayer){ try { map.removeLayer(_mapOverlayLayer); } catch (e){} _mapOverlayLayer = null; }
     if (!mapOverlayVisible) return;
     var prop = activeFishingProp(); if (!prop || !prop.mapOverlay || !prop.mapOverlay.img) return;
