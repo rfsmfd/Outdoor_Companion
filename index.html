@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 302</div>
+    <div id="buildBadge">BUILD 303</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7345,12 +7345,15 @@
       catch (e){
         btn.textContent = '🌊 Depth'; btn.classList.remove('active');
         var em = (e && e.message) || 'unknown', t;
-        if (em === 'no-water') t = 'Couldn\'t spot open water — frame the pond in view and make sure the lake is selected.';
-        else if (em === 'no-area') t = 'This lake has no saved map area yet — re-frame the pond and save it, or draw its outline in ⚙ Set up.';
-        else if (em.indexOf('imagery') === 0) t = 'Couldn\'t load the aerial imagery (service/connection). Try again.';
-        else if (em === 'no-elev') t = 'Read the water fine, but the LiDAR elevation came back empty — the 3DEP service may be busy or not cover this spot. Try again in a moment.';
-        else t = 'Scan failed at: ' + em + '. Try again.';
-        showToast(t); console.error('Outdoor Companion: bathy scan failed', e); return;
+        if (em === 'no-water') t = 'Couldn\'t spot open water in view — frame the pond so the water fills most of the screen, keep the lake selected, and try again.';
+        else if (em === 'no-area') t = 'This lake has no saved map area — re-frame the pond and save it, or draw its outline in Set up.';
+        else if (em.indexOf('imagery') === 0) t = 'The aerial imagery service didn\'t respond (' + em + ').';
+        else if (em === 'no-elev') t = 'It read the water fine, but the LiDAR elevation service came back empty for this spot.';
+        else t = 'It stopped with: "' + em + '"';
+        // Beginner-friendly, unmissable diagnostic (a toast fades before it can be read/relayed): show the exact
+        // cause in a dialog so the founder can tell me precisely what happened. (In-app, never the console.)
+        try { alert('🌊 Depth scan didn\'t finish.\n\n' + t + '\n\nTell Claude this exact message and we\'ll fix it.'); } catch (_){ showToast(t); }
+        console.error('Outdoor Companion: bathy scan failed', e); return;
       }
       btn.textContent = '🌊 Depth';
       var mx = 0; prop.bathy.depthFt.forEach(function(f){ if (f > mx) mx = f; });
