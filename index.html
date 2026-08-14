@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 311</div>
+    <div id="buildBadge">BUILD 312</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7244,7 +7244,7 @@
   // estimate pool level from the SHORELINE (where the aerial's dark water meets land), sample the DEM across
   // the framed area, and shade everything below pool as depth. Where the DEM post-dates the fill it reads
   // flat (~0) — an honest "no bottom captured here."
-  var bathyVisible = false, bathyOverlays = [], _bathyTapHandler = null;
+  var bathyVisible = false, bathyOverlays = [], _bathyTapHandler = null, _bathyPin = null;
   var DEPTH_MAX_FT = 30; // color-scale ceiling; deeper reads as "deepest"
   var BATHY_V = 4;       // bump when the scan algorithm changes so existing scans auto-refresh on next tap
   async function scanBathymetry(prop, onStatus){
@@ -7405,9 +7405,23 @@
   }
   function setBathyTap(on){
     if (on && !_bathyTapHandler){
-      _bathyTapHandler = function(e){ if (placing) return; var prop = activeFishingProp(); if (!prop) return; var ft = bathyDepthAtFt(prop, e.latlng.lat, e.latlng.lng); if (ft == null) return; L.popup().setLatLng(e.latlng).setContent('<b>≈ ' + (ft >= 1 ? Math.round(ft) : ft.toFixed(1)) + ' ft</b> deep').openOn(map); };
+      // Drop a depth pin on any shade of blue: tap the water and a marker lands there showing the reading.
+      // One pin at a time — each tap moves it — so the map stays clean. Cleared when the Depth layer is turned off.
+      _bathyTapHandler = function(e){
+        if (placing) return; var prop = activeFishingProp(); if (!prop) return;
+        var ft = bathyDepthAtFt(prop, e.latlng.lat, e.latlng.lng); if (ft == null) return;
+        var lbl = (ft >= 1 ? Math.round(ft) : ft.toFixed(1)) + ' ft';
+        var html = '<div style="transform:translate(-50%,-100%);white-space:nowrap;text-align:center;">' +
+          '<div style="display:inline-block;background:#0b2a4a;color:#dff1ff;border:1px solid #3f8cff;border-radius:12px;padding:3px 9px;font-size:12px;font-weight:700;box-shadow:0 2px 6px rgba(0,0,0,.45);">🌊 ' + lbl + '</div>' +
+          '<div style="width:2px;height:9px;background:#3f8cff;margin:0 auto;"></div></div>';
+        if (_bathyPin){ map.removeLayer(_bathyPin); _bathyPin = null; }
+        _bathyPin = L.marker(e.latlng, { icon: L.divIcon({ className: 'bathy-pin', iconSize: [0, 0], html: html }), interactive: false, keyboard: false }).addTo(map);
+      };
       map.on('click', _bathyTapHandler);
-    } else if (!on && _bathyTapHandler){ map.off('click', _bathyTapHandler); _bathyTapHandler = null; }
+    } else if (!on && _bathyTapHandler){
+      map.off('click', _bathyTapHandler); _bathyTapHandler = null;
+      if (_bathyPin){ map.removeLayer(_bathyPin); _bathyPin = null; }
+    }
   }
   // Run the scan, then show the overlay + legend. Used both for the direct tap and after a fresh outline trace.
   async function runBathyScan(prop, btn){
