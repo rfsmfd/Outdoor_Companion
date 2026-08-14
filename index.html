@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 308</div>
+    <div id="buildBadge">BUILD 309</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7246,7 +7246,7 @@
   // flat (~0) — an honest "no bottom captured here."
   var bathyVisible = false, bathyOverlays = [], _bathyTapHandler = null;
   var DEPTH_MAX_FT = 30; // color-scale ceiling; deeper reads as "deepest"
-  var BATHY_V = 3;       // bump when the scan algorithm changes so existing scans auto-refresh on next tap
+  var BATHY_V = 4;       // bump when the scan algorithm changes so existing scans auto-refresh on next tap
   async function scanBathymetry(prop, onStatus){
     var bb = propBBox(prop);
     if (!bb){
@@ -7311,9 +7311,17 @@
     var pool = sv[Math.floor(sv.length / 2)]; // median shoreline elevation = full-pool level
     var depthFt = new Array(W * H);
     for (var d = 0; d < W * H; d++){ var dep = (pond[d] && isFinite(elev[d])) ? m2ft(pool - elev[d]) : 0; depthFt[d] = dep > 0.3 ? Math.round(dep * 10) / 10 : 0; }
+    // Adaptive depth scale — the bands must fit THIS pond's real range. A 12-ft pond charted on a fixed 30-ft
+    // ramp lands entirely in the two palest shades and reads as one flat wash; sizing 6 bands to the pond's own
+    // deepest reading spreads the full shallow→deep palette across it so the channel actually stands out.
+    var dsorted = depthFt.filter(function(v){ return v > 0; }).sort(function(a, b){ return a - b; });
+    var maxFt = dsorted.length ? dsorted[Math.floor((dsorted.length - 1) * 0.97)] : 0;   // 97th pct: ignore a lone deep pixel
+    var rstep = maxFt / 6;
+    var step = rstep <= 0 ? 1 : rstep < 0.75 ? 0.5 : rstep < 1.5 ? 1 : rstep < 2.25 ? 2 : rstep < 3.5 ? 2.5 : rstep < 7.5 ? 5 : 10;
+    var bandEdges = []; for (var be = 1; be <= 6; be++) bandEdges.push(Math.round(step * be * 10) / 10);
     // Bonus: the water footprint (traced outline or auto) gives an acreage estimate (pond cells × cell area).
     var cellAreaM2 = (widthM / W) * (heightM / H), acres = (pondN * cellAreaM2) / 4046.8564;
-    prop.bathy = { bbox: bb, cols: W, rows: H, poolM: pool, depthFt: depthFt, acres: Math.round(acres * 10) / 10, v: BATHY_V, createdAt: Date.now() };
+    prop.bathy = { bbox: bb, cols: W, rows: H, poolM: pool, depthFt: depthFt, bandEdges: bandEdges, maxFt: Math.round(maxFt * 10) / 10, traced: !!(prop.boundary && prop.boundary.length >= 3), acres: Math.round(acres * 10) / 10, v: BATHY_V, createdAt: Date.now() };
     try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: failed to save bathy', e); }
     return prop.bathy;
   }
@@ -7322,7 +7330,7 @@
   var DEPTH_BAND_COLORS = [
     [200, 244, 255], [130, 210, 252], [80, 175, 245], [50, 135, 232], [38, 98, 210], [28, 65, 185], [20, 42, 150]
   ];                                                       // shallow → deep (one more color than lines)
-  function depthBand(ft){ for (var i = 0; i < DEPTH_BAND_FT.length; i++){ if (ft < DEPTH_BAND_FT[i]) return i; } return DEPTH_BAND_FT.length; }
+  function depthBand(ft, edges){ edges = edges || DEPTH_BAND_FT; for (var i = 0; i < edges.length; i++){ if (ft < edges[i]) return i; } return edges.length; }
   function renderBathyOverlay(){
     if (!map.getPane('bathyPane')){ map.createPane('bathyPane'); map.getPane('bathyPane').style.zIndex = 413; map.getPane('bathyPane').style.pointerEvents = 'none'; }
     bathyOverlays.forEach(function(o){ map.removeLayer(o); }); bathyOverlays = [];
@@ -7332,12 +7340,12 @@
       var cols = b.cols, rows = b.rows;
       var cv = document.createElement('canvas'); cv.width = cols; cv.height = rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(cols, rows);
       // Banded depth shading with a contour line between bands (and the waterline as the outer contour).
-      var df = b.depthFt;
-      function bandAt(idx){ return (idx >= 0 && idx < cols * rows && df[idx] > 0) ? depthBand(df[idx]) : -1; }
+      var df = b.depthFt, edges = b.bandEdges || DEPTH_BAND_FT;
+      function bandAt(idx){ return (idx >= 0 && idx < cols * rows && df[idx] > 0) ? depthBand(df[idx], edges) : -1; }
       for (var k = 0; k < cols * rows; k++){
         var ft = df[k], o = k * 4;
         if (!(ft > 0)){ id.data[o+3] = 0; continue; }
-        var band = depthBand(ft), col = DEPTH_BAND_COLORS[band] || DEPTH_BAND_COLORS[DEPTH_BAND_COLORS.length - 1];
+        var band = depthBand(ft, edges), col = DEPTH_BAND_COLORS[band] || DEPTH_BAND_COLORS[DEPTH_BAND_COLORS.length - 1];
         var x = k % cols, y = (k / cols) | 0;
         // A cell whose neighbor is a DEEPER band gets the contour line (dark edge of its band). The waterline
         // isn't line-filled (that swallows a narrow pond) — the outer edge of the shading IS the waterline.
@@ -7360,10 +7368,12 @@
   function ensureBathyLegend(){
     var el = document.getElementById('bathyLegend');
     if (!el){ el = document.createElement('div'); el.id = 'bathyLegend'; el.style.cssText = 'position:absolute;bottom:70px;left:10px;z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:8px;padding:7px 9px;font-size:11px;display:none;';
-      var sw = DEPTH_BAND_COLORS.map(function(c){ return '<span style="flex:1;height:11px;background:rgb(' + c.join(',') + ');"></span>'; }).join('');
-      var bounds = [0].concat(DEPTH_BAND_FT), lbl = bounds.map(function(v, i){ return '<span>' + v + (i === bounds.length - 1 ? '+' : '') + '</span>'; }).join('');
-      el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth (ft)</div><div style="display:flex;width:154px;border-radius:3px;overflow:hidden;">' + sw + '</div><div style="display:flex;justify-content:space-between;width:154px;font-size:8px;margin-top:2px;color:#9db0a3;">' + lbl + '</div>';
       document.getElementById('map').appendChild(el); }
+    // Rebuild every time off the active pond's OWN band edges so the scale ties to that pond's real depths.
+    var p = activeFishingProp(), edges = (p && p.bathy && p.bathy.bandEdges) || DEPTH_BAND_FT;
+    var sw = DEPTH_BAND_COLORS.slice(0, edges.length + 1).map(function(c){ return '<span style="flex:1;height:11px;background:rgb(' + c.join(',') + ');"></span>'; }).join('');
+    var bounds = [0].concat(edges), lbl = bounds.map(function(v, i){ return '<span>' + v + (i === bounds.length - 1 ? '+' : '') + '</span>'; }).join('');
+    el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth (ft)</div><div style="display:flex;width:154px;border-radius:3px;overflow:hidden;">' + sw + '</div><div style="display:flex;justify-content:space-between;width:154px;font-size:8px;margin-top:2px;color:#9db0a3;">' + lbl + '</div>';
     return el;
   }
   function setBathyTap(on){
@@ -7372,34 +7382,50 @@
       map.on('click', _bathyTapHandler);
     } else if (!on && _bathyTapHandler){ map.off('click', _bathyTapHandler); _bathyTapHandler = null; }
   }
+  // Run the scan, then show the overlay + legend. Used both for the direct tap and after a fresh outline trace.
+  async function runBathyScan(prop, btn){
+    btn.textContent = '🌊 …'; btn.classList.add('active');
+    try { await scanBathymetry(prop, function(m){ btn.textContent = '🌊 ' + m; }); }
+    catch (e){
+      btn.textContent = '🌊 Depth'; btn.classList.remove('active');
+      var em = (e && e.message) || 'unknown', t;
+      if (em === 'no-water') t = 'Couldn\'t spot open water in view — frame the pond so the water fills most of the screen, keep the lake selected, and try again.';
+      else if (em === 'no-area') t = 'This lake has no saved map area — re-frame the pond and save it, or draw its outline in Set up.';
+      else if (em.indexOf('imagery') === 0) t = 'The aerial imagery service didn\'t respond (' + em + ').';
+      else if (em === 'no-elev') t = 'It read the water fine, but the LiDAR elevation service came back empty for this spot.';
+      else t = 'It stopped with: "' + em + '"';
+      // Beginner-friendly, unmissable diagnostic (a toast fades before it can be read/relayed): show the exact
+      // cause in a dialog so the founder can tell me precisely what happened. (In-app, never the console.)
+      try { alert('🌊 Depth scan didn\'t finish.\n\n' + t + '\n\nTell Claude this exact message and we\'ll fix it.'); } catch (_){ showToast(t); }
+      console.error('Outdoor Companion: bathy scan failed', e); return false;
+    }
+    btn.textContent = '🌊 Depth';
+    var b = prop.bathy, mx = b.maxFt || 0;
+    var acTxt = b.acres > 0 ? (' · ~' + b.acres + ' acres') : '';
+    var hint = b.traced ? '' : ' (auto — trace the outline for a true waterline)';
+    showToast(mx > 1 ? ('Bottom read — deepest ≈ ' + (mx >= 1 ? Math.round(mx) : mx) + ' ft' + acTxt + hint + '. Tap the water to read a depth.') : ('Scanned' + acTxt + ' — but the LiDAR here reads flat (captured after the pond filled), so there\'s no bottom to show.'));
+    renderPropertySelect(); renderPropertiesManageList();   // acreage estimate now shows on the lake
+    bathyVisible = true; btn.classList.add('active');
+    renderBathyOverlay();
+    ensureBathyLegend().style.display = 'block';
+    setBathyTap(true);
+    return true;
+  }
   document.getElementById('depthToggleBtn').addEventListener('click', async function(){
     var btn = this, prop = activeFishingProp();
     if (!prop){ showToast('Pick your lake in the property dropdown first, then tap 🌊 Depth.'); return; }
     if (!prop.bathy || prop.bathy.v !== BATHY_V){   // no scan yet, or an older-algorithm scan → (re)scan
-      btn.textContent = '🌊 …'; btn.classList.add('active');
-      try { await scanBathymetry(prop, function(m){ btn.textContent = '🌊 ' + m; }); }
-      catch (e){
-        btn.textContent = '🌊 Depth'; btn.classList.remove('active');
-        var em = (e && e.message) || 'unknown', t;
-        if (em === 'no-water') t = 'Couldn\'t spot open water in view — frame the pond so the water fills most of the screen, keep the lake selected, and try again.';
-        else if (em === 'no-area') t = 'This lake has no saved map area — re-frame the pond and save it, or draw its outline in Set up.';
-        else if (em.indexOf('imagery') === 0) t = 'The aerial imagery service didn\'t respond (' + em + ').';
-        else if (em === 'no-elev') t = 'It read the water fine, but the LiDAR elevation service came back empty for this spot.';
-        else t = 'It stopped with: "' + em + '"';
-        // Beginner-friendly, unmissable diagnostic (a toast fades before it can be read/relayed): show the exact
-        // cause in a dialog so the founder can tell me precisely what happened. (In-app, never the console.)
-        try { alert('🌊 Depth scan didn\'t finish.\n\n' + t + '\n\nTell Claude this exact message and we\'ll fix it.'); } catch (_){ showToast(t); }
-        console.error('Outdoor Companion: bathy scan failed', e); return;
+      var traced = prop.boundary && prop.boundary.length >= 3;
+      if (!traced){
+        // The waterline is the whole game: without it, aerial grabs the dark timber/swamp ringing the pond
+        // (the ~8.8-ac over-read) and measures every depth off the wrong edge. Offer the reliable path first.
+        var wantTrace = await showConfirm('For an accurate depth map I need the pond\'s waterline.\n\nAuto-detection grabs the dark swamp and timber around a pond — that\'s the ~8-acre over-read — and reads depth off the wrong edge.\n\nTrace the outline now? A dozen taps around the shore gives a true waterline, correct acreage, and real depths.\n\n(Cancel to run a rough auto scan instead.)');
+        if (wantTrace){ drawPropertyBoundary(prop, function(p){ return runBathyScan(p, btn); }); return; }
       }
-      btn.textContent = '🌊 Depth';
-      var mx = 0; prop.bathy.depthFt.forEach(function(f){ if (f > mx) mx = f; });
-      var acTxt = prop.bathy.acres > 0 ? (' · ~' + prop.bathy.acres + ' acres') : '';
-      showToast(mx > 1 ? ('Bottom read — deepest ≈ ' + Math.round(mx) + ' ft' + acTxt + '. Tap the water to read a depth.') : ('Scanned' + acTxt + ' — but the LiDAR here reads flat (captured after the pond filled), so there\'s no bottom to show.'));
-      renderPropertySelect(); renderPropertiesManageList();   // acreage estimate now shows on the lake
-      bathyVisible = true;
-    } else {
-      bathyVisible = !bathyVisible;
+      await runBathyScan(prop, btn);
+      return;
     }
+    bathyVisible = !bathyVisible;
     btn.classList.toggle('active', bathyVisible);
     renderBathyOverlay();
     ensureBathyLegend().style.display = bathyVisible ? 'block' : 'none';
@@ -7596,7 +7622,7 @@
   }
   function setLandcoverVisible(v){ landcoverVisible = v; if (!v && coverEditMode) setCoverEditMode(false); renderLandcoverOverlay(); var btn = document.getElementById('landcoverToggleBtn'); if (btn) btn.classList.toggle('active', v); ensureLandcoverLegend().style.display = v ? 'block' : 'none'; }
 
-  function drawPropertyBoundary(prop){
+  function drawPropertyBoundary(prop, onDone){
     var mp = document.getElementById('managePropertiesModalBackdrop'); if (mp) mp.classList.remove('show');
     if (typeof prop.centerLat === 'number') map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15));
     try { if (typeof getParcelLayer === 'function' && !parcelLayerActive){ getParcelLayer().addTo(map); } } catch (e) {}
@@ -7612,11 +7638,13 @@
       var b = e.layer.getBounds(), c = b.getCenter();
       prop.bounds = { north: b.getNorth(), south: b.getSouth(), east: b.getEast(), west: b.getWest() };
       prop.centerLat = c.lat; prop.centerLng = c.lng;
+      if (prop.bathy) prop.bathy.v = 0;   // a new/changed outline means the old depth scan used the wrong waterline — force a rescan
       try { await saveProperty(prop); } catch (err) { console.error('Outdoor Companion: failed to save boundary', err); }
       renderPropertyBoundaries();
       renderPropertySelect();   // refresh the dropdown so the acreage recomputes off the new boundary
       showToast('Boundary saved for ' + prop.name + ' · ' + acresLabel(polygonAcres(prop.boundary)));
       await offerRehomeForBoundary(prop);
+      if (typeof onDone === 'function'){ try { await onDone(prop); } catch (err2){ console.error('Outdoor Companion: boundary onDone failed', err2); } }
     });
   }
   // After a boundary is drawn/redrawn, offer to pull every feature inside it INTO this property — including
