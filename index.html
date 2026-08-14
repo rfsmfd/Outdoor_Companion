@@ -1730,7 +1730,7 @@
         <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
         <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
         <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
-        <button class="btn-ghost" id="importWaypointsBtn" title="Import stands, markers & trails from onX, HuntStand, Google Earth, Garmin or ArcGIS — or any GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import from other apps</button>
+        <button class="btn-ghost" id="importWaypointsBtn" title="Import sites, waypoints & trails from onX, HuntStand, Google Earth, Garmin, ArcGIS — or any GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import from other apps</button>
         <input type="file" id="waypointFileInput" accept=".kml,.kmz,.gpx,.geojson,.json,.csv,.txt" style="display:none;" />
         <button class="btn-ghost" id="exportBtn">Export</button>
       </div>
@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 291</div>
+    <div id="buildBadge">BUILD 292</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -1858,7 +1858,7 @@
     <div id="sheetBackdrop"></div>
     <div id="bottomSheet">
       <div id="sheetHeader">
-        <h3>What did you see?</h3>
+        <h3 id="sheetTitle">What did you see?</h3>
         <button class="close-x" id="sheetClose">&times;</button>
       </div>
       <div id="sheetGpsLine">Using your current GPS position</div>
@@ -2095,7 +2095,7 @@
       <h3 id="saveTrailTitle">Save Trail <button class="close-x" id="saveTrailClose">&times;</button></h3>
       <div class="form-pop">
         <label>Name</label>
-        <input type="text" id="trailNameInput" placeholder="e.g. Trail to North Stand" />
+        <input type="text" id="trailNameInput" placeholder="e.g. Access trail, shoreline path" />
         <label style="margin-top:10px;">Type</label>
         <div class="chips" id="trailTypeChips">
           <button class="chip" data-type="access">Access Trail</button>
@@ -8166,7 +8166,9 @@
       if (sites.length > 0){
         list.innerHTML = '<div class="empty">No sites match the current filter.<br>Try <strong>All Time</strong> in the date filter, or check your Site Types selection.</div>';
       } else {
-        list.innerHTML = '<div class="empty">No observation sites yet.<br>Tap “+ Add Site” and place your first pin on the map — or tap <strong>📥 Import from other apps</strong> to bring your stands &amp; trails over from onX, HuntStand, Google Earth, Garmin or ArcGIS (KML, GPX, GeoJSON, CSV).</div>';
+        list.innerHTML = (activeModule === 'fishing')
+          ? '<div class="empty">No fishing spots yet.<br>Tap “+ Add Site” and drop your first pin — ramps, docks, favorite holes, structure — or tap <strong>📥 Import from other apps</strong> to bring waypoints over from Google Earth, Garmin, or any GPS (KML, GPX, GeoJSON, CSV).</div>'
+          : '<div class="empty">No observation sites yet.<br>Tap “+ Add Site” and place your first pin on the map — or tap <strong>📥 Import from other apps</strong> to bring your stands &amp; trails over from onX, HuntStand, Google Earth, Garmin or ArcGIS (KML, GPX, GeoJSON, CSV).</div>';
       }
       return;
     }
@@ -8828,6 +8830,11 @@
     if (_camTab) _camTab.style.display = activeModule === 'hunting' ? '' : 'none';
     // The solunar table becomes the "When to Fish" bite forecast in fishing mode.
     var _sb = document.getElementById('solunarBtn'); if (_sb) _sb.textContent = activeModule === 'fishing' ? '🎣 When to Fish' : '⭐ Solunar Table';
+    // Scent cones / Thermals / Cover are deer-hunting map layers (scent management, deer bedding cover) —
+    // no place on the fishing map. Hide their layer-bar buttons in fishing.
+    ['thermalToggleBtn','scentToggleBtn','landcoverToggleBtn'].forEach(function(id){
+      var b = document.getElementById(id); if (b) b.style.display = activeModule === 'hunting' ? '' : 'none';
+    });
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
@@ -12313,6 +12320,8 @@
   // ---------- Quick Log: FAB + bottom sheet ----------
   var obsGrid = document.getElementById('obsGrid');
   function renderQuickLogGrid(){
+    var _st = document.getElementById('sheetTitle');
+    if (_st) _st.textContent = activeModule === 'fishing' ? 'What did you catch?' : 'What did you see?';
     obsGrid.innerHTML = '';
     typeVisibleKeys(getActiveObsTypes()).forEach(function(key){
       var t = getActiveObsTypes()[key];
