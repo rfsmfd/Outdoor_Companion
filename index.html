@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 294</div>
+    <div id="buildBadge">BUILD 295</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7715,6 +7715,7 @@
         '<div class="coords">'+fmtCoord(s.lat)+', '+fmtCoord(s.lng)+'</div>' +
         photosBtn +
         standHuntabilityHtml(s) +
+        spotIntelHtml(s) +
         huntableBtn +
         actionRow +
       '</div>';
@@ -9138,6 +9139,44 @@
       '<div style="font-size:11.5px;margin-top:3px;opacity:.88;">Daylight deer movement: <b>' + r.base.pct + '%</b> all-time · ' + recentTxt + '.</div>' +
       win +
       '<div style="font-size:9.5px;opacity:.6;margin-top:4px;">' + r.base.located + ' deer photo' + (r.base.located === 1 ? '' : 's') + ' here' + (r.recent.located && !r.recentUsable ? ' · recent sample thin' : '') + '.</div>' +
+    '</div>';
+  }
+
+  // ---------- Spot intel (fishing analog of stand huntability) ----------
+  // What a fishing spot has actually produced — mined from the catches logged there: how many, mostly
+  // what, the biggest, the hot lure, and the conditions/season it fires best in. Same honest thin-sample
+  // stance as the bite back-test; gets sharper as catches accumulate.
+  function spotIntelHtml(s){
+    if (!s || activeModule !== 'fishing' || typeof observations === 'undefined') return '';
+    var catches = observations.filter(function(o){ return o.siteId === s.id && isFishSpeciesType(o.type); });
+    if (!catches.length) return '';
+    function topOf(keys){
+      var c = {}; keys.forEach(function(k){ if (k) c[k] = (c[k] || 0) + 1; });
+      var best = null, bn = 0; for (var k in c){ if (c[k] > bn){ bn = c[k]; best = k; } }
+      return best ? { key: best, n: bn } : null;
+    }
+    var n = catches.length;
+    var topSpecies = topOf(catches.map(function(o){ var t = getActiveObsTypes()[o.type]; return t ? t.label : null; }));
+    var topLure = topOf(catches.map(function(o){ return (o.lure && o.lure.trim()) ? o.lure.trim() : null; }));
+    var topPressure = topOf(catches.map(function(o){ return (o.weatherStatus === 'ok' && o.weather && o.weather.pressureTrend) ? o.weather.pressureTrend : null; }));
+    var topSeason = topOf(catches.map(function(o){ return seasonBucket(o.createdAt); }));
+    var solHit = catches.filter(function(o){ return o.solunarPeriod === 'Major Period' || o.solunarPeriod === 'Minor Period'; }).length;
+    var big = null; catches.forEach(function(o){ if (typeof o.weight === 'number' && o.weight > 0 && (!big || o.weight > big.weight)) big = o; });
+    var lastTs = catches.reduce(function(m, o){ return Math.max(m, o.createdAt || 0); }, 0);
+    var daysSince = lastTs ? Math.floor((Date.now() - lastTs) / 86400000) : null;
+
+    var lines = '';
+    lines += '<div style="font-size:11.5px;margin-top:3px;"><b>' + n + '</b> catch' + (n === 1 ? '' : 'es') + ' logged here' + (topSpecies ? ' · mostly <b>' + escapeHtml(topSpecies.key) + '</b>' : '') + '.</div>';
+    if (big){ var bt = getActiveObsTypes()[big.type]; lines += '<div style="font-size:11px;opacity:.9;">⚖️ Biggest: <b>' + big.weight + ' lb</b>' + (bt ? ' ' + escapeHtml(bt.label) : '') + '.</div>'; }
+    if (topLure) lines += '<div style="font-size:11px;opacity:.9;">🎣 Hot lure: <b>' + escapeHtml(topLure.key) + '</b> (' + topLure.n + ').</div>';
+    var condTxt = '';
+    if (topPressure) condTxt += topPressure.key.toLowerCase() + ' pressure';
+    if (topSeason) condTxt += (condTxt ? ', ' : '') + 'in the ' + topSeason.key.toLowerCase();
+    if (condTxt) lines += '<div style="font-size:11px;opacity:.9;">🧭 Best on ' + condTxt + '.</div>';
+    lines += '<div style="font-size:9.5px;opacity:.6;margin-top:4px;">' + solHit + ' of ' + n + ' during a solunar feeding period' + (daysSince != null ? ' · last catch ' + (daysSince === 0 ? 'today' : daysSince + 'd ago') : '') + '.' + (n < 8 ? ' <span style="color:#E8B04B;">Thin sample — more catches sharpen this.</span>' : '') + '</div>';
+
+    return '<div style="border:1px solid rgba(150,180,150,.32);border-radius:8px;padding:8px 10px;margin:9px 0 3px;">' +
+      '<div style="font-weight:700;font-size:12px;">🎣 Spot intel</div>' + lines +
     '</div>';
   }
 
