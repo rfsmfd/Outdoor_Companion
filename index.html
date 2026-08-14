@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 298</div>
+    <div id="buildBadge">BUILD 299</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -14548,6 +14548,58 @@
     return events;
   }
 
+  // Lake productivity — two honest angles on "which water is best," both respecting the current date filter:
+  //   • Catch per HOUR (catch rate / CPUE) — how good the fishing actually is, from your Trip clock
+  //     (checkIn→checkOut) totalled per lake. The truer "is it worth going" number.
+  //   • Catch per ACRE — productivity for the water's size, from the lake's acreage (manual or traced).
+  // Lakes missing acreage or trip-hours are nudged rather than dropped.
+  function buildLakeProductivityCard(source){
+    var byLake = {};
+    source.forEach(function(o){ if (o.propertyId) byLake[o.propertyId] = (byLake[o.propertyId] || 0) + 1; });
+    if (!Object.keys(byLake).length) return null;
+    var hoursByLake = {};
+    (typeof huntEvents !== 'undefined' ? huntEvents : []).forEach(function(h){
+      if (h.module !== 'fishing' || !h.propertyId || !h.checkInAt || !h.checkOutAt) return;
+      if (typeof passesAnalyticsDateFilter === 'function' && !passesAnalyticsDateFilter(h.checkInAt)) return;
+      var hrs = (h.checkOutAt - h.checkInAt) / 3600000;
+      if (hrs > 0) hoursByLake[h.propertyId] = (hoursByLake[h.propertyId] || 0) + hrs;
+    });
+    var rows = Object.keys(byLake).map(function(pid){
+      var p = properties.filter(function(x){ return x.id === pid; })[0]; if (!p) return null;
+      var ac = propAcres(p), hrs = hoursByLake[pid] || 0, c = byLake[pid];
+      return { name: p.name, catches: c, acres: ac, perAcre: ac ? c / ac : null, hours: hrs, perHour: hrs > 0 ? c / hrs : null };
+    }).filter(Boolean);
+    function fmt(v){ return v >= 10 ? String(Math.round(v)) : v.toFixed(1); }
+    function rankList(metric, unit, color, subFn){
+      var have = rows.filter(function(r){ return r[metric] != null; }).sort(function(a, b){ return b[metric] - a[metric]; });
+      if (!have.length) return '';
+      var mx = have[0][metric] || 1;
+      return have.map(function(r){
+        var w = Math.round((r[metric] / mx) * 100);
+        return '<div style="margin:6px 0;font-size:12px;">' +
+          '<div style="display:flex;justify-content:space-between;margin-bottom:2px;"><span style="color:#dff0e4;font-weight:600;">' + escapeHtml(r.name) + '</span><span style="color:' + color + ';font-weight:700;">' + fmt(r[metric]) + unit + '</span></div>' +
+          '<div style="height:11px;background:#22302a;border-radius:3px;overflow:hidden;"><div style="height:100%;width:' + w + '%;background:' + color + ';"></div></div>' +
+          '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">' + subFn(r) + '</div>' +
+        '</div>';
+      }).join('');
+    }
+    var perHourHtml = rankList('perHour', ' / hr', '#5FB0C9', function(r){ return r.catches + ' in ' + fmt(r.hours) + ' hr'; });
+    var perAcreHtml = rankList('perAcre', ' / acre', '#9ED17A', function(r){ return r.catches + ' catch' + (r.catches === 1 ? '' : 'es') + ' · ' + acresLabel(r.acres); });
+    var noHours = rows.filter(function(r){ return r.perHour == null; }).map(function(r){ return r.name; });
+    var noAcres = rows.filter(function(r){ return r.perAcre == null; }).map(function(r){ return r.name; });
+    function sec(title, body){ return '<div style="font-weight:700;font-size:12px;color:#cfe0d6;margin:10px 0 2px;">' + title + '</div>' + body; }
+    var card = document.createElement('div');
+    card.style.cssText = 'border:1px solid #3c4d42;border-radius:10px;padding:12px;margin-bottom:12px;background:#1b2822;';
+    card.innerHTML = '<div style="font-weight:700;font-size:13px;">🎣 Lake productivity</div>' +
+      '<div style="font-size:10.5px;color:#9db0a3;margin:2px 0 4px;">Which water is best — by catch rate and by size, for the current date range.</div>' +
+      (perHourHtml ? sec('⏱ Catch per hour', perHourHtml) : '') +
+      (perAcreHtml ? sec('📐 Catch per acre', perAcreHtml) : '') +
+      (!perHourHtml && !perAcreHtml ? '<div style="font-size:11px;color:#9db0a3;margin-top:6px;">Log a Trip (Start/End) or set a lake\'s acreage to unlock these.</div>' : '') +
+      (noHours.length ? '<div style="font-size:10px;color:#7f8c86;margin-top:8px;line-height:1.4;">No trip-hours yet on ' + noHours.map(escapeHtml).join(', ') + ' — use Start/End Trip to get catch-per-hour.</div>' : '') +
+      (noAcres.length ? '<div style="font-size:10px;color:#7f8c86;margin-top:4px;line-height:1.4;">No acreage on ' + noAcres.map(escapeHtml).join(', ') + ' — set it in ⚙ Properties → Set up.</div>' : '');
+    return card;
+  }
+
   function renderAnalytics(){
     destroyAnalyticsCharts();
     bindAnalyticsMapDismiss();
@@ -14601,6 +14653,8 @@
       mainWrap.innerHTML += '<div class="empty" style="padding:20px 0;">Nothing logged yet matching these filters — try widening the date range or picking a different property/buck.</div>';
       return;
     }
+
+    if (activeModule === 'fishing'){ var _cpa = buildLakeProductivityCard(relevantObs); if (_cpa) mainWrap.appendChild(_cpa); }
 
     renderQueryBuilder(mainWrap);
 
