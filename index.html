@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 318</div>
+    <div id="buildBadge">BUILD 319</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13935,10 +13935,11 @@
     // Phase 3b-2: cameras / trails / bucks reload branches here.
   }
 
-  // One-time upload of anything already in THIS browser's localStorage into the user's
-  // cloud account, so nothing entered before the cloud existed is lost. Runs at most once
-  // per (device, account) and never when the account already has cloud data (so it can't
-  // clobber newer cloud edits with stale local copies).
+  // One-time import of anything already in THIS browser's localStorage into the user's cloud
+  // account, so nothing entered before the cloud existed is lost. Runs at most once per (device,
+  // account) and never when the account already has cloud data. IMPORTANT: it ASKS before importing
+  // when local data exists — a new/second account on a shared browser must not silently inherit the
+  // data left there (found via the two-account sharing test, 2026-08-14).
   async function migrateLocalToCloudIfNeeded(uid){
     var flagKey = 'oc_cloud_migrated_' + uid;
     try{ if (localStorage.getItem(flagKey)) return; }catch(e){ return; }
@@ -13954,7 +13955,9 @@
       site: LS_KEY, obs: OBS_LS_KEY, buck: BUCK_LS_KEY, trail: TRAIL_LS_KEY,
       hunt: HUNT_LS_KEY, cam: CAM_LS_KEY, dep: DEP_LS_KEY, prop: PROP_LS_KEY
     };
-    var total = 0;
+    // Gather what's on THIS device first (don't upload yet). A new/second account on a shared browser
+    // must NOT silently inherit whatever data was left here — so if there's anything, we ASK first.
+    var pending = [], counts = {};
     for (var prefix in lsMap){
       if (!Object.prototype.hasOwnProperty.call(lsMap, prefix)) continue;
       var raw = null;
@@ -13962,15 +13965,24 @@
       if (!raw) continue;
       var arr; try{ arr = JSON.parse(raw); }catch(e){ continue; }
       if (!Array.isArray(arr)) continue;
-      for (var i=0; i<arr.length; i++){
-        var item = arr[i];
-        if (item && item.id){
-          try{ await window.storage.set(prefix + ':' + item.id, JSON.stringify(item), false); total++; }catch(e){}
-        }
-      }
+      for (var i=0; i<arr.length; i++){ var item = arr[i]; if (item && item.id){ pending.push({ prefix: prefix, item: item }); counts[prefix] = (counts[prefix] || 0) + 1; } }
+    }
+    if (!pending.length){ try{ localStorage.setItem(flagKey, '1'); }catch(e){} return; }   // nothing on this device → clean, empty account
+    // There IS local data. Confirm it belongs to this account before importing (else it stays out).
+    var lbl = { site:'sites', obs:'sightings/catches', buck:'bucks', trail:'trails', hunt:'hunts', cam:'cameras', dep:'deployments', prop:'farms' };
+    var parts = []; for (var ck in counts){ if (counts.hasOwnProperty(ck)) parts.push(counts[ck] + ' ' + (lbl[ck] || ck)); }
+    var who = (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'this account';
+    var msg = 'This device has saved data on it (' + parts.join(', ') + ').\n\nIs this YOUR data to bring into ' + who + '?\n\n• OK = Import it (you saved it here before signing up).\n• Cancel = Keep this account empty (choose this for a new or second account — nothing is imported).';
+    var yes;
+    try{ yes = (typeof showConfirm === 'function') ? await showConfirm(msg) : window.confirm(msg); }
+    catch(e){ try{ yes = window.confirm(msg); }catch(_){ yes = false; } }
+    if (!yes){ try{ localStorage.setItem(flagKey, '1'); }catch(e){} return; }   // declined → never inherit, and don't ask again
+    var total = 0;
+    for (var p = 0; p < pending.length; p++){
+      try{ await window.storage.set(pending[p].prefix + ':' + pending[p].item.id, JSON.stringify(pending[p].item), false); total++; }catch(e){}
     }
     try{ localStorage.setItem(flagKey, '1'); }catch(e){}
-    if (total > 0) console.log('Outdoor Companion: migrated ' + total + ' local records to the cloud.');
+    if (total > 0) console.log('Outdoor Companion: imported ' + total + ' local records into the account (user-confirmed).');
   }
 
   // ---- Login / sign-up screen (built in JS so it needs no page-markup changes) ----
