@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 305</div>
+    <div id="buildBadge">BUILD 306</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7246,7 +7246,7 @@
   // flat (~0) — an honest "no bottom captured here."
   var bathyVisible = false, bathyOverlays = [], _bathyTapHandler = null;
   var DEPTH_MAX_FT = 30; // color-scale ceiling; deeper reads as "deepest"
-  var BATHY_V = 2;       // bump when the scan algorithm changes so existing scans auto-refresh on next tap
+  var BATHY_V = 3;       // bump when the scan algorithm changes so existing scans auto-refresh on next tap
   async function scanBathymetry(prop, onStatus){
     var bb = propBBox(prop);
     if (!bb){
@@ -7286,9 +7286,19 @@
       }
       if (cells.length > bestN){ bestN = cells.length; best = cells; } cid++;
     }
-    if (bestN < 8) throw new Error('no-water');
-    var pond = new Uint8Array(W * H); best.forEach(function(k){ pond[k] = 1; });
-    var shore = []; best.forEach(function(k){ var x = k % W, y = (k / W) | 0; if ((x+1<W&&!pond[k+1])||(x>0&&!pond[k-1])||(y+1<H&&!pond[k+W])||(y>0&&!pond[k-W])) shore.push(k); });
+    // The pond mask: your TRACED OUTLINE if you drew one (it IS the waterline — exact acreage, correct pool,
+    // clean clip), otherwise the auto dark-water blob. Shoreline = the mask's edge; its median DEM elevation
+    // is the full-pool level.
+    var hasBnd = prop.boundary && prop.boundary.length >= 3;
+    var pond = new Uint8Array(W * H), pondN = 0;
+    if (hasBnd){
+      for (var bk = 0; bk < W * H; bk++){ var bx = bk % W, by = (bk / W) | 0; var bla = bb.n - (bb.n - bb.s) * ((by + 0.5) / H), blo = bb.w + (bb.e - bb.w) * ((bx + 0.5) / W); if (pointInProperty(bla, blo, prop)){ pond[bk] = 1; pondN++; } }
+    } else {
+      if (bestN < 8) throw new Error('no-water');
+      best.forEach(function(k){ pond[k] = 1; }); pondN = bestN;
+    }
+    if (pondN < 8) throw new Error('no-water');
+    var shore = []; for (var sk = 0; sk < W * H; sk++){ if (!pond[sk]) continue; var sx = sk % W, sy = (sk / W) | 0; if ((sx+1<W&&!pond[sk+1])||(sx>0&&!pond[sk-1])||(sy+1<H&&!pond[sk+W])||(sy>0&&!pond[sk-W])) shore.push(sk); }
     // sample the DEM across the whole grid (chunked getSamples)
     var pts = new Array(W * H);
     for (var q = 0; q < W * H; q++){ var qx = q % W, qy = (q / W) | 0; pts[q] = [bb.w + (bb.e - bb.w) * ((qx + 0.5) / W), bb.n - (bb.n - bb.s) * ((qy + 0.5) / H)]; }
@@ -7300,25 +7310,19 @@
     if (!sv.length) throw new Error('no-elev');
     var pool = sv[Math.floor(sv.length / 2)]; // median shoreline elevation = full-pool level
     var depthFt = new Array(W * H);
-    // If you've traced the pond's outline, clip the shading to inside it — the clean, exact escape hatch
-    // when the auto water-read still grabs too much.
-    var hasBnd = prop.boundary && prop.boundary.length >= 3;
-    for (var d = 0; d < W * H; d++){
-      var inWater = pond[d];
-      if (inWater && hasBnd){ var dx = d % W, dy = (d / W) | 0; var la = bb.n - (bb.n - bb.s) * ((dy + 0.5) / H), lo = bb.w + (bb.e - bb.w) * ((dx + 0.5) / W); if (!pointInProperty(la, lo, prop)) inWater = 0; }
-      var dep = (inWater && isFinite(elev[d])) ? m2ft(pool - elev[d]) : 0;
-      depthFt[d] = dep > 0.3 ? Math.round(dep * 10) / 10 : 0;
-    }
-    // Bonus: the detected water footprint gives a free acreage estimate (pond cells × cell ground area).
-    var cellAreaM2 = (widthM / W) * (heightM / H), acres = (bestN * cellAreaM2) / 4046.8564;
+    for (var d = 0; d < W * H; d++){ var dep = (pond[d] && isFinite(elev[d])) ? m2ft(pool - elev[d]) : 0; depthFt[d] = dep > 0.3 ? Math.round(dep * 10) / 10 : 0; }
+    // Bonus: the water footprint (traced outline or auto) gives an acreage estimate (pond cells × cell area).
+    var cellAreaM2 = (widthM / W) * (heightM / H), acres = (pondN * cellAreaM2) / 4046.8564;
     prop.bathy = { bbox: bb, cols: W, rows: H, poolM: pool, depthFt: depthFt, acres: Math.round(acres * 10) / 10, v: BATHY_V, createdAt: Date.now() };
     try { await saveProperty(prop); } catch (e){ console.error('Outdoor Companion: failed to save bathy', e); }
     return prop.bathy;
   }
   function bathyDepthColor(ft){
+    // Pale cyan (shallow) → vivid cobalt (deep). Kept BRIGHT and saturated end-to-end so it reads over the
+    // dark pond water — the old ramp bottomed out near-black and vanished into the water at depth.
     var t = Math.max(0, Math.min(1, ft / DEPTH_MAX_FT)), c;
-    if (t < 0.5){ var u = t / 0.5; c = [150 + (40 - 150) * u, 220 + (110 - 220) * u, 235 + (200 - 235) * u]; }
-    else { var u2 = (t - 0.5) / 0.5; c = [40 + (12 - 40) * u2, 110 + (30 - 110) * u2, 200 + (90 - 200) * u2]; }
+    if (t < 0.5){ var u = t / 0.5; c = [195 + (60 - 195) * u, 242 + (150 - 242) * u, 255 + (248 - 255) * u]; }
+    else { var u2 = (t - 0.5) / 0.5; c = [60 + (22 - 60) * u2, 150 + (60 - 150) * u2, 248 + (190 - 248) * u2]; }
     return c;
   }
   function renderBathyOverlay(){
@@ -7327,10 +7331,21 @@
     if (!bathyVisible) return;
     (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
       if ((p.module || activeModule) !== 'fishing') return; var b = p.bathy; if (!b || !b.depthFt) return;
-      var cv = document.createElement('canvas'); cv.width = b.cols; cv.height = b.rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(b.cols, b.rows);
-      for (var k = 0; k < b.cols * b.rows; k++){ var ft = b.depthFt[k], o = k * 4; if (ft > 0){ var col = bathyDepthColor(ft); id.data[o] = Math.round(col[0]); id.data[o+1] = Math.round(col[1]); id.data[o+2] = Math.round(col[2]); id.data[o+3] = 205; } else { id.data[o+3] = 0; } }
+      var cols = b.cols, rows = b.rows;
+      var cv = document.createElement('canvas'); cv.width = cols; cv.height = rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(cols, rows);
+      for (var k = 0; k < cols * rows; k++){
+        var ft = b.depthFt[k], o = k * 4;
+        if (ft > 0){
+          // A water cell touching a non-water cell IS the detected shoreline (what set the pool level) —
+          // draw it bright gold so you can check it against the real waterline at a glance.
+          var x = k % cols, y = (k / cols) | 0;
+          var edge = (x + 1 < cols && !(b.depthFt[k+1] > 0)) || (x > 0 && !(b.depthFt[k-1] > 0)) || (y + 1 < rows && !(b.depthFt[k+cols] > 0)) || (y > 0 && !(b.depthFt[k-cols] > 0));
+          if (edge){ id.data[o] = 255; id.data[o+1] = 224; id.data[o+2] = 70; id.data[o+3] = 255; }
+          else { var col = bathyDepthColor(ft); id.data[o] = Math.round(col[0]); id.data[o+1] = Math.round(col[1]); id.data[o+2] = Math.round(col[2]); id.data[o+3] = 240; }
+        } else { id.data[o+3] = 0; }
+      }
       ctx.putImageData(id, 0, 0);
-      var bb = b.bbox; bathyOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'bathyPane', opacity: 0.7, interactive: false }).addTo(map));
+      var bb = b.bbox; bathyOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'bathyPane', opacity: 0.82, interactive: false }).addTo(map));
     });
   }
   function bathyDepthAtFt(prop, lat, lng){
@@ -7344,7 +7359,7 @@
   function ensureBathyLegend(){
     var el = document.getElementById('bathyLegend');
     if (!el){ el = document.createElement('div'); el.id = 'bathyLegend'; el.style.cssText = 'position:absolute;bottom:70px;left:10px;z-index:800;background:rgba(20,32,26,.92);color:#dfeee4;border:1px solid #3c6d42;border-radius:8px;padding:7px 9px;font-size:11px;display:none;';
-      el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth</div><div style="width:120px;height:10px;border-radius:3px;background:linear-gradient(90deg,rgb(150,220,235),rgb(40,110,200),rgb(12,30,90));"></div><div style="display:flex;justify-content:space-between;font-size:9px;margin-top:2px;color:#9db0a3;"><span>shallow</span><span>' + DEPTH_MAX_FT + ' ft+</span></div>';
+      el.innerHTML = '<div style="font-weight:700;margin-bottom:4px;">🌊 Depth</div><div style="width:120px;height:10px;border-radius:3px;background:linear-gradient(90deg,rgb(195,242,255),rgb(60,150,248),rgb(22,60,190));"></div><div style="display:flex;justify-content:space-between;font-size:9px;margin-top:2px;color:#9db0a3;"><span>shallow</span><span>' + DEPTH_MAX_FT + ' ft+</span></div>';
       document.getElementById('map').appendChild(el); }
     return el;
   }
