@@ -1839,7 +1839,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 306</div>
+    <div id="buildBadge">BUILD 307</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7333,17 +7333,9 @@
       if ((p.module || activeModule) !== 'fishing') return; var b = p.bathy; if (!b || !b.depthFt) return;
       var cols = b.cols, rows = b.rows;
       var cv = document.createElement('canvas'); cv.width = cols; cv.height = rows; var ctx = cv.getContext('2d'), id = ctx.createImageData(cols, rows);
-      for (var k = 0; k < cols * rows; k++){
-        var ft = b.depthFt[k], o = k * 4;
-        if (ft > 0){
-          // A water cell touching a non-water cell IS the detected shoreline (what set the pool level) —
-          // draw it bright gold so you can check it against the real waterline at a glance.
-          var x = k % cols, y = (k / cols) | 0;
-          var edge = (x + 1 < cols && !(b.depthFt[k+1] > 0)) || (x > 0 && !(b.depthFt[k-1] > 0)) || (y + 1 < rows && !(b.depthFt[k+cols] > 0)) || (y > 0 && !(b.depthFt[k-cols] > 0));
-          if (edge){ id.data[o] = 255; id.data[o+1] = 224; id.data[o+2] = 70; id.data[o+3] = 255; }
-          else { var col = bathyDepthColor(ft); id.data[o] = Math.round(col[0]); id.data[o+1] = Math.round(col[1]); id.data[o+2] = Math.round(col[2]); id.data[o+3] = 240; }
-        } else { id.data[o+3] = 0; }
-      }
+      // Pure depth shading — the outer edge of the shaded area IS the detected waterline (no gold fill, which
+      // swallowed a narrow pond where every cell touches land).
+      for (var k = 0; k < cols * rows; k++){ var ft = b.depthFt[k], o = k * 4; if (ft > 0){ var col = bathyDepthColor(ft); id.data[o] = Math.round(col[0]); id.data[o+1] = Math.round(col[1]); id.data[o+2] = Math.round(col[2]); id.data[o+3] = 240; } else { id.data[o+3] = 0; } }
       ctx.putImageData(id, 0, 0);
       var bb = b.bbox; bathyOverlays.push(L.imageOverlay(cv.toDataURL(), [[bb.s, bb.w], [bb.n, bb.e]], { pane: 'bathyPane', opacity: 0.82, interactive: false }).addTo(map));
     });
