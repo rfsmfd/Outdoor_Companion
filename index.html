@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 290</div>
+    <div id="buildBadge">BUILD 291</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2238,7 +2238,7 @@
   <!-- Solunar Table: Major/Minor feeding-activity periods, browsable day by day -->
   <div class="oc-modal-backdrop" id="solunarModalBackdrop">
     <div class="oc-modal" id="solunarModal">
-      <h3>⭐ Solunar Table <button class="close-x" id="solunarModalClose">&times;</button></h3>
+      <h3><span id="solunarModalTitle">⭐ Solunar Table</span> <button class="close-x" id="solunarModalClose">&times;</button></h3>
       <div id="solunarDayNav">
         <button id="solunarPrevDay">◀</button>
         <div id="solunarDateLabel">—</div>
@@ -8826,6 +8826,8 @@
     // in Fishing mode. Hide the tab there entirely.
     var _camTab = document.querySelector('.tab-btn[data-tab="cameras"]');
     if (_camTab) _camTab.style.display = activeModule === 'hunting' ? '' : 'none';
+    // The solunar table becomes the "When to Fish" bite forecast in fishing mode.
+    var _sb = document.getElementById('solunarBtn'); if (_sb) _sb.textContent = activeModule === 'fishing' ? '🎣 When to Fish' : '⭐ Solunar Table';
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
@@ -14746,14 +14748,110 @@
     return d.toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
   }
 
+  // ---------- "When to Fish" bite forecast (fishing mode) ----------
+  // An honest, transparent read on the odds, built from established fishing signals the app already
+  // computes: (1) SOLUNAR force — feeding peaks at new & full moon, dips at the quarters; (2) the best
+  // FEEDING WINDOW — a major/minor period that lands on dawn or dusk (low light) is the strongest overlap
+  // you can get; (3) BAROMETRIC PRESSURE — a falling trend ahead of a front turns fish on, a hard rising
+  // trend behind one shuts them down. Presented as a guide to the best odds, never a guarantee.
+  function _pressInHg(hpa){ return hpa != null ? hpa * 0.02953 : null; }
+  function computeBiteForecast(periods, moon, dayMs, fc){
+    var moonForce = Math.abs((moon.illumination || 0) - 50) / 50; // 0 at quarter → 1 at new/full
+    var sr = periods.sunrise ? periods.sunrise.getTime() : null;
+    var ss = periods.sunset ? periods.sunset.getTime() : null;
+    function lightInfo(win){
+      var mid = (win.start.getTime() + win.end.getTime()) / 2, b = 0, label = '';
+      if (sr != null && Math.abs(mid - sr) <= 5400000){ var v = 1 - Math.abs(mid - sr) / 5400000; if (v > b){ b = v; label = 'first light'; } }
+      if (ss != null && Math.abs(mid - ss) <= 5400000){ var v2 = 1 - Math.abs(mid - ss) / 5400000; if (v2 > b){ b = v2; label = 'last light'; } }
+      return { boost: b, label: label };
+    }
+    var wins = [];
+    if (periods.major1) wins.push({ w: periods.major1, weight: 1.0, kind: 'major' });
+    if (periods.major2) wins.push({ w: periods.major2, weight: 1.0, kind: 'major' });
+    if (periods.minor1) wins.push({ w: periods.minor1, weight: 0.6, kind: 'minor' });
+    if (periods.minor2) wins.push({ w: periods.minor2, weight: 0.6, kind: 'minor' });
+    wins.forEach(function(x){ var li = lightInfo(x.w); x.light = li.boost; x.lightLabel = li.label; x.baseScore = x.weight * (1 + x.light * 0.8); });
+    wins.sort(function(a, b){ return b.baseScore - a.baseScore; });
+    var best = wins[0] || null;
+
+    var pressureBoost = 0, pressureNote = null, hasPressure = false;
+    if (fc && best){
+      var mid = (best.w.start.getTime() + best.w.end.getTime()) / 2;
+      var pNow = forecastAt(mid), pPre = forecastAt(mid - 6 * 3600000);
+      if (pNow && pNow.pressureHpa != null){
+        hasPressure = true;
+        var inHg = _pressInHg(pNow.pressureHpa);
+        var trend = (pPre && pPre.pressureHpa != null) ? (pNow.pressureHpa - pPre.pressureHpa) : 0; // hPa over ~6h
+        if (trend <= -2){ pressureBoost += 12; pressureNote = 'Pressure falling ahead of a front — prime feeding window.'; }
+        else if (trend <= -0.7){ pressureBoost += 6; pressureNote = 'Pressure easing off — a good sign.'; }
+        else if (trend >= 2){ pressureBoost -= 14; pressureNote = 'Pressure rising hard behind a front — expect a slow, tight bite.'; }
+        else if (trend >= 0.7){ pressureBoost -= 6; pressureNote = 'Pressure climbing — the bite may be soft.'; }
+        else { pressureNote = 'Pressure holding steady.'; }
+        if (inHg != null){ if (inHg < 29.85) pressureBoost += 3; else if (inHg > 30.25) pressureBoost -= 3; }
+      }
+    }
+
+    var score = 45 + moonForce * 22 + (best ? best.light * 16 : 0) + pressureBoost;
+    score = Math.max(3, Math.min(99, Math.round(score)));
+    var verdict, tone, emoji;
+    if (score >= 75){ verdict = 'Prime'; tone = '#E8823F'; emoji = '🔥'; }
+    else if (score >= 60){ verdict = 'Good'; tone = '#9ED17A'; emoji = '👍'; }
+    else if (score >= 45){ verdict = 'Fair'; tone = '#E8B04B'; emoji = '😐'; }
+    else { verdict = 'Slow'; tone = '#7FA8C9'; emoji = '💤'; }
+
+    var drivers = [];
+    if (moonForce >= 0.8) drivers.push('🌙 ' + moon.name + ' — the solunar pull is at its strongest.');
+    else if (moonForce <= 0.35) drivers.push('🌙 ' + moon.name + ' — weaker solunar pull near the quarter moon.');
+    else drivers.push('🌙 ' + moon.name + '.');
+    if (best && best.lightLabel && best.light >= 0.45) drivers.push('⭐ A ' + best.kind + ' feeding period lands right at ' + best.lightLabel + ' — the best overlap there is.');
+    if (pressureNote) drivers.push('🧭 ' + pressureNote);
+
+    return { score: score, verdict: verdict, tone: tone, emoji: emoji, best: best, windows: wins, drivers: drivers, hasPressure: hasPressure };
+  }
+  function biteCardHtml(bite){
+    var winRows = bite.windows.slice(0, 2).map(function(x){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;font-size:12px;padding:2px 0;">' +
+        '<span style="color:#cfe0d6;">' + (x.kind === 'major' ? '⭐ Major' : 'Minor') + (x.lightLabel ? ' <span style="color:#E8B04B;font-size:11px;">· at ' + x.lightLabel + '</span>' : '') + '</span>' +
+        '<b style="color:#dff0e4;">' + fmtClockTime(x.w.start) + '–' + fmtClockTime(x.w.end) + '</b></div>';
+    }).join('');
+    return '<div style="border:1px solid ' + bite.tone + ';border-radius:10px;padding:12px;margin-bottom:14px;background:#1b2822;">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">' +
+        '<div style="font-weight:700;font-size:13px;">🎣 Bite forecast</div>' +
+        '<div style="font-size:13px;font-weight:800;color:' + bite.tone + ';">' + bite.emoji + ' ' + bite.verdict + ' · ' + bite.score + '</div>' +
+      '</div>' +
+      (bite.windows.length ? '<div style="margin-bottom:6px;"><div style="font-size:10.5px;color:#9db0a3;margin-bottom:2px;">Best windows this day</div>' + winRows + '</div>' : '') +
+      bite.drivers.map(function(d){ return '<div style="font-size:11.5px;color:#cfe0d6;line-height:1.5;">' + d + '</div>'; }).join('') +
+      (bite.hasPressure ? '' : '<div style="font-size:10px;color:#6f8377;margin-top:5px;">Adding live pressure…</div>') +
+      '<div style="font-size:9.5px;color:#6f8377;margin-top:6px;line-height:1.4;">Solunar feeding times + barometric pressure — a read on the best odds, not a guarantee.</div>' +
+    '</div>';
+  }
   function renderSolunarTable(){
     var pos = getSolunarViewLocation();
+    var dayMs = solunarViewDate.getTime();
     var periods = getSolunarPeriodsForDay(solunarViewDate, pos.lat, pos.lng);
     var moon = getMoonPhase(solunarViewDate);
+    var isFishing = activeModule === 'fishing';
 
+    var titleEl = document.getElementById('solunarModalTitle');
+    if (titleEl) titleEl.textContent = isFishing ? '🎣 When to Fish' : '⭐ Solunar Table';
     document.getElementById('solunarDateLabel').textContent = solunarViewDate.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
 
     var html = '';
+    // Fishing mode leads with the bite forecast; hunting keeps the plain solunar table unchanged.
+    if (isFishing){
+      var inRange = dayMs >= Date.now() - 86400000 && dayMs <= Date.now() + 3 * 86400000;
+      var bite = computeBiteForecast(periods, moon, dayMs, (inRange && _fc) ? _fc : null);
+      html += '<div id="solunarBiteCard">' + biteCardHtml(bite) + '</div>';
+      // Fold in live barometric pressure (today..+3d) without blocking the render.
+      if (!bite.hasPressure && inRange){
+        ensureForecast(pos.lat, pos.lng).then(function(fc){
+          if (!fc || solunarViewDate.getTime() !== dayMs) return;
+          if (!document.getElementById('solunarModalBackdrop').classList.contains('show')) return;
+          var card = document.getElementById('solunarBiteCard');
+          if (card) card.innerHTML = biteCardHtml(computeBiteForecast(periods, moon, dayMs, fc));
+        });
+      }
+    }
     html += '<div class="solunar-row"><div class="lbl">🌙 Moon Phase<span class="tag">'+moon.illumination+'% illuminated</span></div><div class="time">'+escapeHtml(moon.name)+'</div></div>';
     html += '<div class="solunar-row major"><div class="lbl">⭐ Major Period 1<span class="tag">overhead</span></div><div class="time">'+fmtClockTime(periods.major1.start)+' – '+fmtClockTime(periods.major1.end)+'</div></div>';
     html += '<div class="solunar-row major"><div class="lbl">⭐ Major Period 2<span class="tag">underfoot</span></div><div class="time">'+fmtClockTime(periods.major2.start)+' – '+fmtClockTime(periods.major2.end)+'</div></div>';
