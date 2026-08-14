@@ -1838,7 +1838,7 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
-    <div id="buildBadge">BUILD 293</div>
+    <div id="buildBadge">BUILD 294</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12293,6 +12293,7 @@
     activeFilters = new Set(Object.keys(getActiveTypes()));
     renderChips();
     renderObsTypeToggles();
+    renderPropertySelect();   // refresh the left property dropdown for the new module (it was going stale — showed the old module's properties until something else re-rendered it, so it disagreed with the Query Builder's fresh list)
     renderQuickLogGrid();
     renderMarkers();
     renderObsMarkers();
