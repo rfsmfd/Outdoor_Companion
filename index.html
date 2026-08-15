@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 330</div>
+    <div id="buildBadge">BUILD 331</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3111,6 +3111,8 @@
         points: currentTrailPoints.slice(), color: selectedTrailColor, lineStyle: selectedTrailStyle,
         createdAt: Date.now(), notes: '', hidden: false
       };
+      var _tmid = newTrail.points[Math.floor(newTrail.points.length / 2)];   // stamp its farm at creation so it can't orphan
+      if (_tmid){ var _tf = farmForPoint(_tmid.lat, _tmid.lng); if (_tf) newTrail.propertyId = _tf.id; }
       trails.push(newTrail);
       try{ await saveTrail(newTrail); }catch(e){ console.error('Outdoor Companion: failed to save new trail', e); }
       if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
@@ -6926,6 +6928,7 @@
       return;
     }
     list.innerHTML = '';
+    var _siteProp = {}; sites.forEach(function(s){ _siteProp[s.id] = s.propertyId; });   // map for a fast per-farm photo count
     mine.sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); }).forEach(function(p){
       var siteCount = sites.filter(function(s){ return s.propertyId === p.id; }).length;
       var row = document.createElement('div');
@@ -6944,8 +6947,13 @@
         : ' · <span style="color:#7f8c86;">0 ' + evtNoun + (isFishProp ? 'es' : 's') + '</span>';
       var otherMod = activeModule === 'fishing' ? 'hunting' : 'fishing';
       var otherLabel = otherMod === 'fishing' ? '🎣 Fishing' : '🏹 Hunting';
+      // Full asset inventory for this farm — eyeball the counts, and match them against what a share reports.
+      var _camN = sites.filter(function(s){ return s.propertyId === p.id && s.type === 'camera'; }).length;
+      var _trailN = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ return t.propertyId === p.id; }).length;
+      var _photoN = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(ph){ return ph.matchedSiteId && _siteProp[ph.matchedSiteId] === p.id; }).length;
+      var _invLine = isFishProp ? '' : ('<div class="count" style="font-size:11px;opacity:.8;margin-top:2px;">🎯 ' + (siteCount - _camN) + ' stands · 📷 ' + _camN + ' cams · 🥾 ' + _trailN + ' trails · 👁 ' + catchCount + ' sightings · 📸 ' + _photoN + ' photos</div>');
       row.innerHTML =
-        '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + catchChip + (propAcresLabel(p) ? ' · ' + propAcresLabel(p) : '') + ' · setup ' + doneN + '/' + totalN + '</div></div>' +
+        '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + catchChip + (propAcresLabel(p) ? ' · ' + propAcresLabel(p) : '') + ' · setup ' + doneN + '/' + totalN + '</div>' + _invLine + '</div>' +
         '<div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
           '<button class="btn-ghost" data-act="setup-prop" data-id="' + p.id + '" style="font-size:11px;padding:5px 10px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;">🗺 Set up</button>' +
           (((p.boundary && p.boundary.length >= 3) || p.bounds) ? '<button class="btn-ghost" data-act="attach-prop" data-id="' + p.id + '" title="Link any stands, camera sites, trails or sightings inside the farm to it" style="font-size:11px;padding:5px 10px;">🔗 Attach inside</button>' : '') +
@@ -8077,6 +8085,18 @@
     if (b && lat <= b.north && lat >= b.south && lng <= b.east && lng >= b.west) return true;
     return (prop.boundary && prop.boundary.length >= 3) ? pointInPolygon(lat, lng, prop.boundary) : false;
   }
+  // Which farm does a point sit on? The source-of-truth attribution: called at CREATION time for anything
+  // locatable (camera sites at deploy, trails, stands) so nothing is ever born orphaned — regardless of whether
+  // a boundary exists yet or gets redrawn later. Prefer a precise traced outline, then fall back to the map-area.
+  function farmForPoint(lat, lng, moduleOverride){
+    if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+    var mod = moduleOverride || activeModule;
+    var list = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return !p.module || p.module === mod; });
+    var i;
+    for (i = 0; i < list.length; i++){ if (list[i].boundary && list[i].boundary.length >= 3 && pointInPolygon(lat, lng, list[i].boundary)) return list[i]; }
+    for (i = 0; i < list.length; i++){ if (insideFarmArea(lat, lng, list[i])) return list[i]; }
+    return null;
+  }
   async function offerRehomeForBoundary(prop){
     if (!(prop.boundary && prop.boundary.length >= 3) && !prop.bounds) return;
     var inSites = sites.filter(function(s){ return typeof s.lat === 'number' && s.propertyId !== prop.id && typeIsInActiveModule(s.type) && insideFarmArea(s.lat, s.lng, prop); });
@@ -8128,11 +8148,15 @@
       (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId && fsid[d.siteId]; }).forEach(function(d){ keys.push('dep:' + d.id); });
       (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return (p.matchedSiteId && fsid[p.matchedSiteId]) || (p.cameraId && fcid[p.cameraId]); }).forEach(function(p){ keys.push('photo:' + p.id); });
       if (keys.length > 60) showToast('Sharing ' + keys.length + ' items to your group — hang on…');
-      await bulkSetSharing(keys, groups);
+      var _ar = await bulkSetSharing(keys, groups);
       try { await reloadAllShareable(); } catch (e){}
+      renderPropertySelect(); renderAll();
+      if (_ar.failed){ alert('⚠ Attached ' + total + ', but ' + _ar.failed + ' of ' + _ar.total + ' items didn\'t finish sharing — tap 🤝 Share on “' + prop.name + '” to retry.'); }
+      else { alert('✅ Attached ' + total + ' item' + (total === 1 ? '' : 's') + ' to “' + prop.name + '” and shared everything on it with your group.\n\n' + _ar.total + ' records verified — none missed.'); }
+      return;
     }
     renderPropertySelect(); renderAll();
-    showToast('Attached ' + total + ' to “' + prop.name + '”' + (groups.length ? ' and shared with your group' : '') + '.');
+    showToast('Attached ' + total + ' to “' + prop.name + '”.');
   }
 
   // ---------- 🗺 Property Setup wizard — the bundled, guided "do this first" flow ----------
@@ -8769,7 +8793,7 @@
           if (w.srcId) existing.importId = w.srcId;
           try { await saveSite(existing); updated++; } catch (e) { console.error('Outdoor Companion: import update failed', e); }
         } else {
-          var site = { id: uid(), name: w.name || ('Waypoint ' + (i + 1)), type: type, notes: 'Imported', importId: w.srcId || null, lat: w.lat, lng: w.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: propId };
+          var site = { id: uid(), name: w.name || ('Waypoint ' + (i + 1)), type: type, notes: 'Imported', importId: w.srcId || null, lat: w.lat, lng: w.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: propId || (farmForPoint(w.lat, w.lng) || {}).id || null };
           sites.push(site);
           try { await saveSite(site); made++; } catch (e) { console.error('Outdoor Companion: import save failed', e); }
         }
@@ -10892,6 +10916,7 @@
         var notes = document.getElementById('f_notes').value.trim();
         if (!name){ document.getElementById('f_name').style.borderColor = '#D94A2E'; return; }
         var propertyIdVal = document.getElementById('f_property') ? (document.getElementById('f_property').value || null) : null;
+        if (!propertyIdVal){ var _sf = farmForPoint(latlng.lat, latlng.lng); if (_sf) propertyIdVal = _sf.id; }   // no farm picked → stamp the one it sits on, so it can't orphan
         var site = {
           id: uid(),
           name: name,
@@ -14053,11 +14078,15 @@
         depKeys.forEach(function(d){ keys.push('dep:' + d.id); });
         photoKeys.forEach(function(p){ keys.push('photo:' + p.id); });
         var _spBtn = this;
-        await bulkSetSharing(keys, chosen, function(done, total){ if (total > 60) _spBtn.textContent = 'Sharing ' + done + '/' + total + '…'; });
+        var _res = await bulkSetSharing(keys, chosen, function(done, total){ if (total > 60) _spBtn.textContent = 'Sharing ' + done + '/' + total + '…'; });
         close();
         await reloadAllShareable();
         renderAll(); renderPropertiesManageList(); if (typeof renderPropertySelect === 'function') renderPropertySelect();
-        showToast(chosen.length ? ('“' + prop.name + '” shared with ' + chosen.length + ' group' + (chosen.length > 1 ? 's' : '')) : ('“' + prop.name + '” made private again'));
+        if (!chosen.length){ showToast('“' + prop.name + '” made private again'); return; }
+        var _gn = myGroups.filter(function(g){ return chosen.indexOf(g.id) >= 0; }).map(function(g){ return g.name; }).join(', ');
+        var _cts = { sites: siteKeys.length, obs: obsKeys.length, trails: trailKeys.length, cams: camKeys.length, deps: depKeys.length, photos: photoKeys.length };
+        if (_res.failed){ alert('⚠ Shared ' + (_res.total - _res.failed) + ' of ' + _res.total + ' items on “' + prop.name + '” with ' + _gn + '.\n\n' + _res.failed + ' didn\'t go through — tap 🤝 Share again to retry the rest.'); }
+        else { alert('✅ “' + prop.name + '” fully shared with ' + _gn + '.\n\nEvery item is attached to the farm and shared:\n• ' + shareBreakdownText(_cts).split(', ').join('\n• ') + '\n\n' + _res.total + ' records in all — none missed.'); }
       } catch (e){ alert('Could not share the farm:\n' + ((e && e.message) || e)); this.disabled = false; this.textContent = 'Share'; }
     });
   }
@@ -14085,13 +14114,21 @@
   // thousands of photos; a serial loop takes minutes and can look like it "didn't share." Chunked so we don't
   // fire 2000 writes at once. onProgress(done,total) drives a status line so the founder sees it working.
   async function bulkSetSharing(keys, groups, onProgress){
-    var CHUNK = 25, done = 0, total = keys.length;
+    var CHUNK = 25, done = 0, failed = 0, total = keys.length;
     for (var i = 0; i < total; i += CHUNK){
       var slice = keys.slice(i, i + CHUNK);
-      await Promise.all(slice.map(function(k){ return window.storage.setSharing(k, groups).catch(function(e){ console.error('Outdoor Companion: share failed', k, e); }); }));
+      await Promise.all(slice.map(function(k){ return window.storage.setSharing(k, groups).catch(function(e){ failed++; console.error('Outdoor Companion: share failed', k, e); }); }));
       done += slice.length;
       if (onProgress) try { onProgress(done, total); } catch (e){}
     }
+    return { total: total, failed: failed };
+  }
+  // Itemized breakdown for the share-confirmation ("3 stands, 2 cameras, 1684 photos…") + a verify line.
+  function shareBreakdownText(counts){
+    var lbl = [['sites','spot','spots'],['obs','sighting','sightings'],['trails','trail','trails'],['cams','camera','cameras'],['deps','deployment','deployments'],['photos','photo','photos']];
+    var parts = [];
+    lbl.forEach(function(x){ var n = counts[x[0]] || 0; if (n) parts.push(n + ' ' + (n === 1 ? x[1] : x[2])); });
+    return parts.length ? parts.join(', ') : 'the property';
   }
   // Reload everything a shared farm can carry (used after a bulk "share this farm").
   async function reloadAllShareable(){
@@ -16793,7 +16830,7 @@
           lng: importBatchLocation.lng,
           createdAt: Date.now(),
           lastActivityAt: Date.now(),
-          propertyId: importLocSelectedPropertyId || null // file under the property they jumped to
+          propertyId: importLocSelectedPropertyId || (farmForPoint(importBatchLocation.lat, importBatchLocation.lng) || {}).id || null // the property they jumped to, else the farm it sits on
         };
         sites.push(manualSite);
         createdNewSite = true;
@@ -17403,7 +17440,8 @@
         lat: pos.lat,
         lng: pos.lng,
         createdAt: Date.now(),
-        lastActivityAt: Date.now()
+        lastActivityAt: Date.now(),
+        propertyId: (farmForPoint(pos.lat, pos.lng) || {}).id || null   // stamp its farm at deploy so a camera spot is never born orphaned
       };
       sites.push(site);
     }
