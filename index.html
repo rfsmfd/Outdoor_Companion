@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 328</div>
+    <div id="buildBadge">BUILD 329</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8111,7 +8111,8 @@
       (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId && fsid[c.currentSiteId]; }).forEach(function(c){ fcid[c.id] = 1; keys.push('cam:' + c.id); });
       (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId && fsid[d.siteId]; }).forEach(function(d){ keys.push('dep:' + d.id); });
       (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return (p.matchedSiteId && fsid[p.matchedSiteId]) || (p.cameraId && fcid[p.cameraId]); }).forEach(function(p){ keys.push('photo:' + p.id); });
-      for (var q = 0; q < keys.length; q++){ try { await window.storage.setSharing(keys[q], groups); } catch (e){} }
+      if (keys.length > 60) showToast('Sharing ' + keys.length + ' items to your group — hang on…');
+      await bulkSetSharing(keys, groups);
       try { await reloadAllShareable(); } catch (e){}
     }
     renderPropertySelect(); renderAll();
@@ -14035,7 +14036,8 @@
         camKeys.forEach(function(c){ keys.push('cam:' + c.id); });
         depKeys.forEach(function(d){ keys.push('dep:' + d.id); });
         photoKeys.forEach(function(p){ keys.push('photo:' + p.id); });
-        for (var i = 0; i < keys.length; i++){ try { await window.storage.setSharing(keys[i], chosen); } catch (e){ console.error('Outdoor Companion: share farm item failed', keys[i], e); } }
+        var _spBtn = this;
+        await bulkSetSharing(keys, chosen, function(done, total){ if (total > 60) _spBtn.textContent = 'Sharing ' + done + '/' + total + '…'; });
         close();
         await reloadAllShareable();
         renderAll(); renderPropertiesManageList(); if (typeof renderPropertySelect === 'function') renderPropertySelect();
@@ -14062,6 +14064,18 @@
     else if (prefix === 'dep'){ await loadDeployments(); }
     else if (prefix === 'photo'){ await loadImportedPhotos(); }
     // Phase 3b: bucks reload branch here next.
+  }
+  // Stamp sharing on many items FAST — in parallel chunks, not one-at-a-time. A trail-cam farm can have
+  // thousands of photos; a serial loop takes minutes and can look like it "didn't share." Chunked so we don't
+  // fire 2000 writes at once. onProgress(done,total) drives a status line so the founder sees it working.
+  async function bulkSetSharing(keys, groups, onProgress){
+    var CHUNK = 25, done = 0, total = keys.length;
+    for (var i = 0; i < total; i += CHUNK){
+      var slice = keys.slice(i, i + CHUNK);
+      await Promise.all(slice.map(function(k){ return window.storage.setSharing(k, groups).catch(function(e){ console.error('Outdoor Companion: share failed', k, e); }); }));
+      done += slice.length;
+      if (onProgress) try { onProgress(done, total); } catch (e){}
+    }
   }
   // Reload everything a shared farm can carry (used after a bulk "share this farm").
   async function reloadAllShareable(){
