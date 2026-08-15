@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 334</div>
+    <div id="buildBadge">BUILD 335</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2641,6 +2641,8 @@
   var properties = [];   // {id, name, notes, createdAt}
   var trails = [];       // {id, name, type, module, points, color, lineStyle, createdAt, notes}
   var buckProfiles = []; // {id, name, notes, createdAt} — hunting-only; sightings optionally link to one via buckProfileId
+  var suggestionList = [];    // Phase 2a: teammate suggestions (buck matches on an owner's photos) visible in the current scope
+  var suggestionAckList = []; // owner approvals/rejections of those suggestions
   var huntEvents = [];   // {id, module, siteId, lat, lng, checkInAt, checkOutAt, weather, weatherStatus, moonPhase, observationIds}
   var activeHuntId = null; // the currently in-progress hunt/trip, or null if none active
   var journalFilterRange = 'all'; // 'all' | 'week' | 'month' | 'custom' — Journal totals time filter
@@ -4619,21 +4621,51 @@
 
   // Link a photo to a named Buck Profile (same buckProfileId pattern sightings use, so a
   // buck's gallery shows his sightings AND his photos together).
+  // What can I do to THIS photo's buck tag right now? 'own' = my photo, direct edit; 'suggest' = a teammate's
+  // photo I have a Suggester (or Editor, until Phase 2b wires direct writes) grant on; 'view' = read-only.
+  function photoContribMode(doc){
+    var me = _permMyUid();
+    if (!doc || !doc.__ownerUid || doc.__ownerUid === me) return 'own';
+    if (activeScope.type === 'group'){
+      var gid = activeScope.id;
+      if (grantAllows(gid, 'bucks', 'suggest') || grantAllows(gid, 'photos', 'suggest')) return 'suggest';
+    }
+    return 'view';
+  }
   function populateLightboxBuckSelect(doc){
     var sel = document.getElementById('photoLightboxBuck');
-    var opts = ['<option value="">🦌 Link to buck…</option>'];
-    if (buckProfiles.length) opts.push('<option value="__identify__">🔍 Which buck? (AI)</option>');
-    buckProfiles.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
-      .forEach(function(b){ opts.push('<option value="' + b.id + '">' + escapeHtml(b.name) + '</option>'); });
-    opts.push('<option value="__new__">＋ New buck…</option>');
-    if (doc.buckProfileId) opts.push('<option value="__unlink__">✕ Unlink</option>');
+    var mode = photoContribMode(doc);
+    if (mode === 'view'){ sel.innerHTML = '<option value="">🦌 View only</option>'; sel.value = ''; sel.disabled = true; return; }
+    sel.disabled = false;
+    var sorted = buckProfiles.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); });
+    var opts;
+    if (mode === 'suggest'){
+      opts = ['<option value="">💬 Suggest a buck…</option>'];
+      sorted.forEach(function(b){ opts.push('<option value="' + b.id + '">' + escapeHtml(b.name) + '</option>'); });
+    } else {
+      opts = ['<option value="">🦌 Link to buck…</option>'];
+      if (buckProfiles.length) opts.push('<option value="__identify__">🔍 Which buck? (AI)</option>');
+      sorted.forEach(function(b){ opts.push('<option value="' + b.id + '">' + escapeHtml(b.name) + '</option>'); });
+      opts.push('<option value="__new__">＋ New buck…</option>');
+      if (doc.buckProfileId) opts.push('<option value="__unlink__">✕ Unlink</option>');
+    }
     sel.innerHTML = opts.join('');
-    sel.value = doc.buckProfileId || '';
+    sel.value = (mode === 'own' && doc.buckProfileId) ? doc.buckProfileId : '';
   }
   document.getElementById('photoLightboxBuck').addEventListener('change', async function(){
     var val = this.value;
     var doc = galleryLightboxDoc;
     if (!doc) return;
+    var mode = photoContribMode(doc);
+    if (mode === 'view'){ this.value = ''; showToast('View only — ask the owner to grant you Suggester/Editor to tag their photos.'); return; }
+    if (mode === 'suggest'){
+      this.value = '';   // a suggestion doesn't change the photo; reset the picker
+      if (val === '__identify__'){ showToast('AI matching is the owner\'s call — suggest a known buck instead.'); return; }
+      if (val === '__new__'){ showToast('Only the owner can add a new buck — suggest one of the existing bucks.'); return; }
+      if (!val || val === '__unlink__') return;
+      await createBuckSuggestion(doc, val);
+      return;
+    }
     if (val === '__identify__'){ this.value = doc.buckProfileId || ''; identifyBuck(doc); return; }
     if (val === '__new__'){
       var det = await promptBuckDetails();
@@ -5786,6 +5818,7 @@
       populateGalleryFilters();
       renderGallery();
       refreshTagAllButton();
+      try { refreshSuggestionsButton(); } catch (e) {}
     }
     closeAllModals();
     document.getElementById('photoGalleryModalBackdrop').classList.add('show');
@@ -6496,6 +6529,143 @@
       var all = buckLocalLoadAll().filter(function(p){ return p.id !== id; });
       buckLocalSaveAll(all);
     }
+  }
+
+  // ---------- Phase 2a: teammate suggestions (Suggester flow) ----------
+  // A suggestion lives in the SUGGESTER's own tree, shared to the group — so every write stays in its
+  // own owner's tree (no write-rule piercing). The owner reads suggestions addressed to them, applies the
+  // change to their own item, and writes an ACK (their own tree, shared) so the suggester sees the outcome.
+  // Cloud-only (they only make sense with a group); signed-out/local mode has no suggestions.
+  async function loadSuggestions(){
+    suggestionList = [];
+    if (!hasChatStorage) return;
+    try{
+      var res = await window.storage.list('sug:');
+      var keys = (res && res.keys) ? res.keys : [];
+      for (var i=0;i<keys.length;i++){ try{ var r = await window.storage.get(keys[i]); if (r && r.value) suggestionList.push(JSON.parse(r.value)); }catch(e){} }
+      suggestionList = dedupeById(suggestionList);
+    }catch(e){ suggestionList = []; }
+  }
+  async function loadSuggestionAcks(){
+    suggestionAckList = [];
+    if (!hasChatStorage) return;
+    try{
+      var res = await window.storage.list('sugack:');
+      var keys = (res && res.keys) ? res.keys : [];
+      for (var i=0;i<keys.length;i++){ try{ var r = await window.storage.get(keys[i]); if (r && r.value) suggestionAckList.push(JSON.parse(r.value)); }catch(e){} }
+      suggestionAckList = dedupeById(suggestionAckList);
+    }catch(e){ suggestionAckList = []; }
+  }
+  function ackFor(suggestionId){ for (var i=0;i<suggestionAckList.length;i++){ if (suggestionAckList[i].id === suggestionId) return suggestionAckList[i]; } return null; }
+  // Suggestions still awaiting MY decision (I'm the target owner and there's no ack yet).
+  function pendingSuggestionsForMe(){
+    var me = _permMyUid(); if (!me) return [];
+    return suggestionList.filter(function(s){ return s && s.ownerUid === me && !ackFor(s.id); })
+      .sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); });
+  }
+  // A member (Suggester) proposes a buck match on someone else's photo. Written to MY own tree, shared
+  // to the active group — the owner reads it and decides. Requires group scope + a suggest grant.
+  async function createBuckSuggestion(photoDoc, buckId){
+    if (activeScope.type !== 'group'){ showToast('Switch to your group to suggest a match.'); return false; }
+    var gid = activeScope.id, me = _permMyUid();
+    var g = groupById(gid);
+    var myName = (g && g.members && g.members[me] && g.members[me].name) || (firebase.auth().currentUser && firebase.auth().currentUser.email) || 'A teammate';
+    var buck = buckProfiles.filter(function(b){ return b.id === buckId; })[0];
+    var sug = { id: uid(), kind:'buck-match', fromUid: me, fromName: myName, ownerUid: photoDoc.__ownerUid || null,
+      groupId: gid, target:{ prefix:'photo', id: photoDoc.id }, photoThumb: photoDoc.thumb || null,
+      change:{ buckProfileId: buckId, buckName: buck ? buck.name : '' }, createdAt: Date.now() };
+    try {
+      await window.storage.set('sug:' + sug.id, JSON.stringify(sug));
+      try { await window.storage.setSharing('sug:' + sug.id, [gid]); } catch (e) {}   // ensure the owner can see it
+      suggestionList.push(sug);
+      showToast('Suggested "' + (buck ? buck.name : 'buck') + '" — the owner will get it to approve');
+      return true;
+    } catch (e){ alert('Could not send the suggestion:\n' + ((e && e.message) || e)); return false; }
+  }
+  // Owner approves/rejects a suggestion. Approve applies the change to MY item (my own write) and writes an
+  // ACK (my own tree, shared to the group) so the suggester sees the outcome; reject just writes the ack.
+  async function resolveSuggestion(sug, approve){
+    var me = _permMyUid();
+    if (!sug || sug.ownerUid !== me){ showToast('That suggestion isn\'t yours to decide.'); return false; }
+    if (approve && sug.kind === 'buck-match' && sug.target && sug.target.prefix === 'photo'){
+      var photo = importedPhotos.filter(function(p){ return p.id === sug.target.id; })[0];
+      if (!photo){ showToast('That photo isn\'t loaded here — open your group scope and try again.'); return false; }
+      if (!Array.isArray(photo.buckProfileIds)) photo.buckProfileIds = [];
+      if (photo.buckProfileId && photo.buckProfileIds.indexOf(photo.buckProfileId) === -1) photo.buckProfileIds.push(photo.buckProfileId);
+      if (sug.change.buckProfileId && photo.buckProfileIds.indexOf(sug.change.buckProfileId) === -1) photo.buckProfileIds.push(sug.change.buckProfileId);
+      if (!photo.buckProfileId) photo.buckProfileId = sug.change.buckProfileId;
+      photo.buckSuggestion = null;
+      try { await window.storage.set('photo:' + photo.id, JSON.stringify(photo)); }
+      catch (e){ alert('Could not apply the match:\n' + ((e && e.message) || e)); return false; }
+    }
+    var ack = { id: sug.id, ownerUid: me, groupId: sug.groupId, status: approve ? 'approved' : 'rejected', at: Date.now() };
+    try { await window.storage.set('sugack:' + sug.id, JSON.stringify(ack)); try { await window.storage.setSharing('sugack:' + sug.id, [sug.groupId]); } catch (e) {} suggestionAckList.push(ack); }
+    catch (e){ /* the change applied; a failed ack just risks the item re-showing later */ }
+    return true;
+  }
+  // A "N teammate suggestions — review" button inside the Photo Gallery, shown only when I (the owner) have
+  // pending suggestions on my photos. Created on demand so it needs no HTML markup.
+  function refreshSuggestionsButton(){
+    var anchor = document.getElementById('galleryAiRow');
+    var existing = document.getElementById('gallerySuggBtn');
+    if (!anchor) return;
+    var pend = pendingSuggestionsForMe();
+    if (!pend.length){ if (existing) existing.style.display = 'none'; return; }
+    if (!existing){
+      existing = document.createElement('button');
+      existing.id = 'gallerySuggBtn'; existing.type = 'button';
+      existing.style.cssText = 'width:100%;margin:0 0 10px 0;padding:10px;border-radius:8px;border:1px solid #2f5573;background:#243b52;color:#dbeafe;font-weight:700;font-size:12.5px;cursor:pointer;';
+      existing.addEventListener('click', function(){ showSuggestionInbox(); });
+      anchor.parentNode.insertBefore(existing, anchor);
+    }
+    existing.style.display = 'block';
+    existing.textContent = '💬 ' + pend.length + ' teammate suggestion' + (pend.length === 1 ? '' : 's') + ' — review';
+  }
+  // Owner's review inbox: approve applies the teammate's match to your photo; reject discards it.
+  function showSuggestionInbox(){
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100055;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:18px;overflow:auto;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:460px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); renderGallery(); if (typeof renderBuckProfilesList === 'function' && document.getElementById('buckProfilesList')) { try { renderBuckProfilesList(); } catch (e) {} } refreshSuggestionsButton(); }
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    function render(){
+      var pend = pendingSuggestionsForMe();
+      var head = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+        '<div style="font-weight:800;font-size:16px;">💬 Teammate suggestions</div>' +
+        '<button class="si-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>';
+      if (!pend.length){
+        card.innerHTML = head + '<div style="color:#9db0a3;font-size:13px;padding:8px 0 14px;">Nothing waiting — you\'re all caught up. When a teammate suggests a buck for one of your photos, it shows here for you to approve.</div>' +
+          '<button class="si-done" style="width:100%;padding:10px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Close</button>';
+        card.querySelector('.si-close').addEventListener('click', close);
+        card.querySelector('.si-done').addEventListener('click', close);
+        return;
+      }
+      var rows = pend.map(function(s){
+        var buckName = s.change.buckName || ((buckProfiles.filter(function(b){ return b.id === s.change.buckProfileId; })[0] || {}).name) || 'a buck';
+        var thumb = s.photoThumb || ((importedPhotos.filter(function(p){ return p.id === s.target.id; })[0] || {}).thumb) || '';
+        return '<div style="display:flex;gap:10px;align-items:center;padding:9px 0;border-top:1px solid #33443a;">' +
+          (thumb ? '<img src="' + thumb + '" style="width:66px;height:66px;object-fit:cover;border-radius:8px;background:#000;flex:0 0 auto;">' : '<div style="width:66px;height:66px;border-radius:8px;background:#1c2620;display:flex;align-items:center;justify-content:center;font-size:26px;flex:0 0 auto;">🦌</div>') +
+          '<div style="flex:1;min-width:0;"><div style="font-size:13px;"><b>' + escapeHtml(s.fromName || 'A teammate') + '</b> says this is</div>' +
+            '<div style="font-weight:800;font-size:14px;color:#E8B04B;">🦌 ' + escapeHtml(buckName) + '</div></div>' +
+          '<div style="display:flex;flex-direction:column;gap:5px;flex:0 0 auto;">' +
+            '<button class="si-ok" data-id="' + s.id + '" style="padding:6px 12px;border-radius:7px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;font-weight:700;font-size:12px;cursor:pointer;">✓ Approve</button>' +
+            '<button class="si-no" data-id="' + s.id + '" style="padding:6px 12px;border-radius:7px;border:1px solid #7a3b3b;background:transparent;color:#e6b8b8;font-size:12px;cursor:pointer;">✕ Reject</button>' +
+          '</div></div>';
+      }).join('');
+      card.innerHTML = head +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:6px;">' + pend.length + ' waiting. Approve applies the match to your photo; reject discards it.</div>' +
+        '<button class="si-all" style="width:100%;margin-bottom:6px;padding:9px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;font-weight:700;font-size:12.5px;cursor:pointer;">✓ Approve all ' + pend.length + '</button>' +
+        rows +
+        '<button class="si-done" style="width:100%;margin-top:12px;padding:10px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Done</button>';
+      card.querySelector('.si-close').addEventListener('click', close);
+      card.querySelector('.si-done').addEventListener('click', close);
+      Array.prototype.forEach.call(card.querySelectorAll('.si-ok'), function(b){ b.addEventListener('click', async function(){ b.disabled = true; var s = pend.filter(function(x){ return x.id === b.getAttribute('data-id'); })[0]; if (s){ await resolveSuggestion(s, true); showToast('Approved — ' + (s.change.buckName || 'buck') + ' added'); } render(); }); });
+      Array.prototype.forEach.call(card.querySelectorAll('.si-no'), function(b){ b.addEventListener('click', async function(){ b.disabled = true; var s = pend.filter(function(x){ return x.id === b.getAttribute('data-id'); })[0]; if (s){ await resolveSuggestion(s, false); } render(); }); });
+      card.querySelector('.si-all').addEventListener('click', async function(){ this.disabled = true; this.textContent = 'Approving…'; var all = pendingSuggestionsForMe(); for (var i = 0; i < all.length; i++){ await resolveSuggestion(all[i], true); } showToast('Approved ' + all.length + ' suggestion' + (all.length === 1 ? '' : 's')); render(); });
+    }
+    render();
   }
 
   function trailLocalLoadAll(){
@@ -13666,6 +13836,7 @@
     await loadTrails();
     await loadBuckProfiles();
     await loadImportedPhotos();
+    try { await loadSuggestions(); await loadSuggestionAcks(); } catch (e) {}
     renderAllSavedTrails();
     // If a hunt was left active from a previous session (app closed without tapping End
     // Hunt), pick that state back up rather than silently losing track of it.
@@ -13695,7 +13866,8 @@
   var CLOUD_COLLECTIONS = {
     site:'sites', obs:'observations', buck:'bucks', trail:'trails',
     hunt:'hunts', cam:'cameras', dep:'deployments', prop:'properties',
-    photo:'photos'
+    photo:'photos',
+    sug:'suggestions', sugack:'suggestionAcks'   // Phase 2a: member suggestions + owner approvals
   };
   function cloudCollName(prefix){
     var p = String(prefix).replace(/:$/, '');
@@ -13713,7 +13885,7 @@
   // `cache` is a fresh closure per adapter, so rebuilding the adapter on a scope
   // switch guarantees no stale records bleed across from the previous scope.
   // Collections that can be shared into a group (Phase 3b-1: sites only; extend later).
-  var SHAREABLE_COLLECTIONS = { sites: true, properties: true, observations: true, trails: true, cameras: true, deployments: true, photos: true, bucks: true };   // bucks shareable → cross-member buck tracking (Phase 1)
+  var SHAREABLE_COLLECTIONS = { sites: true, properties: true, observations: true, trails: true, cameras: true, deployments: true, photos: true, bucks: true, suggestions: true, suggestionAcks: true };   // bucks (Phase 1) + suggestions/acks (Phase 2a Suggester flow)
 
   function makeCloudStorage(scope){
     // Back-compat: a bare uid string means the user's private scope.
@@ -14312,6 +14484,8 @@
     try { await loadDeployments(); } catch (e) {}
     try { await loadImportedPhotos(); } catch (e) {}
     try { await loadBuckProfiles(); } catch (e) {}
+    try { await loadSuggestions(); } catch (e) {}
+    try { await loadSuggestionAcks(); } catch (e) {}
   }
 
   // One-time import of anything already in THIS browser's localStorage into the user's cloud

@@ -36,6 +36,11 @@ service cloud.firestore {
     // Photos: the doc carries a self-authorizing download URL (token) for the full image, so sharing the
     // DOC is enough — no Storage-rules change needed for a member to open a shared photo full-size.
     match /{path=**}/photos/{docId}       { allow read: if canReadShared(); }
+    // Phase 2a Suggester flow: a member writes a suggestion into THEIR OWN tree (owner rule above governs
+    // the write), shares it to the group, and the target owner reads it here; the owner's approval/rejection
+    // ack works the same way. Reads only — every write still lands in the writer's own tree.
+    match /{path=**}/suggestions/{docId}    { allow read: if canReadShared(); }
+    match /{path=**}/suggestionAcks/{docId} { allow read: if canReadShared(); }
 
     // ---- Membership mirror: readable by the user, written ONLY by Cloud Functions ----
     // Must live at the top level (not under users/{uid}) — the recursive owner rule above
