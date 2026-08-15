@@ -33,6 +33,9 @@ service cloud.firestore {
     match /{path=**}/cameras/{docId}      { allow read: if canReadShared(); }
     match /{path=**}/deployments/{docId}  { allow read: if canReadShared(); }
     match /{path=**}/bucks/{docId}        { allow read: if canReadShared(); }
+    // Photos: the doc carries a self-authorizing download URL (token) for the full image, so sharing the
+    // DOC is enough — no Storage-rules change needed for a member to open a shared photo full-size.
+    match /{path=**}/photos/{docId}       { allow read: if canReadShared(); }
 
     // ---- Membership mirror: readable by the user, written ONLY by Cloud Functions ----
     // Must live at the top level (not under users/{uid}) — the recursive owner rule above

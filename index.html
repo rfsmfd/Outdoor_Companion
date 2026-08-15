@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 325</div>
+    <div id="buildBadge">BUILD 326</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8096,10 +8096,12 @@
       inSites.forEach(function(s){ keys.push('site:' + s.id); });
       inObs.forEach(function(o){ keys.push('obs:' + o.id); });
       inTrails.forEach(function(t){ keys.push('trail:' + t.id); });
-      // cameras + deployments sitting on this farm's sites (the camera sites are now attached)
+      // cameras + deployments + photos sitting on this farm's sites (the camera sites are now attached)
       var fsid = {}; sites.filter(function(s){ return s.propertyId === pid; }).forEach(function(s){ fsid[s.id] = 1; });
-      (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId && fsid[c.currentSiteId]; }).forEach(function(c){ keys.push('cam:' + c.id); });
+      var fcid = {};
+      (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId && fsid[c.currentSiteId]; }).forEach(function(c){ fcid[c.id] = 1; keys.push('cam:' + c.id); });
       (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId && fsid[d.siteId]; }).forEach(function(d){ keys.push('dep:' + d.id); });
+      (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return (p.matchedSiteId && fsid[p.matchedSiteId]) || (p.cameraId && fcid[p.cameraId]); }).forEach(function(p){ keys.push('photo:' + p.id); });
       for (var q = 0; q < keys.length; q++){ try { await window.storage.setSharing(keys[q], groups); } catch (e){} }
       try { await reloadAllShareable(); } catch (e){}
     }
@@ -13620,7 +13622,7 @@
   // `cache` is a fresh closure per adapter, so rebuilding the adapter on a scope
   // switch guarantees no stale records bleed across from the previous scope.
   // Collections that can be shared into a group (Phase 3b-1: sites only; extend later).
-  var SHAREABLE_COLLECTIONS = { sites: true, properties: true, observations: true, trails: true, cameras: true, deployments: true };   // bucks: rules ready, client wiring next
+  var SHAREABLE_COLLECTIONS = { sites: true, properties: true, observations: true, trails: true, cameras: true, deployments: true, photos: true };   // bucks: rules ready, client wiring next
 
   function makeCloudStorage(scope){
     // Back-compat: a bare uid string means the user's private scope.
@@ -13993,6 +13995,9 @@
     var farmSiteIds = {}; siteKeys.forEach(function(s){ farmSiteIds[s.id] = 1; });
     var camKeys = (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId && farmSiteIds[c.currentSiteId]; });
     var depKeys = (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId && farmSiteIds[d.siteId]; });
+    // Photos belong to the farm if they're matched to one of its spots, or taken by a camera on it.
+    var farmCamIds = {}; camKeys.forEach(function(c){ farmCamIds[c.id] = 1; });
+    var photoKeys = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return (p.matchedSiteId && farmSiteIds[p.matchedSiteId]) || (p.cameraId && farmCamIds[p.cameraId]); });
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100003;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
     var card = document.createElement('div');
@@ -14003,7 +14008,7 @@
     function nphr(n, one, many){ return n + ' ' + (n === 1 ? one : many); }
     card.innerHTML =
       '<div style="font-weight:700;margin-bottom:4px;">Share “' + escapeHtml(prop.name) + '” with a group</div>' +
-      '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">The group will see this farm read-only — its boundary, ' + nphr(siteKeys.length, 'spot', 'spots') + ', ' + nphr(obsKeys.length, 'sighting', 'sightings') + ', ' + nphr(trailKeys.length, 'trail', 'trails') + ', and ' + nphr(camKeys.length, 'camera', 'cameras') + '. It stays yours; uncheck to make it private again. <em>(Camera photos come next.)</em></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">The group will see this farm read-only — its boundary, ' + nphr(siteKeys.length, 'spot', 'spots') + ', ' + nphr(obsKeys.length, 'sighting', 'sightings') + ', ' + nphr(trailKeys.length, 'trail', 'trails') + ', ' + nphr(camKeys.length, 'camera', 'cameras') + ', and ' + nphr(photoKeys.length, 'photo', 'photos') + '. It stays yours; uncheck to make it private again.</div>' +
       rows +
       '<div style="display:flex;gap:8px;margin-top:14px;"><button id="spCancel" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button><button id="spSave" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">Share</button></div>';
     back.appendChild(card); document.body.appendChild(back);
@@ -14020,6 +14025,7 @@
         trailKeys.forEach(function(t){ keys.push('trail:' + t.id); });
         camKeys.forEach(function(c){ keys.push('cam:' + c.id); });
         depKeys.forEach(function(d){ keys.push('dep:' + d.id); });
+        photoKeys.forEach(function(p){ keys.push('photo:' + p.id); });
         for (var i = 0; i < keys.length; i++){ try { await window.storage.setSharing(keys[i], chosen); } catch (e){ console.error('Outdoor Companion: share farm item failed', keys[i], e); } }
         close();
         await reloadAllShareable();
@@ -14045,6 +14051,7 @@
     else if (prefix === 'prop'){ await loadProperties(); }
     else if (prefix === 'cam'){ await loadCameras(); }
     else if (prefix === 'dep'){ await loadDeployments(); }
+    else if (prefix === 'photo'){ await loadImportedPhotos(); }
     // Phase 3b: bucks reload branch here next.
   }
   // Reload everything a shared farm can carry (used after a bulk "share this farm").
@@ -14055,6 +14062,7 @@
     try { await loadTrails(); } catch (e) {}
     try { await loadCameras(); } catch (e) {}
     try { await loadDeployments(); } catch (e) {}
+    try { await loadImportedPhotos(); } catch (e) {}
   }
 
   // One-time import of anything already in THIS browser's localStorage into the user's cloud
@@ -16162,6 +16170,11 @@
       await window.storage.set('photo:' + photoRecord.id, JSON.stringify(doc), false);
       importedPhotos.push(doc);
       photoRecord.cloudSaved = true;
+      // If this photo's spot (or its camera's spot) belongs to an already-shared farm, share the photo too.
+      var _psite = doc.matchedSiteId ? sites.filter(function(s){ return s.id === doc.matchedSiteId; })[0] : null;
+      var _ppid = _psite && _psite.propertyId;
+      if (!_ppid && doc.cameraId){ var _pc = cameras.filter(function(c){ return c.id === doc.cameraId; })[0]; var _cs = (_pc && _pc.currentSiteId) ? sites.filter(function(s){ return s.id === _pc.currentSiteId; })[0] : null; if (_cs) _ppid = _cs.propertyId; }
+      if (typeof autoShareToPropertyGroups === 'function' && _ppid) autoShareToPropertyGroups('photo', doc.id, _ppid);
     }catch(e){
       console.warn('Outdoor Companion: photo upload failed', e);
       photoRecord.cloudSaved = false;
