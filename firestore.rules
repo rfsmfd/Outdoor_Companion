@@ -14,10 +14,36 @@ service cloud.firestore {
         && exists(/databases/$(database)/documents/memberships/$(request.auth.uid))
         && resource.data.get('sharedGroups', []).hasAny(memberGroups());
     }
+    // Phase 2b Editor tier: is the requester granted direct-edit on `coll` for this owner? The grant lives
+    // at users/{ownerUid}/editors/{editorUid}.cats (a list of collection names), writable ONLY by the owner
+    // (the recursive owner rule below). exists() first so a missing grant can't error the rule.
+    function canEditGrant(ownerUid, coll) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/users/$(ownerUid)/editors/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(ownerUid)/editors/$(request.auth.uid)).data.get('cats', []).hasAny([coll]);
+    }
 
     // ---- Private per-user data: the owner can do anything with their own tree. ----
     match /users/{uid}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ---- Cross-member EDIT (Phase 2b) — a member the owner granted Editor may UPDATE the owner's item ----
+    // Scoped to one collection level (matches users/{ownerUid}/{coll}/{docId} directly). Guards, all required:
+    //   • canEditGrant  — the owner explicitly granted this editor this collection (grant is in the owner's tree)
+    //   • the item is shared to a group the editor belongs to (can't reach unshared/private items)
+    //   • the write may NOT change ownerUid or sharedGroups (no seizing ownership, no re-sharing/un-sharing)
+    // UPDATE only — never create or delete another member's records. Reads are unchanged (governed above).
+    match /users/{ownerUid}/{coll}/{docId} {
+      allow update: if canEditGrant(ownerUid, coll)
+        // Whitelist the ONLY collections an editor grant can ever reach — never control collections
+        // (editors/memberships) and never farm boundaries (properties) or the suggestion trail.
+        && coll in ['sites', 'observations', 'trails', 'cameras', 'deployments', 'bucks', 'photos']
+        && resource.data.get('sharedGroups', []).hasAny(memberGroups())
+        && request.resource.data.get('ownerUid', ownerUid) == ownerUid
+        && request.resource.data.get('sharedGroups', []) == resource.data.get('sharedGroups', [])
+        // Defense-in-depth: an editor may only touch the payload/timestamp, not inject other top-level fields.
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['data', 'updatedAt', 'ownerUid']);
     }
 
     // ---- Cross-member READ of shared items (Phase 3b) ----
