@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 329</div>
+    <div id="buildBadge">BUILD 330</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2178,6 +2178,7 @@
     <div class="oc-modal" id="photoGalleryModal">
       <h3><span id="galleryTitle">📸 Photo Gallery</span> <button class="close-x" id="photoGalleryClose">&times;</button></h3>
       <div class="photo-gallery-filters" id="galleryFiltersRow">
+        <select id="galleryFarmFilter"><option value="">🌲 All farms</option></select>
         <select id="gallerySiteFilter"><option value="">📍 All locations</option></select>
         <select id="galleryCameraFilter"><option value="">All cameras</option></select>
         <select id="gallerySpeciesFilter"><option value="">All photos</option></select>
@@ -4125,9 +4126,11 @@
   function galleryPhotoList(){
     var camF = document.getElementById('galleryCameraFilter').value;
     var siteF = document.getElementById('gallerySiteFilter').value;
+    var farmF = (document.getElementById('galleryFarmFilter') || {}).value;
     var spF = document.getElementById('gallerySpeciesFilter').value;
     var sort = document.getElementById('gallerySort').value;
     var list = importedPhotos.slice();
+    if (farmF) list = list.filter(function(p){ if (!p.matchedSiteId) return false; var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; return !!(s && s.propertyId === farmF); });
     if (camF) list = list.filter(function(p){ return p.cameraId === camF; });
     if (siteF === '__none__') list = list.filter(function(p){ return !p.matchedSiteId; });
     else if (siteF) list = list.filter(function(p){ return p.matchedSiteId === siteF; });
@@ -4160,6 +4163,19 @@
       .forEach(function(s){ if (siteIds[s.id]) siteOpts.push('<option value="'+s.id+'">'+escapeHtml(s.name||'(unnamed)')+'</option>'); });
     if (hasUnlocated) siteOpts.push('<option value="__none__">No site match</option>');
     var prevSite = siteSel.value; siteSel.innerHTML = siteOpts.join(''); siteSel.value = prevSite;
+
+    // Farm filter — the property behind each photo's spot, so you can see a whole farm's photos at once
+    // (and confirm what a group share scoped to). A spot's farm = its site.propertyId.
+    var farmSel = document.getElementById('galleryFarmFilter');
+    if (farmSel){
+      var farmIds = {};
+      importedPhotos.forEach(function(p){ if (p.matchedSiteId){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; if (s && s.propertyId) farmIds[s.propertyId] = true; } });
+      var farmOpts = ['<option value="">🌲 All farms</option>'];
+      (typeof properties !== 'undefined' ? properties : []).filter(function(pr){ return !pr.module || pr.module === 'hunting'; })
+        .slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
+        .forEach(function(pr){ if (farmIds[pr.id]) farmOpts.push('<option value="'+pr.id+'">'+escapeHtml(pr.name)+'</option>'); });
+      var prevFarm = farmSel.value; farmSel.innerHTML = farmOpts.join(''); farmSel.value = prevFarm;
+    }
 
     // Species filter — built from whatever the AI has tagged so far.
     var spSel = document.getElementById('gallerySpeciesFilter');
@@ -5780,8 +5796,8 @@
   document.getElementById('photoGalleryModalBackdrop').addEventListener('click', function(e){
     if (e.target === this) this.classList.remove('show');
   });
-  ['galleryCameraFilter','gallerySiteFilter','gallerySpeciesFilter','gallerySort'].forEach(function(id){
-    document.getElementById(id).addEventListener('change', function(){ renderGallery(); refreshTagAllButton(); });
+  ['galleryFarmFilter','galleryCameraFilter','gallerySiteFilter','gallerySpeciesFilter','gallerySort'].forEach(function(id){
+    var _el = document.getElementById(id); if (_el) _el.addEventListener('change', function(){ renderGallery(); refreshTagAllButton(); });
   });
   document.getElementById('galleryGroupVisits').addEventListener('change', function(){
     galleryGroupVisits = this.checked;
