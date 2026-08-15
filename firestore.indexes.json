@@ -56,6 +56,20 @@
       "indexes": [
         { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION_GROUP" }
       ]
+    },
+    {
+      "collectionGroup": "suggestions",
+      "fieldPath": "sharedGroups",
+      "indexes": [
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION_GROUP" }
+      ]
+    },
+    {
+      "collectionGroup": "suggestionAcks",
+      "fieldPath": "sharedGroups",
+      "indexes": [
+        { "arrayConfig": "CONTAINS", "queryScope": "COLLECTION_GROUP" }
+      ]
     }
   ]
 }
