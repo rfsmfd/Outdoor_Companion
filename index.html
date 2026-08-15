@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 332</div>
+    <div id="buildBadge">BUILD 333</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8164,7 +8164,14 @@
       var fcid = {};
       (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId && fsid[c.currentSiteId]; }).forEach(function(c){ fcid[c.id] = 1; keys.push('cam:' + c.id); });
       (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId && fsid[d.siteId]; }).forEach(function(d){ keys.push('dep:' + d.id); });
-      (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return (p.matchedSiteId && fsid[p.matchedSiteId]) || (p.cameraId && fcid[p.cameraId]); }).forEach(function(p){ keys.push('photo:' + p.id); });
+      var _afPhotos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return (p.matchedSiteId && fsid[p.matchedSiteId]) || (p.cameraId && fcid[p.cameraId]); });
+      _afPhotos.forEach(function(p){ keys.push('photo:' + p.id); });
+      // Bucks seen on this farm (Phase 1 cross-member) — my own buck profiles linked to its photos/sightings.
+      var _abIds = {};
+      _afPhotos.forEach(function(p){ if (p.buckProfileId) _abIds[p.buckProfileId] = 1; if (Array.isArray(p.buckProfileIds)) p.buckProfileIds.forEach(function(bid){ _abIds[bid] = 1; }); });
+      inObs.forEach(function(o){ if (o.buckProfileId) _abIds[o.buckProfileId] = 1; });
+      var _abMyUid = (firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+      (typeof buckProfiles !== 'undefined' ? buckProfiles : []).forEach(function(b){ if (_abIds[b.id] && (!b.__ownerUid || !_abMyUid || b.__ownerUid === _abMyUid)) keys.push('buck:' + b.id); });
       if (keys.length > 60) showToast('Sharing ' + keys.length + ' items to your group — hang on…');
       var _ar = await bulkSetSharing(keys, groups);
       try { await reloadAllShareable(); } catch (e){}
@@ -10635,6 +10642,15 @@
         .sort(function(a,b){ return (b.timestamp||0) - (a.timestamp||0); });
       var totalLinked = linkedObs.length + linkedPhotos.length;
       var hunt = huntStats(linkedPhotos);
+      // Cross-member (Phase 1): how many distinct people's cameras/sightings this buck shows up on, and
+      // whether I own the profile (only then can I share it). __ownerUid is injected by the cloud loader.
+      var _buckOwners = {};
+      linkedPhotos.forEach(function(p){ if (p.__ownerUid) _buckOwners[p.__ownerUid] = 1; });
+      linkedObs.forEach(function(o){ if (o.__ownerUid) _buckOwners[o.__ownerUid] = 1; });
+      var _memberN = Object.keys(_buckOwners).length;
+      var _buckMyUid = (firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+      var _iOwnBuck = !profile.__ownerUid || !_buckMyUid || profile.__ownerUid === _buckMyUid;
+      var _buckSharedN = (profile.__sharedGroups || []).length;
       var mostRecentPhoto = linkedObs.filter(function(o){ return o.photoThumb; })[0];
       var coverThumb = mostRecentPhoto ? mostRecentPhoto.photoThumb : null;
       var coverTime = mostRecentPhoto ? (mostRecentPhoto.createdAt||0) : -1;
@@ -10648,10 +10664,10 @@
                           : '<div style="width:80px;height:80px;border-radius:6px;flex-shrink:0;background:var(--panel-alt);display:flex;align-items:center;justify-content:center;font-size:30px;">🦌</div>') +
         '<div class="info">' +
           '<div class="dt" style="display:flex;align-items:center;justify-content:space-between;">' +
-            '<span>' + escapeHtml(profile.name) + (hunt.located >= 8 ? ' <span title="Daylight-movement %% — how huntable he is" style="font-size:10px;font-weight:700;color:#E8B04B;background:rgba(232,176,75,.15);border-radius:10px;padding:1px 7px;margin-left:5px;white-space:nowrap;">🎯 ' + hunt.pct + '% day</span>' : '') + '</span>' +
+            '<span>' + escapeHtml(profile.name) + (hunt.located >= 8 ? ' <span title="Daylight-movement %% — how huntable he is" style="font-size:10px;font-weight:700;color:#E8B04B;background:rgba(232,176,75,.15);border-radius:10px;padding:1px 7px;margin-left:5px;white-space:nowrap;">🎯 ' + hunt.pct + '% day</span>' : '') + (_buckSharedN ? ' <span title="Shared with your group" style="font-size:10px;font-weight:700;color:#dbeafe;background:#243b52;border-radius:10px;padding:1px 7px;margin-left:4px;white-space:nowrap;">🤝</span>' : '') + '</span>' +
             '<span class="detail-chevron" style="color:var(--accent);font-size:14px;">▸</span>' +
           '</div>' +
-          '<div class="co">' + linkedObs.length + ' ' + (linkedObs.length === 1 ? 'sighting' : 'sightings') + (linkedPhotos.length ? ' · ' + linkedPhotos.length + ' photo' + (linkedPhotos.length === 1 ? '' : 's') : '') + '</div>' +
+          '<div class="co">' + linkedObs.length + ' ' + (linkedObs.length === 1 ? 'sighting' : 'sightings') + (linkedPhotos.length ? ' · ' + linkedPhotos.length + ' photo' + (linkedPhotos.length === 1 ? '' : 's') : '') + (_memberN > 1 ? ' · <span title="Seen on more than one member\'s cameras" style="color:#7FB3FF;font-weight:700;">👥 ' + _memberN + ' members</span>' : '') + '</div>' +
           (profile.notes ? '<div class="co" style="color:var(--text-dim);font-style:italic;">' + escapeHtml(profile.notes) + '</div>' : '') +
         '</div>';
       var galleryWrap = document.createElement('div');
@@ -10670,6 +10686,7 @@
       actionsRow.innerHTML =
         '<button class="btn-ghost" data-act="buck-map" style="width:100%;font-size:12px;font-weight:600;margin-bottom:5px;background:var(--accent);color:#fff;border-color:var(--accent);">📍 Where he\'s been (map)</button>' +
         '<button class="btn-ghost" data-act="buck-move" style="width:100%;font-size:12px;font-weight:600;margin-bottom:5px;background:#20302a;color:#dff0e4;border-color:#3c4d42;">🎬 Movement timeline (play his track)</button>' +
+        ((_iOwnBuck && typeof myGroups !== 'undefined' && myGroups.length) ? '<button class="btn-ghost" data-act="buck-share" style="width:100%;font-size:12px;font-weight:600;margin-bottom:5px;background:#243b52;color:#dbeafe;border-color:#2f5573;">🤝 ' + (_buckSharedN ? ('Shared with group (' + _buckSharedN + ') — manage') : 'Share with group') + '</button>' : '') +
         '<button class="btn-ghost" data-act="edit-buck" style="width:100%;font-size:11px;margin-bottom:5px;">Edit</button>' +
         '<div style="display:flex;gap:6px;">' +
           '<button class="btn-ghost" data-act="delete-buck" style="flex:1;font-size:11px;color:#D94A2E;">Delete Profile</button>' +
@@ -10744,6 +10761,11 @@
       actionsRow.querySelector('[data-act="buck-move"]').addEventListener('click', function(e){
         e.stopPropagation();
         showBuckMovement(profile);
+      });
+      var _buckShareBtn = actionsRow.querySelector('[data-act="buck-share"]');
+      if (_buckShareBtn) _buckShareBtn.addEventListener('click', function(e){
+        e.stopPropagation();
+        openSharePicker('buck:' + profile.id, profile.name, profile.__sharedGroups || []);
       });
       actionsRow.querySelector('[data-act="edit-buck"]').addEventListener('click', function(e){
         e.stopPropagation();
@@ -13691,7 +13713,7 @@
   // `cache` is a fresh closure per adapter, so rebuilding the adapter on a scope
   // switch guarantees no stale records bleed across from the previous scope.
   // Collections that can be shared into a group (Phase 3b-1: sites only; extend later).
-  var SHAREABLE_COLLECTIONS = { sites: true, properties: true, observations: true, trails: true, cameras: true, deployments: true, photos: true };   // bucks: rules ready, client wiring next
+  var SHAREABLE_COLLECTIONS = { sites: true, properties: true, observations: true, trails: true, cameras: true, deployments: true, photos: true, bucks: true };   // bucks shareable → cross-member buck tracking (Phase 1)
 
   function makeCloudStorage(scope){
     // Back-compat: a bare uid string means the user's private scope.
@@ -14065,6 +14087,15 @@
     // Photos belong to the farm if they're matched to one of its spots, or taken by a camera on it.
     var farmCamIds = {}; camKeys.forEach(function(c){ farmCamIds[c.id] = 1; });
     var photoKeys = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return (p.matchedSiteId && farmSiteIds[p.matchedSiteId]) || (p.cameraId && farmCamIds[p.cameraId]); });
+    // Bucks seen on this farm — Phase 1 cross-member tracking. Any buck profile I OWN that has a linked
+    // photo on this farm's cameras or a linked sighting on the farm rides along, so the group can view his
+    // movement across everyone's cameras (the photos/sightings themselves are already shared above). Only
+    // MY bucks: a teammate's shared buck (__ownerUid ≠ me) stays theirs — I can't re-share what I don't own.
+    var farmBuckIds = {};
+    photoKeys.forEach(function(p){ if (p.buckProfileId) farmBuckIds[p.buckProfileId] = 1; if (Array.isArray(p.buckProfileIds)) p.buckProfileIds.forEach(function(bid){ farmBuckIds[bid] = 1; }); });
+    obsKeys.forEach(function(o){ if (o.buckProfileId) farmBuckIds[o.buckProfileId] = 1; });
+    var _shareMyUid = (firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+    var buckKeys = (typeof buckProfiles !== 'undefined' ? buckProfiles : []).filter(function(b){ return farmBuckIds[b.id] && (!b.__ownerUid || !_shareMyUid || b.__ownerUid === _shareMyUid); });
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100003;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
     var card = document.createElement('div');
@@ -14075,7 +14106,7 @@
     function nphr(n, one, many){ return n + ' ' + (n === 1 ? one : many); }
     card.innerHTML =
       '<div style="font-weight:700;margin-bottom:4px;">Share “' + escapeHtml(prop.name) + '” with a group</div>' +
-      '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">The group will see this farm read-only — its boundary, ' + nphr(siteKeys.length, 'spot', 'spots') + ', ' + nphr(obsKeys.length, 'sighting', 'sightings') + ', ' + nphr(trailKeys.length, 'trail', 'trails') + ', ' + nphr(camKeys.length, 'camera', 'cameras') + ', and ' + nphr(photoKeys.length, 'photo', 'photos') + '. It stays yours; uncheck to make it private again.</div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">The group will see this farm read-only — its boundary, ' + nphr(siteKeys.length, 'spot', 'spots') + ', ' + nphr(obsKeys.length, 'sighting', 'sightings') + ', ' + nphr(trailKeys.length, 'trail', 'trails') + ', ' + nphr(camKeys.length, 'camera', 'cameras') + ', ' + nphr(photoKeys.length, 'photo', 'photos') + (buckKeys.length ? ', and ' + nphr(buckKeys.length, 'buck', 'bucks') + ' (their movement shows across everyone\'s cameras)' : '') + '. It stays yours; uncheck to make it private again.</div>' +
       rows +
       '<div style="display:flex;gap:8px;margin-top:14px;"><button id="spCancel" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button><button id="spSave" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">Share</button></div>';
     back.appendChild(card); document.body.appendChild(back);
@@ -14093,6 +14124,7 @@
         camKeys.forEach(function(c){ keys.push('cam:' + c.id); });
         depKeys.forEach(function(d){ keys.push('dep:' + d.id); });
         photoKeys.forEach(function(p){ keys.push('photo:' + p.id); });
+        buckKeys.forEach(function(b){ keys.push('buck:' + b.id); });
         var _spBtn = this;
         var _res = await bulkSetSharing(keys, chosen, function(done, total){ if (total > 60) _spBtn.textContent = 'Sharing ' + done + '/' + total + '…'; });
         close();
@@ -14100,7 +14132,7 @@
         renderAll(); renderPropertiesManageList(); if (typeof renderPropertySelect === 'function') renderPropertySelect();
         if (!chosen.length){ showToast('“' + prop.name + '” made private again'); return; }
         var _gn = myGroups.filter(function(g){ return chosen.indexOf(g.id) >= 0; }).map(function(g){ return g.name; }).join(', ');
-        var _cts = { sites: siteKeys.length, obs: obsKeys.length, trails: trailKeys.length, cams: camKeys.length, deps: depKeys.length, photos: photoKeys.length };
+        var _cts = { sites: siteKeys.length, obs: obsKeys.length, trails: trailKeys.length, cams: camKeys.length, deps: depKeys.length, photos: photoKeys.length, bucks: buckKeys.length };
         if (_res.failed){ alert('⚠ Shared ' + (_res.total - _res.failed) + ' of ' + _res.total + ' items on “' + prop.name + '” with ' + _gn + '.\n\n' + _res.failed + ' didn\'t go through — tap 🤝 Share again to retry the rest.'); }
         else { alert('✅ “' + prop.name + '” fully shared with ' + _gn + '.\n\nEvery item is attached to the farm and shared:\n• ' + shareBreakdownText(_cts).split(', ').join('\n• ') + '\n\n' + _res.total + ' records in all — none missed.'); }
       } catch (e){ alert('Could not share the farm:\n' + ((e && e.message) || e)); this.disabled = false; this.textContent = 'Share'; }
@@ -14124,7 +14156,7 @@
     else if (prefix === 'cam'){ await loadCameras(); }
     else if (prefix === 'dep'){ await loadDeployments(); }
     else if (prefix === 'photo'){ await loadImportedPhotos(); }
-    // Phase 3b: bucks reload branch here next.
+    else if (prefix === 'buck'){ await loadBuckProfiles(); if (document.getElementById('buckProfilesList')){ try { renderBuckProfilesList(); } catch (e) {} } }
   }
   // Stamp sharing on many items FAST — in parallel chunks, not one-at-a-time. A trail-cam farm can have
   // thousands of photos; a serial loop takes minutes and can look like it "didn't share." Chunked so we don't
@@ -14141,7 +14173,7 @@
   }
   // Itemized breakdown for the share-confirmation ("3 stands, 2 cameras, 1684 photos…") + a verify line.
   function shareBreakdownText(counts){
-    var lbl = [['sites','spot','spots'],['obs','sighting','sightings'],['trails','trail','trails'],['cams','camera','cameras'],['deps','deployment','deployments'],['photos','photo','photos']];
+    var lbl = [['sites','spot','spots'],['obs','sighting','sightings'],['trails','trail','trails'],['cams','camera','cameras'],['deps','deployment','deployments'],['photos','photo','photos'],['bucks','buck','bucks']];
     var parts = [];
     lbl.forEach(function(x){ var n = counts[x[0]] || 0; if (n) parts.push(n + ' ' + (n === 1 ? x[1] : x[2])); });
     return parts.length ? parts.join(', ') : 'the property';
@@ -14155,6 +14187,7 @@
     try { await loadCameras(); } catch (e) {}
     try { await loadDeployments(); } catch (e) {}
     try { await loadImportedPhotos(); } catch (e) {}
+    try { await loadBuckProfiles(); } catch (e) {}
   }
 
   // One-time import of anything already in THIS browser's localStorage into the user's cloud
@@ -14934,11 +14967,16 @@
     //  • CAMERA frames — linked photos at their site's coords/capture time.
     //  • real SIGHTINGS — field-log observations linked to this buck (you or, once sharing is on, buddies).
     var photoEvents = importedPhotos.filter(function(p){ return photoLinkedToBuck(p, profile.id) && p.matchedSiteId && p.timestamp; })
-      .map(function(p){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; return (s && typeof s.lat === 'number') ? { source:'cam', p:p, ts:p.timestamp, lat:s.lat, lng:s.lng, name:(s.name || 'Unnamed spot') } : null; })
+      .map(function(p){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; return (s && typeof s.lat === 'number') ? { source:'cam', p:p, ts:p.timestamp, lat:s.lat, lng:s.lng, name:(s.name || 'Unnamed spot'), owner:(p.__ownerUid || null) } : null; })
       .filter(Boolean);
     var obsEvents = observations.filter(function(o){ return o.buckProfileId === profile.id && o.lat != null && o.lng != null && o.createdAt; })
-      .map(function(o){ var s = o.siteId ? sites.filter(function(x){ return x.id === o.siteId; })[0] : null; return { source:'sighting', o:o, ts:o.createdAt, lat:o.lat, lng:o.lng, name:(s && s.name) ? s.name : 'Field sighting' }; });
+      .map(function(o){ var s = o.siteId ? sites.filter(function(x){ return x.id === o.siteId; })[0] : null; return { source:'sighting', o:o, ts:o.createdAt, lat:o.lat, lng:o.lng, name:(s && s.name) ? s.name : 'Field sighting', owner:(o.__ownerUid || null) }; });
     var full = photoEvents.concat(obsEvents).sort(function(a,b){ return a.ts - b.ts; });
+    // Cross-member (Phase 1): how many distinct people's cameras/sightings make up his track.
+    var _mvMyUid = (firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+    var _mvOwners = {}; full.forEach(function(e){ if (e.owner) _mvOwners[e.owner] = 1; });
+    var _mvMemberN = Object.keys(_mvOwners).length;
+    function _mvIsTeammate(ev){ return !!(ev && ev.owner && _mvMyUid && ev.owner !== _mvMyUid); }
     closeAllModals();
     if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();
     if (!map.getPane('buckMovePane')){ map.createPane('buckMovePane'); map.getPane('buckMovePane').style.zIndex = 650; }
@@ -15012,11 +15050,11 @@
             left = othumb
               ? '<img class="bmv-img" src="' + othumb + '" alt="" style="width:150px;height:100px;object-fit:cover;border-radius:8px;background:#000;cursor:zoom-in;flex:0 0 auto;">'
               : '<div style="width:150px;height:100px;border-radius:8px;background:rgba(56,178,92,.14);border:1px solid rgba(56,178,92,.5);display:flex;align-items:center;justify-content:center;font-size:36px;flex:0 0 auto;">👁</div>';
-            kind = '<span style="color:#4bd07a;font-weight:700;">👁 Seen in person</span>' + (ev.o.notes ? ' <span style="color:var(--text-dim);">· ' + escapeHtml(ev.o.notes.slice(0, 60)) + '</span>' : '');
+            kind = '<span style="color:#4bd07a;font-weight:700;">👁 Seen in person</span>' + (_mvIsTeammate(ev) ? ' <span style="color:#7FB3FF;font-weight:600;">· 👥 teammate</span>' : '') + (ev.o.notes ? ' <span style="color:var(--text-dim);">· ' + escapeHtml(ev.o.notes.slice(0, 60)) + '</span>' : '');
           } else {
             var src = ev.p.thumb || ev.p.downloadURL || '';
             left = '<img class="bmv-img" src="' + src + '" alt="" style="width:150px;height:100px;object-fit:cover;border-radius:8px;background:#000;cursor:zoom-in;flex:0 0 auto;">';
-            kind = '<span style="color:#E8B04B;font-weight:700;">📷 Trail-cam</span>';
+            kind = '<span style="color:#E8B04B;font-weight:700;">📷 Trail-cam</span>' + (_mvIsTeammate(ev) ? ' <span style="color:#7FB3FF;font-weight:600;">· 👥 teammate\'s camera</span>' : '');
           }
           body = rangeRow +
             '<div style="display:flex;gap:10px;align-items:center;">' + left +
@@ -15038,7 +15076,7 @@
       }
       panel.innerHTML =
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;">' +
-          '<div style="font-weight:700;font-size:14px;">🎬 ' + escapeHtml(profile.name) + ' — movement</div>' +
+          '<div style="font-weight:700;font-size:14px;">🎬 ' + escapeHtml(profile.name) + ' — movement' + (_mvMemberN > 1 ? ' <span title="His track is built from more than one member\'s cameras" style="font-size:10.5px;font-weight:700;color:#7FB3FF;background:rgba(127,179,255,.14);border-radius:9px;padding:1px 7px;margin-left:4px;white-space:nowrap;">👥 ' + _mvMemberN + ' members</span>' : '') + '</div>' +
           '<button class="bmv-close" style="background:none;border:none;color:var(--text-dim);font-size:22px;line-height:1;cursor:pointer;">×</button>' +
         '</div>' + body;
       var c = panel.querySelector('.bmv-close'); if (c) c.addEventListener('click', closeAll);
