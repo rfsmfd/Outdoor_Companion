@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 333</div>
+    <div id="buildBadge">BUILD 334</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13865,11 +13865,66 @@
       myGroups = [];
       snap.forEach(function(d){
         var x = d.data() || {};
-        myGroups.push({ id: d.id, name: x.name || 'Group', inviteCode: x.inviteCode, ownerUid: x.ownerUid, memberUids: x.memberUids || [] });
+        myGroups.push({ id: d.id, name: x.name || 'Group', inviteCode: x.inviteCode, ownerUid: x.ownerUid, memberUids: x.memberUids || [], members: x.members || {} });
       });
       myGroups.sort(function(a, b){ return (a.name || '').localeCompare(b.name || '', undefined, { numeric: true }); });
     }catch(e){ myGroups = []; }
     return myGroups;
+  }
+
+  // ---------- Phase 2: per-member PERMISSIONS (grant model) ----------
+  // A member's grant lives in the group doc's members map: members[uid] = { name, role, cats:[...] }.
+  // The owner may update the group doc (rules freeze memberUids/ownerUid/inviteCode but allow the rest),
+  // and every member can READ the group doc — so roles need NO new collection or rules deploy. Role tiers:
+  //   viewer    — sees everything shared, changes nothing (default)
+  //   suggester — proposes changes on the owner's items (owner approves) — Phase 2a
+  //   editor    — directly edits the owner's items in granted categories — Phase 2b
+  // `cats` scopes the elevated role to specific data types (a member can be Editor of photos only).
+  var PERM_CATEGORIES = [
+    { key:'photos',    label:'Trail-cam photos', icon:'📸' },
+    { key:'bucks',     label:'Buck profiles',    icon:'🦌' },
+    { key:'sites',     label:'Stands & spots',   icon:'🎯' },
+    { key:'cameras',   label:'Cameras',          icon:'📷' },
+    { key:'trails',    label:'Trails',           icon:'🥾' },
+    { key:'sightings', label:'Sightings',        icon:'👁' }
+  ];
+  var PERM_ROLES = [
+    { key:'viewer',    label:'Viewer',    sub:'Sees everything, changes nothing (default)' },
+    { key:'suggester', label:'Suggester', sub:'Proposes changes for you to approve' },
+    { key:'editor',    label:'Editor',    sub:'Directly edits what you allow' }
+  ];
+  // storage-prefix → permission category (what data type a keyed item belongs to)
+  var PERM_PREFIX_CAT = { photo:'photos', buck:'bucks', site:'sites', cam:'cameras', dep:'cameras', trail:'trails', obs:'sightings' };
+  function permCatLabel(key){ for (var i=0;i<PERM_CATEGORIES.length;i++){ if (PERM_CATEGORIES[i].key === key) return PERM_CATEGORIES[i]; } return { key:key, label:key, icon:'•' }; }
+  function groupById(gid){ for (var i=0;i<myGroups.length;i++){ if (myGroups[i].id === gid) return myGroups[i]; } return null; }
+  function _permMyUid(){ return (firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null; }
+  // The effective grant for a member in a group. The owner implicitly has full editor rights everywhere.
+  function memberGrant(gid, uid){
+    var g = groupById(gid); if (!g) return { role:'viewer', cats:[] };
+    if (uid && uid === g.ownerUid) return { role:'owner', cats: PERM_CATEGORIES.map(function(c){ return c.key; }) };
+    var m = (g.members && g.members[uid]) ? g.members[uid] : null;
+    return { role:(m && m.role) || 'viewer', cats:(m && Array.isArray(m.cats)) ? m.cats : [] };
+  }
+  function myGrantIn(gid){ var u = _permMyUid(); return u ? memberGrant(gid, u) : { role:'viewer', cats:[] }; }
+  // Does my grant let me `need` ('suggest' | 'edit') on category `cat` in group gid?
+  // owner → anything; editor → suggest+edit granted cats; suggester → suggest granted cats; viewer → nothing.
+  function grantAllows(gid, cat, need){
+    var gr = myGrantIn(gid); if (!gr) return false;
+    if (gr.role === 'owner') return true;
+    var has = gr.cats.indexOf(cat) !== -1;
+    if (gr.role === 'editor') return has;
+    if (gr.role === 'suggester') return has && need === 'suggest';
+    return false;
+  }
+  // Persist a member's role+cats onto the group doc (owner-only; rules enforce the frozen fields).
+  async function setMemberGrant(gid, memberUid, memberName, role, cats){
+    var ref = firebase.firestore().collection('groups').doc(gid);
+    var snap = await ref.get(); if (!snap.exists) throw new Error('Group not found');
+    var members = (snap.data() && snap.data().members) ? Object.assign({}, snap.data().members) : {};
+    var prev = members[memberUid] || {};
+    members[memberUid] = { name: memberName || prev.name || '', role: role || 'viewer', cats: (role === 'viewer') ? [] : (cats || []) };
+    await ref.update({ members: members });
+    var u = _permMyUid(); if (u) await loadMyGroups(u);
   }
 
   async function userIsMemberOf(uid, gid){
@@ -13989,10 +14044,25 @@
     try { var snap = await firebase.firestore().collection('groups').doc(gid).get(); if (!snap.exists){ card.innerHTML = '<div>Group not found.</div>'; return; } g = snap.data() || {}; }
     catch (e){ card.innerHTML = '<div style="color:#e8a;">Couldn\'t load this group.<br>' + escapeHtml((e && e.message) || '') + '</div>'; return; }
     var isOwner = g.ownerUid === uid, members = g.members || {}, mkeys = Object.keys(members);
+    // Make sure the freshly-fetched members map is reflected in myGroups so grant helpers read it.
+    var _mg = groupById(gid); if (_mg) _mg.members = members;
+    function grantSummary(m, isOwnerRow){
+      if (isOwnerRow) return '👑 owner · full access';
+      var roleKey = (m && m.role) || 'viewer';
+      if (roleKey === 'viewer') return 'Viewer · read-only';
+      var cats = (m && Array.isArray(m.cats)) ? m.cats : [];
+      var icons = cats.length ? cats.map(function(c){ return permCatLabel(c).icon; }).join(' ') : '(no categories yet)';
+      return (roleKey === 'editor' ? '✏️ Editor' : '💬 Suggester') + ' · ' + icons;
+    }
     var memRows = mkeys.map(function(mu){
-      var m = members[mu] || {}, who = escapeHtml(m.name || mu.slice(0, 6)), role = (mu === g.ownerUid) ? 'owner' : (m.role || 'member');
+      var m = members[mu] || {}, who = escapeHtml(m.name || mu.slice(0, 6));
+      var isOwnerRow = (mu === g.ownerUid);
       var youTag = (mu === uid) ? ' <span style="color:#7fd6a0;">(you)</span>' : '';
-      return '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid #33443a;font-size:14px;"><span>' + who + youTag + '</span><span style="color:#9db0a3;font-size:12px;">' + role + '</span></div>';
+      var manageBtn = (isOwner && !isOwnerRow) ? '<button class="gp-perm" data-mu="' + mu + '" data-name="' + escapeHtml(m.name || '') + '" style="flex:0 0 auto;background:#243b52;color:#dbeafe;border:1px solid #2f5573;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;white-space:nowrap;">⚙ Permissions</button>' : '';
+      return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px solid #33443a;font-size:14px;">' +
+        '<span style="flex:1;min-width:0;">' + who + youTag + '<span style="display:block;color:#9db0a3;font-size:11px;margin-top:1px;">' + grantSummary(m, isOwnerRow) + '</span></span>' +
+        manageBtn +
+      '</div>';
     }).join('') || '<div style="color:#9db0a3;padding:6px 0;">No members listed yet.</div>';
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">' +
@@ -14026,6 +14096,60 @@
       catch (e){ alert('Could not rename the group:\n' + ((e && e.message) || e)); }
     });
     card.querySelector('#gpLeave').addEventListener('click', async function(){ close(); if (uid) await doLeaveGroup(uid); });
+    Array.prototype.forEach.call(card.querySelectorAll('.gp-perm'), function(btn){
+      btn.addEventListener('click', function(){
+        openMemberPermissions(gid, btn.getAttribute('data-mu'), btn.getAttribute('data-name'), function(){ close(); showGroupPanel(gid); });
+      });
+    });
+  }
+
+  // Owner sets a member's role + which data types it covers. Saves onto the group doc's members map.
+  function openMemberPermissions(gid, memberUid, memberName, onSaved){
+    var g = groupById(gid);
+    var cur = (g && g.members && g.members[memberUid]) ? g.members[memberUid] : {};
+    var role = cur.role || 'viewer';
+    var cats = (cur && Array.isArray(cur.cats)) ? cur.cats.slice() : [];
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:360px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);max-height:88vh;overflow:auto;';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    function render(){
+      var roleBtns = PERM_ROLES.map(function(r){
+        var on = (role === r.key);
+        return '<button class="mp-role" data-role="' + r.key + '" style="width:100%;text-align:left;margin-bottom:6px;padding:9px 11px;border-radius:9px;cursor:pointer;border:1px solid ' + (on ? '#FF6A13' : '#3c4d42') + ';background:' + (on ? 'rgba(255,106,19,.14)' : 'transparent') + ';color:#e8f0ea;">' +
+          '<div style="font-weight:700;font-size:13px;">' + (on ? '◉ ' : '○ ') + escapeHtml(r.label) + '</div>' +
+          '<div style="font-size:11px;color:#9db0a3;margin-top:1px;">' + escapeHtml(r.sub) + '</div>' +
+        '</button>';
+      }).join('');
+      var catRows = (role === 'viewer') ? '' :
+        '<div style="margin-top:6px;font-size:12px;color:#9db0a3;">Which data types can they ' + (role === 'editor' ? 'edit' : 'suggest changes to') + '?</div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:7px;">' + PERM_CATEGORIES.map(function(c){
+          var on = cats.indexOf(c.key) !== -1;
+          return '<button class="mp-cat" data-cat="' + c.key + '" style="padding:6px 10px;border-radius:16px;cursor:pointer;font-size:12px;border:1px solid ' + (on ? '#6BBF59' : '#3c4d42') + ';background:' + (on ? 'rgba(107,191,89,.16)' : 'transparent') + ';color:#e8f0ea;">' + (on ? '✓ ' : '') + c.icon + ' ' + escapeHtml(c.label) + '</button>';
+        }).join('') + '</div>';
+      card.innerHTML =
+        '<div style="font-weight:700;font-size:15px;margin-bottom:2px;">⚙ ' + escapeHtml(memberName || 'Member') + '</div>' +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:12px;line-height:1.4;">What can they do with the farms you share to this group? This stays your call — everything is view-only until you grant more.</div>' +
+        roleBtns + catRows +
+        (role === 'editor' ? '<div style="font-size:11px;color:#E7B45A;margin-top:10px;line-height:1.4;">✏️ Editor lets them change your records directly — grant it only to people you fully trust.</div>' : '') +
+        '<div style="display:flex;gap:8px;margin-top:16px;">' +
+          '<button id="mpCancel" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
+          '<button id="mpSave" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">Save</button>' +
+        '</div>';
+      Array.prototype.forEach.call(card.querySelectorAll('.mp-role'), function(b){ b.addEventListener('click', function(){ role = b.getAttribute('data-role'); render(); }); });
+      Array.prototype.forEach.call(card.querySelectorAll('.mp-cat'), function(b){ b.addEventListener('click', function(){ var c = b.getAttribute('data-cat'), i = cats.indexOf(c); if (i === -1) cats.push(c); else cats.splice(i, 1); render(); }); });
+      card.querySelector('#mpCancel').addEventListener('click', close);
+      card.querySelector('#mpSave').addEventListener('click', async function(){
+        if (role !== 'viewer' && !cats.length){ showToast('Pick at least one data type, or set them back to Viewer.'); return; }
+        this.disabled = true; this.textContent = 'Saving…';
+        try { await setMemberGrant(gid, memberUid, memberName, role, cats); close(); showToast('Permissions updated for ' + (memberName || 'member')); if (typeof onSaved === 'function') onSaved(); }
+        catch (e){ alert('Could not update permissions:\n' + ((e && e.message) || e)); this.disabled = false; this.textContent = 'Save'; }
+      });
+    }
+    render();
   }
 
   // ---- Per-item sharing (Phase 3b): tag an item with the groups it's shared to ----
