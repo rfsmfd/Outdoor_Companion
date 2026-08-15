@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 326</div>
+    <div id="buildBadge">BUILD 327</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8079,7 +8079,15 @@
     // Works off a traced outline OR the saved map-area rectangle (pointInProperty handles both).
     if (!(prop.boundary && prop.boundary.length >= 3) && !prop.bounds){ showToast('This farm has no outline or saved map-area yet — frame it and Save, or trace its outline in Set up, then Attach.'); return; }
     var pid = prop.id, mod = prop.module || activeModule;
-    function inside(lat, lng){ return (typeof lat === 'number' && typeof lng === 'number') && pointInProperty(lat, lng, prop); }
+    // Use the saved MAP-AREA rectangle as well as the traced outline. A re-traced (or tightened) boundary can
+    // leave real spots — camera sites especially — just OUTSIDE the polygon and orphaned; the broader map-area
+    // rectangle catches those. (The confirm shows the count, so an over-grab is easy to cancel.)
+    function inside(lat, lng){
+      if (typeof lat !== 'number' || typeof lng !== 'number') return false;
+      var b = prop.bounds;
+      if (b && lat <= b.north && lat >= b.south && lng <= b.east && lng >= b.west) return true;
+      return (prop.boundary && prop.boundary.length >= 3) ? pointInPolygon(lat, lng, prop.boundary) : false;
+    }
     var inSites = sites.filter(function(s){ return s.propertyId !== pid && typeIsInActiveModule(s.type) && inside(s.lat, s.lng); });
     var inObs = (typeof observations !== 'undefined' ? observations : []).filter(function(o){ return o.propertyId !== pid && typeIsInActiveModule(o.type, true) && inside(o.lat, o.lng); });
     var inTrails = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ if ((t.module || activeModule) !== mod || t.propertyId === pid || !t.points || !t.points.length) return false; var m = t.points[Math.floor(t.points.length / 2)]; return !!(m && inside(m.lat, m.lng)); });
