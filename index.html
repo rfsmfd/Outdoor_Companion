@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 335</div>
+    <div id="buildBadge">BUILD 336</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4628,6 +4628,7 @@
     if (!doc || !doc.__ownerUid || doc.__ownerUid === me) return 'own';
     if (activeScope.type === 'group'){
       var gid = activeScope.id;
+      if (grantAllows(gid, 'bucks', 'edit') || grantAllows(gid, 'photos', 'edit')) return 'edit';       // Phase 2b: direct write
       if (grantAllows(gid, 'bucks', 'suggest') || grantAllows(gid, 'photos', 'suggest')) return 'suggest';
     }
     return 'view';
@@ -4638,19 +4639,20 @@
     if (mode === 'view'){ sel.innerHTML = '<option value="">🦌 View only</option>'; sel.value = ''; sel.disabled = true; return; }
     sel.disabled = false;
     var sorted = buckProfiles.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); });
+    var canAI = (mode === 'own') || (mode === 'edit' && activeScope.type === 'group' && grantAllowsAI(activeScope.id));
     var opts;
     if (mode === 'suggest'){
       opts = ['<option value="">💬 Suggest a buck…</option>'];
       sorted.forEach(function(b){ opts.push('<option value="' + b.id + '">' + escapeHtml(b.name) + '</option>'); });
-    } else {
+    } else {   // 'own' or 'edit' — direct tagging (an Editor writes straight into the owner's photo)
       opts = ['<option value="">🦌 Link to buck…</option>'];
-      if (buckProfiles.length) opts.push('<option value="__identify__">🔍 Which buck? (AI)</option>');
+      if (buckProfiles.length && canAI) opts.push('<option value="__identify__">🔍 Which buck? (AI)</option>');
       sorted.forEach(function(b){ opts.push('<option value="' + b.id + '">' + escapeHtml(b.name) + '</option>'); });
-      opts.push('<option value="__new__">＋ New buck…</option>');
+      if (mode === 'own') opts.push('<option value="__new__">＋ New buck…</option>');   // creating a buck stays owner-only
       if (doc.buckProfileId) opts.push('<option value="__unlink__">✕ Unlink</option>');
     }
     sel.innerHTML = opts.join('');
-    sel.value = (mode === 'own' && doc.buckProfileId) ? doc.buckProfileId : '';
+    sel.value = ((mode === 'own' || mode === 'edit') && doc.buckProfileId) ? doc.buckProfileId : '';
   }
   document.getElementById('photoLightboxBuck').addEventListener('change', async function(){
     var val = this.value;
@@ -13968,10 +13970,19 @@
       },
       set: async function(key, value){
         var pk = cloudParseKey(key);
-        // Writes ALWAYS target the writer's own tree — never a group tree, never another
-        // member's item. This guard stops a stray edit from forking a copy under the
-        // wrong owner (silent corruption of the single-source-of-truth invariant).
+        // Writes normally target the writer's own tree — never another member's item. This guard stops a
+        // stray edit from forking a copy under the wrong owner (single-source-of-truth invariant).
         if (isGroup && owners[key] && owners[key] !== myUid){
+          // Phase 2b EDITOR tier: if I hold an Editor grant for this item's category in THIS group, write
+          // straight into the OWNER's tree (only the data changes; ownerUid + sharedGroups are left exactly
+          // as the owner set them). The security rule independently re-checks the grant + the guards.
+          var _pfx = String(key).split(':')[0], _cat = PERM_PREFIX_CAT[_pfx];
+          if (_cat && typeof grantAllows === 'function' && grantAllows(scope.id, _cat, 'edit')){
+            var oref = db.collection('users').doc(owners[key]).collection(pk.coll).doc(pk.id);
+            await oref.set({ data: stripMeta(value), updatedAt: firebase.firestore.FieldValue.serverTimestamp(), ownerUid: owners[key] }, { merge: true });
+            cache[key] = value;   // owners[key] stays the real owner — I never take ownership
+            return;
+          }
           throw new Error('That item belongs to another group member — you can view it but not edit it.');
         }
         var ref = db.collection('users').doc(myUid).collection(pk.coll).doc(pk.id);
@@ -14067,17 +14078,19 @@
   ];
   // storage-prefix → permission category (what data type a keyed item belongs to)
   var PERM_PREFIX_CAT = { photo:'photos', buck:'bucks', site:'sites', cam:'cameras', dep:'cameras', trail:'trails', obs:'sightings' };
+  // A permission category → the Firestore collection(s) it governs (for the Editor-write security rule).
+  var PERM_CAT_COLLECTIONS = { photos:['photos'], bucks:['bucks'], sites:['sites'], cameras:['cameras','deployments'], trails:['trails'], sightings:['observations'] };
   function permCatLabel(key){ for (var i=0;i<PERM_CATEGORIES.length;i++){ if (PERM_CATEGORIES[i].key === key) return PERM_CATEGORIES[i]; } return { key:key, label:key, icon:'•' }; }
   function groupById(gid){ for (var i=0;i<myGroups.length;i++){ if (myGroups[i].id === gid) return myGroups[i]; } return null; }
   function _permMyUid(){ return (firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null; }
   // The effective grant for a member in a group. The owner implicitly has full editor rights everywhere.
   function memberGrant(gid, uid){
-    var g = groupById(gid); if (!g) return { role:'viewer', cats:[] };
-    if (uid && uid === g.ownerUid) return { role:'owner', cats: PERM_CATEGORIES.map(function(c){ return c.key; }) };
+    var g = groupById(gid); if (!g) return { role:'viewer', cats:[], aiSpend:false };
+    if (uid && uid === g.ownerUid) return { role:'owner', cats: PERM_CATEGORIES.map(function(c){ return c.key; }), aiSpend:true };
     var m = (g.members && g.members[uid]) ? g.members[uid] : null;
-    return { role:(m && m.role) || 'viewer', cats:(m && Array.isArray(m.cats)) ? m.cats : [] };
+    return { role:(m && m.role) || 'viewer', cats:(m && Array.isArray(m.cats)) ? m.cats : [], aiSpend:!!(m && m.aiSpend) };
   }
-  function myGrantIn(gid){ var u = _permMyUid(); return u ? memberGrant(gid, u) : { role:'viewer', cats:[] }; }
+  function myGrantIn(gid){ var u = _permMyUid(); return u ? memberGrant(gid, u) : { role:'viewer', cats:[], aiSpend:false }; }
   // Does my grant let me `need` ('suggest' | 'edit') on category `cat` in group gid?
   // owner → anything; editor → suggest+edit granted cats; suggester → suggest granted cats; viewer → nothing.
   function grantAllows(gid, cat, need){
@@ -14088,15 +14101,31 @@
     if (gr.role === 'suggester') return has && need === 'suggest';
     return false;
   }
-  // Persist a member's role+cats onto the group doc (owner-only; rules enforce the frozen fields).
-  async function setMemberGrant(gid, memberUid, memberName, role, cats){
+  // May I trigger the PAID AI matcher on this group's (owner's) photos? Owner always; others only if granted.
+  function grantAllowsAI(gid){ var gr = myGrantIn(gid); return !!(gr && (gr.role === 'owner' || gr.aiSpend)); }
+  // Persist a member's role+cats(+aiSpend) onto the group doc (owner-only; rules enforce the frozen fields),
+  // and mirror any EDITOR grant into my own tree at users/{me}/editors/{member} — the doc the security rule
+  // reads to authorize a direct edit of my items (Phase 2b). No mirror for viewer/suggester (no direct write).
+  async function setMemberGrant(gid, memberUid, memberName, role, cats, aiSpend){
     var ref = firebase.firestore().collection('groups').doc(gid);
     var snap = await ref.get(); if (!snap.exists) throw new Error('Group not found');
     var members = (snap.data() && snap.data().members) ? Object.assign({}, snap.data().members) : {};
     var prev = members[memberUid] || {};
-    members[memberUid] = { name: memberName || prev.name || '', role: role || 'viewer', cats: (role === 'viewer') ? [] : (cats || []) };
+    var finalCats = (role === 'viewer') ? [] : (cats || []);
+    members[memberUid] = { name: memberName || prev.name || '', role: role || 'viewer', cats: finalCats, aiSpend: (role === 'viewer') ? false : !!aiSpend };
     await ref.update({ members: members });
-    var u = _permMyUid(); if (u) await loadMyGroups(u);
+    var u = _permMyUid();
+    if (u){
+      var edRef = firebase.firestore().collection('users').doc(u).collection('editors').doc(memberUid);
+      if (role === 'editor' && finalCats.length){
+        var colls = [];
+        finalCats.forEach(function(c){ (PERM_CAT_COLLECTIONS[c] || [c]).forEach(function(cn){ if (colls.indexOf(cn) === -1) colls.push(cn); }); });
+        try { await edRef.set({ cats: colls, grantee: memberUid, groupId: gid, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }); } catch (e) { console.error('Outdoor Companion: editor-grant mirror failed', e); }
+      } else {
+        try { await edRef.delete(); } catch (e) {}
+      }
+      await loadMyGroups(u);
+    }
   }
 
   async function userIsMemberOf(uid, gid){
@@ -14224,7 +14253,7 @@
       if (roleKey === 'viewer') return 'Viewer · read-only';
       var cats = (m && Array.isArray(m.cats)) ? m.cats : [];
       var icons = cats.length ? cats.map(function(c){ return permCatLabel(c).icon; }).join(' ') : '(no categories yet)';
-      return (roleKey === 'editor' ? '✏️ Editor' : '💬 Suggester') + ' · ' + icons;
+      return (roleKey === 'editor' ? '✏️ Editor' : '💬 Suggester') + ' · ' + icons + ((m && m.aiSpend) ? ' · 🔍AI' : '');
     }
     var memRows = mkeys.map(function(mu){
       var m = members[mu] || {}, who = escapeHtml(m.name || mu.slice(0, 6));
@@ -14281,6 +14310,7 @@
     var cur = (g && g.members && g.members[memberUid]) ? g.members[memberUid] : {};
     var role = cur.role || 'viewer';
     var cats = (cur && Array.isArray(cur.cats)) ? cur.cats.slice() : [];
+    var aiSpend = !!(cur && cur.aiSpend);
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
     var card = document.createElement('div');
@@ -14302,10 +14332,15 @@
           var on = cats.indexOf(c.key) !== -1;
           return '<button class="mp-cat" data-cat="' + c.key + '" style="padding:6px 10px;border-radius:16px;cursor:pointer;font-size:12px;border:1px solid ' + (on ? '#6BBF59' : '#3c4d42') + ';background:' + (on ? 'rgba(107,191,89,.16)' : 'transparent') + ';color:#e8f0ea;">' + (on ? '✓ ' : '') + c.icon + ' ' + escapeHtml(c.label) + '</button>';
         }).join('') + '</div>';
+      var aiRow = (role === 'viewer') ? '' :
+        '<label class="mp-ai" style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:9px 10px;border:1px solid ' + (aiSpend ? '#C9832E' : '#3c4d42') + ';border-radius:9px;cursor:pointer;background:' + (aiSpend ? 'rgba(201,131,46,.12)' : 'transparent') + ';">' +
+          '<input type="checkbox" class="mp-ai-cb"' + (aiSpend ? ' checked' : '') + ' style="width:17px;height:17px;margin-top:1px;accent-color:#C9832E;">' +
+          '<span style="font-size:12px;line-height:1.4;"><b>Allow AI matching</b> <span style="color:#9db0a3;">— lets them run the paid “Which buck? (AI)” step on your photos (~½¢ each, billed to you). Off = they tag by eye only.</span></span>' +
+        '</label>';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:2px;">⚙ ' + escapeHtml(memberName || 'Member') + '</div>' +
         '<div style="font-size:12px;color:#9db0a3;margin-bottom:12px;line-height:1.4;">What can they do with the farms you share to this group? This stays your call — everything is view-only until you grant more.</div>' +
-        roleBtns + catRows +
+        roleBtns + catRows + aiRow +
         (role === 'editor' ? '<div style="font-size:11px;color:#E7B45A;margin-top:10px;line-height:1.4;">✏️ Editor lets them change your records directly — grant it only to people you fully trust.</div>' : '') +
         '<div style="display:flex;gap:8px;margin-top:16px;">' +
           '<button id="mpCancel" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
@@ -14313,11 +14348,12 @@
         '</div>';
       Array.prototype.forEach.call(card.querySelectorAll('.mp-role'), function(b){ b.addEventListener('click', function(){ role = b.getAttribute('data-role'); render(); }); });
       Array.prototype.forEach.call(card.querySelectorAll('.mp-cat'), function(b){ b.addEventListener('click', function(){ var c = b.getAttribute('data-cat'), i = cats.indexOf(c); if (i === -1) cats.push(c); else cats.splice(i, 1); render(); }); });
+      var aiCb = card.querySelector('.mp-ai-cb'); if (aiCb) aiCb.addEventListener('change', function(){ aiSpend = this.checked; render(); });
       card.querySelector('#mpCancel').addEventListener('click', close);
       card.querySelector('#mpSave').addEventListener('click', async function(){
         if (role !== 'viewer' && !cats.length){ showToast('Pick at least one data type, or set them back to Viewer.'); return; }
         this.disabled = true; this.textContent = 'Saving…';
-        try { await setMemberGrant(gid, memberUid, memberName, role, cats); close(); showToast('Permissions updated for ' + (memberName || 'member')); if (typeof onSaved === 'function') onSaved(); }
+        try { await setMemberGrant(gid, memberUid, memberName, role, cats, aiSpend); close(); showToast('Permissions updated for ' + (memberName || 'member')); if (typeof onSaved === 'function') onSaved(); }
         catch (e){ alert('Could not update permissions:\n' + ((e && e.message) || e)); this.disabled = false; this.textContent = 'Save'; }
       });
     }
