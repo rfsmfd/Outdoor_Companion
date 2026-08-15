@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 331</div>
+    <div id="buildBadge">BUILD 332</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3111,8 +3111,7 @@
         points: currentTrailPoints.slice(), color: selectedTrailColor, lineStyle: selectedTrailStyle,
         createdAt: Date.now(), notes: '', hidden: false
       };
-      var _tmid = newTrail.points[Math.floor(newTrail.points.length / 2)];   // stamp its farm at creation so it can't orphan
-      if (_tmid){ var _tf = farmForPoint(_tmid.lat, _tmid.lng); if (_tf) newTrail.propertyId = _tf.id; }
+      var _tf = farmForTrail(newTrail); if (_tf) newTrail.propertyId = _tf.id;   // stamp its farm at creation (any part inside) so it can't orphan
       trails.push(newTrail);
       try{ await saveTrail(newTrail); }catch(e){ console.error('Outdoor Companion: failed to save new trail', e); }
       if (liveTrailPolyline){ map.removeLayer(liveTrailPolyline); liveTrailPolyline = null; }
@@ -8097,6 +8096,25 @@
     for (i = 0; i < list.length; i++){ if (insideFarmArea(lat, lng, list[i])) return list[i]; }
     return null;
   }
+  // A TRAIL belongs to a farm if ANY part of it falls inside — not just its midpoint (a trail that BEGINS on the
+  // farm but runs well past the line had its midpoint land outside and got missed). Tested against the traced
+  // OUTLINE when there is one (not the looser box), so trails that sit entirely outside the border — e.g. old WMA
+  // reference paths — stay excluded on purpose.
+  function trailOnFarm(trail, prop){
+    if (!trail || !trail.points || !trail.points.length) return false;
+    var poly = (prop.boundary && prop.boundary.length >= 3) ? prop.boundary : null;
+    for (var i = 0; i < trail.points.length; i++){
+      var pt = trail.points[i]; if (!pt) continue;
+      if (poly){ if (pointInPolygon(pt.lat, pt.lng, poly)) return true; }
+      else if (insideFarmArea(pt.lat, pt.lng, prop)) return true;
+    }
+    return false;
+  }
+  function farmForTrail(trail){
+    var list = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return !p.module || p.module === activeModule; });
+    for (var i = 0; i < list.length; i++){ if (trailOnFarm(trail, list[i])) return list[i]; }
+    return null;
+  }
   async function offerRehomeForBoundary(prop){
     if (!(prop.boundary && prop.boundary.length >= 3) && !prop.bounds) return;
     var inSites = sites.filter(function(s){ return typeof s.lat === 'number' && s.propertyId !== prop.id && typeIsInActiveModule(s.type) && insideFarmArea(s.lat, s.lng, prop); });
@@ -8104,7 +8122,7 @@
     var inObs = observations.filter(function(o){ return o.propertyId !== prop.id && o.lat != null && o.lng != null && typeIsInActiveModule(o.type, true) && insideFarmArea(o.lat, o.lng, prop); });
     // Trails carry no propertyId natively — attribute the ones lying inside the boundary too (founder's call:
     // anything in the polygon belongs to that farm). A trail counts as "inside" if its midpoint is inside.
-    var inTrails = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ if (t.module !== prop.module || t.propertyId === prop.id || !t.points || !t.points.length) return false; var mid = t.points[Math.floor(t.points.length / 2)]; return !!(mid && insideFarmArea(mid.lat, mid.lng, prop)); });
+    var inTrails = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ if (t.module !== prop.module || t.propertyId === prop.id) return false; return trailOnFarm(t, prop); });
     var total = inSites.length + inHunts.length + inObs.length + inTrails.length;
     if (!total) return;
     var fromOther = inSites.filter(function(s){ return s.propertyId; }).length + inHunts.filter(function(h){ return h.propertyId; }).length + inObs.filter(function(o){ return o.propertyId; }).length + inTrails.filter(function(t){ return t.propertyId; }).length;
@@ -8127,7 +8145,7 @@
     function inside(lat, lng){ return insideFarmArea(lat, lng, prop); }   // map-area OR outline — shared with auto-attach
     var inSites = sites.filter(function(s){ return s.propertyId !== pid && typeIsInActiveModule(s.type) && inside(s.lat, s.lng); });
     var inObs = (typeof observations !== 'undefined' ? observations : []).filter(function(o){ return o.propertyId !== pid && typeIsInActiveModule(o.type, true) && inside(o.lat, o.lng); });
-    var inTrails = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ if ((t.module || activeModule) !== mod || t.propertyId === pid || !t.points || !t.points.length) return false; var m = t.points[Math.floor(t.points.length / 2)]; return !!(m && inside(m.lat, m.lng)); });
+    var inTrails = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ if ((t.module || activeModule) !== mod || t.propertyId === pid) return false; return trailOnFarm(t, prop); });
     var total = inSites.length + inObs.length + inTrails.length;
     if (!total){ showToast('Nothing new to attach — everything inside “' + prop.name + '” is already on it.'); return; }
     var ok = await showConfirm(total + ' item' + (total === 1 ? '' : 's') + ' inside “' + prop.name + '” (stands, camera sites, trails, sightings) aren\'t linked to it yet. Attach them all to this farm?');
@@ -14037,9 +14055,7 @@
     // Trails don't always carry a propertyId — also grab any whose path runs inside this farm's boundary.
     var trailKeys = (typeof trails !== 'undefined' ? trails : []).filter(function(t){
       if ((t.module || activeModule) !== (prop.module || activeModule)) return false;
-      if (t.propertyId === pid) return true;
-      if (prop.boundary && prop.boundary.length >= 3 && t.points && t.points.length){ var mid = t.points[Math.floor(t.points.length / 2)]; return !!(mid && pointInPolygon(mid.lat, mid.lng, prop.boundary)); }
-      return false;
+      return t.propertyId === pid || trailOnFarm(t, prop);   // linked to this farm, or any part of it runs on the farm
     });
     // Cameras + deployments ride on the farm's SITES (a camera's place is its site). Share the ones
     // sitting on this farm — the device records so the group sees the actual cameras (photos come next).
