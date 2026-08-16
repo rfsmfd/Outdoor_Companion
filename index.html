@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 336</div>
+    <div id="buildBadge">BUILD 337</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5227,6 +5227,17 @@
   var THUMB_CAP = 150; // per-group tiles rendered; "select all" still acts on the full group
   function showBuckClusterReview(){
     var pool = galleryUnlinkedBucksInView();
+    // Phase 2.5 cross-member: in the camp (group scope) the board pools EVERYONE's shared buck photos, so it
+    // honors permissions — an Editor tags straight in (writes route to each photo's owner), a Suggester's
+    // picks go to the owner's approval inbox, a Viewer looks only. Naming a NEW buck stays owner-only (a
+    // teammate's new buck would land unshared in their own tree). In My Data scope it's always full 'edit'.
+    var _bInGroup = (typeof activeScope !== 'undefined' && activeScope.type === 'group');
+    var _bGid = _bInGroup ? activeScope.id : null;
+    var _bRole = _bInGroup ? (myGrantIn(_bGid).role) : 'owner';
+    var _bCanEdit = !_bInGroup || _bRole === 'owner' || grantAllows(_bGid, 'bucks', 'edit') || grantAllows(_bGid, 'photos', 'edit');
+    var _bCanSuggest = _bInGroup && !_bCanEdit && (grantAllows(_bGid, 'bucks', 'suggest') || grantAllows(_bGid, 'photos', 'suggest'));
+    var boardMode = _bCanEdit ? 'edit' : (_bCanSuggest ? 'suggest' : (_bInGroup ? 'view' : 'edit'));
+    var boardIsOwner = !_bInGroup || _bRole === 'owner';
     // The "worth-IDing" bar (founder's "ID shooters, count the rest"): default to MATURE/older body so
     // the little 4-pointers and young bucks drop off the board. Body size is the reliable maturity
     // signal in velvet (point counts read low on every buck this time of year). User-tunable live.
@@ -5368,8 +5379,8 @@
         panel.innerHTML = '<div style="font:600 11px ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#8aa080;margin-bottom:6px;">AI read of this frame</div>' +
           '<div style="font-size:14px;line-height:1.55;">' + descHtml + '</div>' + guessHtml +
           '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">' +
-            '<button class="bcl-tagthis" style="padding:10px 18px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:700;">🦌 Tag this buck</button>' +
-            (buckProfiles.length ? '<button class="bcl-whichai" style="padding:10px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#dff0e4;cursor:pointer;font-weight:600;">🔍 Which buck? (AI · ~1-2¢)</button>' : '') +
+            '<button class="bcl-tagthis" style="padding:10px 18px;border-radius:8px;border:1px solid #6BBF59;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:700;">' + (boardMode === 'suggest' ? '💬 Suggest this buck' : '🦌 Tag this buck') + '</button>' +
+            (buckProfiles.length && (!_bInGroup || grantAllowsAI(_bGid)) ? '<button class="bcl-whichai" style="padding:10px 14px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#dff0e4;cursor:pointer;font-weight:600;">🔍 Which buck? (AI · ~1-2¢)</button>' : '') +
           '</div>' +
           '<div style="font-size:11px;color:#6f8377;margin-top:10px;">' + (multi ? '‹ › or ← → keys flip frames · ' : '') + 'scroll to zoom · drag to pan · Esc closes</div>';
         var tt = panel.querySelector('.bcl-tagthis'); if (tt) tt.addEventListener('click', function(){
@@ -5422,7 +5433,7 @@
         : '<div style="font-weight:700;margin-bottom:2px;">🦌 Group <span style="font-size:11px;color:#E8B04B;font-weight:600;">· ' + g.members.length + ' photo' + (g.members.length===1?'':'s') + '</span></div>';
       var actions = g.loose ? '' :
         '<div style="display:flex;gap:8px;margin-top:10px;">' +
-          '<button class="bcl-name" data-gid="' + g.id + '" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">🦌 Name &amp; link all ' + g.members.length + '</button>' +
+          (boardIsOwner ? '<button class="bcl-name" data-gid="' + g.id + '" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;cursor:pointer;font-weight:600;">🦌 Name &amp; link all ' + g.members.length + '</button>' : '') +
           '<button class="bcl-break" data-gid="' + g.id + '" style="flex:0 0 auto;padding:9px 12px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Not one buck</button>' +
         '</div>';
       return '<div class="bcl-group" data-gid="' + g.id + '" style="border:1px solid ' + (g.loose ? '#33413a' : '#3c4d42') + ';border-radius:10px;padding:12px;margin-bottom:12px;background:' + (g.loose ? '#1a2620' : '#1E2B23') + ';">' +
@@ -5443,8 +5454,8 @@
       var bar = n > 0
         ? '<div style="position:sticky;bottom:-18px;z-index:6;background:#20302a;border:1px solid #3c4d42;border-radius:10px;padding:10px 12px;margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;box-shadow:0 -6px 22px rgba(0,0,0,.45);">' +
             '<span style="font-weight:700;font-size:13px;">' + n + ' selected</span>' +
-            (buckProfiles.length ? '<button class="bcl-tagas-btn" style="flex:1;min-width:170px;padding:9px 12px;border-radius:8px;border:1px solid #6BBF59;background:#1E2B23;color:#e8f0ea;font-weight:600;cursor:pointer;text-align:left;">🦌 Tag as… (pick a buck) ▾</button>' : '') +
-            '<button class="bcl-newbuck" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">➕ New buck</button>' +
+            (buckProfiles.length && boardMode !== 'view' ? '<button class="bcl-tagas-btn" style="flex:1;min-width:170px;padding:9px 12px;border-radius:8px;border:1px solid #6BBF59;background:#1E2B23;color:#e8f0ea;font-weight:600;cursor:pointer;text-align:left;">' + (boardMode === 'suggest' ? '💬 Suggest as… (pick a buck) ▾' : '🦌 Tag as… (pick a buck) ▾') + '</button>' : '') +
+            (boardIsOwner ? '<button class="bcl-newbuck" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">➕ New buck</button>' : '') +
             '<select class="bcl-moveto" style="flex:0 1 auto;min-width:130px;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
               '<option value="">Move to group…</option>' + moveOpts + '<option value="__new__">➕ New empty group</option>' +
             '</select>' +
@@ -5500,6 +5511,7 @@
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
         '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. Photos ringed in <b style="color:#E8823F;">orange</b>/<b style="color:#5FB0C9;">teal</b> are a <b>burst</b> — one visit, so probably (not always) the same buck; the two colors just separate back-to-back bursts. Tap <b style="color:#ffd77a;">⚡</b> on any of them to grab the whole run at once. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
+        (_bInGroup ? ('<div style="background:#243b52;border:1px solid #2f5573;border-radius:9px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;color:#dbeafe;line-height:1.45;">🤝 <b>Camp sort</b> — the whole camp\'s shared buck photos, pooled from everyone\'s cameras. ' + (boardMode === 'edit' ? 'Your tags save straight to the camp, and each buck\'s movement stitches across everyone\'s ground.' : boardMode === 'suggest' ? 'Your picks are sent to the owner to approve — nothing changes until they do.' : 'Look-only — ask the owner to make you an Editor or Suggester to help sort.') + '</div>') : '') +
         bucksStrip() + controls + body + heldSection + noIntSection +
         '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
         (heldBack > 0 ? '<div style="font-size:10.5px;color:#6f8377;margin-top:10px;line-height:1.4;">' + heldBack + ' smaller/younger buck photo' + (heldBack===1?'':'s') + ' held back by the bar — still recorded as buck activity, just not sorted for individual ID.</div>' : '') +
@@ -5519,6 +5531,7 @@
       render();
     }
     async function nameGroup(g){
+      if (!boardIsOwner){ showToast("Only the camp owner can add a NEW buck — select these and tag them to one of the camp's bucks instead."); return; }
       var det = await promptBuckDetails({ title: 'Name this buck — links all ' + g.members.length + ' photo' + (g.members.length===1?'':'s') });
       if (!det) return;
       var profile = { id: uid(), name: det.name, notes: det.notes, propertyIds: det.propertyIds || [], createdAt: Date.now() };
@@ -5539,8 +5552,38 @@
       var useIds = idsOverride || selected;   // idsOverride lets a single-photo flow (enlarge) tag without touching the live selection
       var ids = Object.keys(useIds);
       if (!ids.length){ showToast('Tap a few photos first, then tap the buck.'); return; }
+      if (boardMode === 'view'){ showToast('Look-only in the camp — ask the owner to make you an Editor or Suggester to help sort.'); return; }
       var affected = [], binCount = 0;
       allContainers().forEach(function(g){ g.members.forEach(function(m){ if (useIds[m.p.id]) affected.push({ p: m.p, held: !!g.held }); }); });
+      // Suggester: don't write the owner's photos — propose the match to the owner's inbox instead (my OWN
+      // photos I can still tag directly). Then clear them off the board and report.
+      if (boardMode === 'suggest'){
+        var _me = _permMyUid();
+        for (var si = 0; si < affected.length; si++){
+          var sp = affected[si].p;
+          if (!sp.__ownerUid || sp.__ownerUid === _me){
+            if (!Array.isArray(sp.buckProfileIds)) sp.buckProfileIds = [];
+            if (sp.buckProfileId && sp.buckProfileIds.indexOf(sp.buckProfileId) === -1) sp.buckProfileIds.push(sp.buckProfileId);
+            if (sp.buckProfileIds.indexOf(buckId) === -1) sp.buckProfileIds.push(buckId);
+            if (!sp.buckProfileId) sp.buckProfileId = buckId;
+            sp.buckSuggestion = null;
+            if (hasChatStorage){ try { await window.storage.set('photo:' + sp.id, JSON.stringify(sp)); } catch (e) {} }
+          } else {
+            try { await createBuckSuggestion(sp, buckId); } catch (e) {}
+          }
+        }
+        board.forEach(function(g){ g.members = g.members.filter(function(m){ return !useIds[m.p.id]; }); });
+        loose.members = loose.members.filter(function(m){ return !useIds[m.p.id]; });
+        noInt.members = noInt.members.filter(function(m){ return !useIds[m.p.id]; });
+        board = board.filter(function(g){ return g.members.length > 0; });
+        if (!idsOverride) selected = {};
+        renderGallery(); populateGalleryFilters(); refreshTagAllButton();
+        var _sb = buckProfiles.filter(function(x){ return x.id === buckId; })[0];
+        showToast('Suggested ' + affected.length + ' as ' + (_sb ? _sb.name : 'buck') + ' — sent to the owner to approve');
+        if (!board.length && !loose.members.length && !held.members.length && !noInt.members.length) close(); else render();
+        return;
+      }
+      var _editFailed = 0;
       for (var i = 0; i < affected.length; i++){
         var p = affected[i].p;
         if (!Array.isArray(p.buckProfileIds)) p.buckProfileIds = [];
@@ -5549,7 +5592,7 @@
         if (!p.buckProfileId) p.buckProfileId = buckId;                               // primary = first credited
         p.buckSuggestion = null; p.buckMatchedAt = Date.now(); p.notInterested = false;  // tagging overrides a stray dismiss
         if (affected[i].held) binCount++;
-        if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){} }
+        if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){ _editFailed++; } }
       }
       // Cluster/loose photos are done once credited and leave the board; bin (held) frames STAY parked
       // so you can credit additional bucks to the same frame, until you release them.
@@ -5560,7 +5603,8 @@
       if (!idsOverride) selected = {};
       renderGallery(); populateGalleryFilters(); refreshTagAllButton();
       var b = buckProfiles.filter(function(x){ return x.id === buckId; })[0];
-      showToast(binCount ? ('Added ' + affected.length + ' to ' + (b ? b.name : 'buck') + ' — release when fully credited') : ('Tagged ' + affected.length + ' as ' + (b ? b.name : 'buck')));
+      if (_editFailed){ showToast('Tagged ' + (affected.length - _editFailed) + ', but ' + _editFailed + " couldn't be saved (not yours to edit)"); }
+      else showToast(binCount ? ('Added ' + affected.length + ' to ' + (b ? b.name : 'buck') + ' — release when fully credited') : ('Tagged ' + affected.length + ' as ' + (b ? b.name : 'buck')));
       if (!board.length && !loose.members.length && !held.members.length && !noInt.members.length) close(); else render();
     }
     // Release the selected bin frames — they're fully credited; drop the hold so they leave the bin.
@@ -5628,6 +5672,7 @@
     }
     // Make a NEW named buck from the selected photos (his own folder from the jump).
     async function newBuckFromSelected(idsOverride){
+      if (!boardIsOwner){ showToast("Only the camp owner can add a NEW buck — tag these to one of the camp's bucks instead."); return false; }
       var useIds = idsOverride || selected;
       var ids = Object.keys(useIds);
       if (!ids.length){ showToast('Tap a few photos first.'); return false; }
