@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 337</div>
+    <div id="buildBadge">BUILD 338</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5144,6 +5144,19 @@
     var v = buckFpVec(p); if (!v) return false;
     return v.spread === 'wide' || v.spread === 'very-wide' || v.feats.length > 0 || v.pts >= 8;
   }
+  // Accumulation nudge: clusters of UNNAMED buck photos that look like ONE deer and have piled up past a
+  // threshold — "you've got 9 shots of an unnamed buck, name him." Reuses the same clustering the sort board
+  // uses; mature-body only (velvet point-counts read low). Returns the biggest clusters first.
+  function accumulationClusters(minSize){
+    minSize = minSize || 6;
+    var pool = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){
+      return p.ai && p.ai.isBuck && !p.buckProfileId && !p.multiBuckHold && !p.notInterested && buckFpVec(p);
+    });
+    if (pool.length < minSize) return [];
+    var clusters = clusterUnlinkedBucks(pool, function(p){ var v = buckFpVec(p); return !!(v && (v.body === 'mature' || v.body === 'old')); });
+    return clusters.filter(function(c){ return c.members.length >= minSize; })
+      .sort(function(a, b){ return b.members.length - a.members.length; });
+  }
   // Similarity between two rack fingerprints. Shared DISTINCTIVE oddities dominate (they're the true
   // fingerprint); spread / frame-height / mass / body / point-count / asymmetry are supporting signals;
   // a wide point gap or opposite spread penalizes.
@@ -5271,7 +5284,7 @@
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:96vw;width:96vw;max-height:92vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
     back.appendChild(card); document.body.appendChild(back);
-    function close(){ if (back.parentNode) document.body.removeChild(back); refreshTagAllButton(); try { refreshHuntAlerts(true); } catch (e) {} }  // after a tagging session, surface any buck that just went daylight
+    function close(){ if (back.parentNode) document.body.removeChild(back); refreshTagAllButton(); try { refreshHuntAlerts(true); } catch (e) {} try { refreshAccumNudge(); } catch (e) {} }  // after a tagging session, surface any buck that just went daylight + update the accumulation nudge
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     function allGroups(){ var g = board.slice(); if (loose.members.length) g.push(loose); return g; }
     function allContainers(){ return board.concat([loose, held, noInt]); }  // everything selectable-from, incl. parked/dumped
@@ -5866,6 +5879,7 @@
       renderGallery();
       refreshTagAllButton();
       try { refreshSuggestionsButton(); } catch (e) {}
+      try { refreshAccumNudge(); } catch (e) {}
     }
     closeAllModals();
     document.getElementById('photoGalleryModalBackdrop').classList.add('show');
@@ -6667,6 +6681,27 @@
     }
     existing.style.display = 'block';
     existing.textContent = '💬 ' + pend.length + ' teammate suggestion' + (pend.length === 1 ? '' : 's') + ' — review';
+  }
+  // Accumulation nudge — a callout at the top of the Photo Gallery when unnamed buck photos have piled up
+  // into a namable cluster. Taps straight to the sort board. Created on demand (no HTML markup needed).
+  function refreshAccumNudge(){
+    var anchor = document.getElementById('galleryAiRow');
+    var existing = document.getElementById('galleryAccumNudge');
+    if (!anchor) return;
+    var clusters = accumulationClusters(6);
+    if (!clusters.length){ if (existing) existing.style.display = 'none'; return; }
+    if (!existing){
+      existing = document.createElement('button');
+      existing.id = 'galleryAccumNudge'; existing.type = 'button';
+      existing.style.cssText = 'width:100%;margin:0 0 10px 0;padding:10px 12px;border-radius:8px;border:1px solid #C9832E;background:#2a2114;color:#E7B45A;font-weight:600;font-size:12.5px;cursor:pointer;text-align:left;line-height:1.4;';
+      existing.addEventListener('click', function(){ showBuckClusterReview(); });
+      anchor.parentNode.insertBefore(existing, anchor);
+    }
+    existing.style.display = 'block';
+    var top = clusters[0].members.length;
+    existing.innerHTML = (clusters.length === 1)
+      ? '🦌 An unnamed buck is stacking up — <b>' + top + ' photos</b> of what looks like one deer. Tap to sort &amp; name him.'
+      : '🦌 <b>' + clusters.length + ' unnamed bucks</b> are stacking up (' + top + '+ photos each). Tap to sort &amp; name them.';
   }
   // Owner's review inbox: approve applies the teammate's match to your photo; reject discards it.
   function showSuggestionInbox(){
