@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 339</div>
+    <div id="buildBadge">BUILD 340</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -15334,12 +15334,12 @@
     var visits = computeVisits(buckPhotos, (galleryVisitGapMin || 30) * 60000);
     visits.forEach(function(v){
       var s = v.siteId ? sites.filter(function(x){ return x.id === v.siteId; })[0] : null;
-      if (s && typeof s.lat === 'number') events.push({ siteId: v.siteId, lat: s.lat, lng: s.lng });
+      if (s && typeof s.lat === 'number') events.push({ siteId: v.siteId, lat: s.lat, lng: s.lng, name: (s.name || 'Unnamed spot'), owner: (v.photos && v.photos[0] && v.photos[0].__ownerUid) || null, source: 'cam' });
     });
     observations.filter(function(o){ return o.buckProfileId === profileId; }).forEach(function(o){
       if (o.siteId){
         var s = sites.filter(function(x){ return x.id === o.siteId; })[0];
-        if (s && typeof s.lat === 'number') events.push({ siteId: o.siteId, lat: s.lat, lng: s.lng });
+        if (s && typeof s.lat === 'number') events.push({ siteId: o.siteId, lat: s.lat, lng: s.lng, name: (s.name || 'Field sighting'), owner: o.__ownerUid || null, source: 'sighting' });
       }
     });
     return events;
@@ -15369,6 +15369,20 @@
       resultsEl.innerHTML = '<div style="color:var(--text-dim);line-height:1.5;">No located sightings yet for ' + escapeHtml(profile.name) + '. Link some of his photos (Photo Gallery → open a photo → 🦌 Link to buck), then try again.</div>';
       return;
     }
+    // Payoff summary — his hangouts ("seen here 12×, there 5×") + the cross-member layer when in the camp.
+    var _bmBySite = {}, _bmOwners = {};
+    events.forEach(function(e){ var g = _bmBySite[e.siteId] || (_bmBySite[e.siteId] = { count:0, name:e.name }); g.count++; if (e.owner) _bmOwners[e.owner] = 1; });
+    var _bmSpots = Object.keys(_bmBySite).map(function(id){ return _bmBySite[id]; }).sort(function(a,b){ return b.count - a.count; });
+    var _bmMembers = Object.keys(_bmOwners).length;
+    var _bmInGroup = (typeof activeScope !== 'undefined' && activeScope.type === 'group');
+    var _bmTop = _bmSpots.slice(0, 5).map(function(s){ return escapeHtml(s.name) + ' <b>' + s.count + '×</b>'; }).join(' · ');
+    resultsEl.innerHTML =
+      '<div style="background:rgba(0,0,0,.14);border-radius:8px;padding:8px 10px;margin-bottom:8px;line-height:1.5;">' +
+        '<div style="font-weight:700;">' + events.length + ' detection' + (events.length === 1 ? '' : 's') + ' · ' + _bmSpots.length + ' spot' + (_bmSpots.length === 1 ? '' : 's') +
+          (_bmInGroup && _bmMembers > 1 ? ' <span style="color:#7FB3FF;">· 👥 ' + _bmMembers + " members' cameras</span>" : '') + '</div>' +
+        (_bmTop ? '<div style="color:var(--text-dim);margin-top:3px;">📍 ' + _bmTop + '</div>' : '') +
+        '<div style="color:var(--text-dim);font-size:11px;margin-top:4px;">' + (_bmInGroup ? "Pooled across the camp — everyone's shared cameras." : 'Where he spends his time on your ground.') + '</div>' +
+      '</div>';
     renderCountMarkers(events, resultsEl);
   }
 
