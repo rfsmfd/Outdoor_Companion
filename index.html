@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 341</div>
+    <div id="buildBadge">BUILD 342</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16203,6 +16203,25 @@
       var wLabels = WEIGHT_BUCKET_ORDER.filter(function(w){ return wCounts[w]; });
       if (wLabels.length){
         buildBarChart(makeChartCanvas(chartsGrid, '⚖️ By Weight', 'chartWeight'), wLabels, wLabels.map(function(w){ return wCounts[w]; }), 'Count');
+      }
+      // By Lake — total catches AND the headline CATCH-PER-ACRE comparison, so you can see which of your
+      // waters actually out-produces the others per acre (not just in raw numbers).
+      var lakeStats = {};
+      relevantObs.forEach(function(o){
+        if (!o.propertyId || !isFishSpeciesType(o.type)) return;
+        var pr = (typeof properties !== 'undefined' ? properties : []).filter(function(x){ return x.id === o.propertyId; })[0];
+        if (!pr) return;
+        var st = lakeStats[o.propertyId] || (lakeStats[o.propertyId] = { name: pr.name || 'Lake', acres: propAcres(pr), catches: 0 });
+        st.catches++;
+      });
+      var lakeArr = Object.keys(lakeStats).map(function(id){ return lakeStats[id]; });
+      if (lakeArr.length){
+        var byCatch = lakeArr.slice().sort(function(a, b){ return b.catches - a.catches; });
+        buildBarChart(makeChartCanvas(chartsGrid, '🎣 By Lake (catches)', 'chartByLake'), byCatch.map(function(l){ return l.name; }), byCatch.map(function(l){ return l.catches; }), 'Catches');
+        var perAcre = lakeArr.filter(function(l){ return l.acres; }).map(function(l){ return { name: l.name, v: Math.round((l.catches / l.acres) * 10) / 10 }; }).sort(function(a, b){ return b.v - a.v; });
+        if (perAcre.length){
+          buildBarChart(makeChartCanvas(chartsGrid, '🎣 Catch per acre (by lake)', 'chartPerAcre'), perAcre.map(function(l){ return l.name; }), perAcre.map(function(l){ return l.v; }), 'Per acre');
+        }
       }
     }
   }
