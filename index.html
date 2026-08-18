@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 340</div>
+    <div id="buildBadge">BUILD 341</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7204,7 +7204,30 @@
       var _camN = sites.filter(function(s){ return s.propertyId === p.id && s.type === 'camera'; }).length;
       var _trailN = (typeof trails !== 'undefined' ? trails : []).filter(function(t){ return t.propertyId === p.id; }).length;
       var _photoN = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(ph){ return ph.matchedSiteId && _siteProp[ph.matchedSiteId] === p.id; }).length;
-      var _invLine = isFishProp ? '' : ('<div class="count" style="font-size:11px;opacity:.8;margin-top:2px;">🎯 ' + (siteCount - _camN) + ' stands · 📷 ' + _camN + ' cams · 🥾 ' + _trailN + ' trails · 👁 ' + catchCount + ' sightings · 📸 ' + _photoN + ' photos</div>');
+      var _invLine;
+      if (isFishProp){
+        // Per-lake catch summary + CATCH-PER-ACRE (the founder's "compare my waters" stat). Uses only real
+        // fish catches (drops no-catch/trip-notes) and the lake's acreage (manual, traced, or NHD).
+        var _lakeCatches = (typeof observations !== 'undefined' ? observations : []).filter(function(o){ return o.propertyId === p.id && isFishSpeciesType(o.type); });
+        var _catchN = _lakeCatches.length;
+        var _acres = propAcres(p);
+        var _big = null; _lakeCatches.forEach(function(o){ if (typeof o.weight === 'number' && o.weight > 0 && (!_big || o.weight > _big.weight)) _big = o; });
+        var _spCount = {}, _topType = null, _topNum = 0;
+        _lakeCatches.forEach(function(o){ _spCount[o.type] = (_spCount[o.type] || 0) + 1; if (_spCount[o.type] > _topNum){ _topNum = _spCount[o.type]; _topType = o.type; } });
+        var _topLbl = _topType ? (((getActiveObsTypes()[_topType]) || {}).label || _topType) : '';
+        if (_catchN === 0){
+          _invLine = '<div class="count" style="font-size:11px;opacity:.75;margin-top:2px;">🐟 No catches logged here yet</div>';
+        } else {
+          var _fp = ['🐟 ' + _catchN + ' catch' + (_catchN === 1 ? '' : 'es')];
+          if (_acres) _fp.push('<b style="color:#7FB3D6;">' + (_catchN / _acres).toFixed(1) + ' per acre</b>');
+          if (_big) _fp.push('⚖️ ' + _big.weight + ' lb');
+          if (_topLbl) _fp.push('top: ' + escapeHtml(_topLbl));
+          _invLine = '<div class="count" style="font-size:11px;opacity:.85;margin-top:2px;">' + _fp.join(' · ') + '</div>' +
+            (!_acres ? '<div class="count" style="font-size:10.5px;opacity:.7;margin-top:1px;">Add this lake\'s acreage (📐 in Set up) to see catch-per-acre.</div>' : '');
+        }
+      } else {
+        _invLine = '<div class="count" style="font-size:11px;opacity:.8;margin-top:2px;">🎯 ' + (siteCount - _camN) + ' stands · 📷 ' + _camN + ' cams · 🥾 ' + _trailN + ' trails · 👁 ' + catchCount + ' sightings · 📸 ' + _photoN + ' photos</div>';
+      }
       row.innerHTML =
         '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + catchChip + (propAcresLabel(p) ? ' · ' + propAcresLabel(p) : '') + ' · setup ' + doneN + '/' + totalN + '</div>' + _invLine + '</div>' +
         '<div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
