@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 338</div>
+    <div id="buildBadge">BUILD 339</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5469,6 +5469,7 @@
             '<span style="font-weight:700;font-size:13px;">' + n + ' selected</span>' +
             (buckProfiles.length && boardMode !== 'view' ? '<button class="bcl-tagas-btn" style="flex:1;min-width:170px;padding:9px 12px;border-radius:8px;border:1px solid #6BBF59;background:#1E2B23;color:#e8f0ea;font-weight:600;cursor:pointer;text-align:left;">' + (boardMode === 'suggest' ? '💬 Suggest as… (pick a buck) ▾' : '🦌 Tag as… (pick a buck) ▾') + '</button>' : '') +
             (boardIsOwner ? '<button class="bcl-newbuck" style="padding:8px 12px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">➕ New buck</button>' : '') +
+            (boardMode === 'edit' ? '<button class="bcl-dismiss-bar" title="Leave these counted as buck activity, but I\'m done — not tagging them" style="padding:8px 12px;border-radius:8px;border:1px solid #6a5245;background:#2c241f;color:#e6cbb8;font-weight:600;cursor:pointer;">🚫 Not tagging</button>' : '') +
             '<select class="bcl-moveto" style="flex:0 1 auto;min-width:130px;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;">' +
               '<option value="">Move to group…</option>' + moveOpts + '<option value="__new__">➕ New empty group</option>' +
             '</select>' +
@@ -5523,7 +5524,7 @@
         '</div>' : '';
       card.innerHTML =
         '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🧩 Sort bucks into groups</div>' +
-        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. Photos ringed in <b style="color:#E8823F;">orange</b>/<b style="color:#5FB0C9;">teal</b> are a <b>burst</b> — one visit, so probably (not always) the same buck; the two colors just separate back-to-back bursts. Tap <b style="color:#ffd77a;">⚡</b> on any of them to grab the whole run at once. Set the size bar below; small/young bucks are held back (still counted as activity). Nothing links until you say so.</div>' +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:10px;line-height:1.45;">Your named bucks are the folders up top. <b>Tap photos to select</b> them, then tap a buck to tag them as him — or <b>➕ New buck from selected</b> for a new one. Photos ringed in <b style="color:#E8823F;">orange</b>/<b style="color:#5FB0C9;">teal</b> are a <b>burst</b> — one visit, so probably (not always) the same buck; the two colors just separate back-to-back bursts. Tap <b style="color:#ffd77a;">⚡</b> on any of them to grab the whole run at once. Set the size bar below; small/young bucks are held back (still counted as activity). <b>Done with a batch you won\'t ID</b> (velvet dregs, not worth it)? Select them and hit <b style="color:#e6cbb8;">🚫 Not tagging</b> — they leave the board for good but still count as buck activity in your analytics. Nothing links until you say so.</div>' +
         (_bInGroup ? ('<div style="background:#243b52;border:1px solid #2f5573;border-radius:9px;padding:9px 12px;margin-bottom:10px;font-size:12.5px;color:#dbeafe;line-height:1.45;">🤝 <b>Camp sort</b> — the whole camp\'s shared buck photos, pooled from everyone\'s cameras. ' + (boardMode === 'edit' ? 'Your tags save straight to the camp, and each buck\'s movement stitches across everyone\'s ground.' : boardMode === 'suggest' ? 'Your picks are sent to the owner to approve — nothing changes until they do.' : 'Look-only — ask the owner to make you an Editor or Suggester to help sort.') + '</div>') : '') +
         bucksStrip() + controls + body + heldSection + noIntSection +
         '<button class="bcl-close" style="width:100%;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;margin-top:2px;">Done</button>' +
@@ -5817,6 +5818,7 @@
       // picker tagged a phantom single photo (id undefined) and ignored the real multi-selection (tagged 0).
       var ta = card.querySelector('.bcl-tagas-btn'); if (ta) ta.addEventListener('click', function(){ openTagAsPicker(); });
       var nb = card.querySelector('.bcl-newbuck'); if (nb) nb.addEventListener('click', newBuckFromSelected);
+      var dbBar = card.querySelector('.bcl-dismiss-bar'); if (dbBar) dbBar.addEventListener('click', dismissSelected);
       Array.prototype.forEach.call(card.querySelectorAll('.bcl-park'), function(b){
         b.addEventListener('click', function(){ if (Object.keys(selected).length) parkSelected(); else { showHeld = !showHeld; render(); } });
       });
