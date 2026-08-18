@@ -1843,7 +1843,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 342</div>
+    <div id="buildBadge">BUILD 343</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4932,6 +4932,9 @@
     var rBtn = document.getElementById('galleryBuckReviewBtn');
     if (!mBtn || !rBtn) return;
     if (!cloudPhotosAvailable() || !buckProfiles.length){ mBtn.style.display = 'none'; rBtn.style.display = 'none'; return; }
+    // The batch matcher spends the OWNER's AI money. In the camp, hide it unless you're the owner or the
+    // owner granted you AI matching (per-photo AI is gated the same way).
+    if ((typeof activeScope !== 'undefined' && activeScope.type === 'group') && typeof grantAllowsAI === 'function' && !grantAllowsAI(activeScope.id)){ mBtn.style.display = 'none'; rBtn.style.display = 'none'; return; }
     var fresh = galleryBuckPhotosToMatch().length;
     if (fresh > 0){
       mBtn.style.display = 'block'; mBtn.disabled = false;
@@ -4948,6 +4951,7 @@
     rBtn.style.display = 'none';
   }
   document.getElementById('galleryBuckMatchBtn').addEventListener('click', async function(){
+    if ((typeof activeScope !== 'undefined' && activeScope.type === 'group') && typeof grantAllowsAI === 'function' && !grantAllowsAI(activeScope.id)){ showToast("AI matching spends the owner's money — ask the owner for the AI-matching permission."); return; }
     if (!buckProfiles.length){ alert('Name at least one buck first (open a clear photo of him → 🦌 Link to buck → ＋ New buck). Then this can match others against him.'); return; }
     var list = galleryBuckPhotosToMatch(), recheck = false;
     if (!list.length){ list = galleryStampedUnlinkedBucks(); recheck = true; }
