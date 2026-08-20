@@ -230,6 +230,7 @@
     /* 📐 parcel + 💨 wind nudge up the right side so the bottom Now scrubber is clear */
     #parcelToggleBtn{ bottom:172px !important; top:auto !important; }
     #windToggleBtn{ bottom:120px !important; top:auto !important; }
+    #compassBtn{ bottom:68px !important; top:auto !important; width:46px; height:46px; }
 
     /* Readability: everything in the sidebar was sized for a desktop screen — scale up. */
     #brand h1{ font-size:25px; }
@@ -753,6 +754,19 @@
     color:#1A1204;
     border-color:#D4B24C;
   }
+  #compassBtn{
+    position:absolute;
+    bottom:18px;right:14px;
+    z-index:1000;
+    width:42px;height:42px;
+    border-radius:50%;
+    background:var(--panel);
+    border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4);
+    cursor:pointer;
+  }
+  #compassBtn.active{ background:#3B9EFF; border-color:#3B9EFF; }
   .wind-arrow-icon{
     color:#E85D4A;
     font-size:26px;
@@ -1881,9 +1895,10 @@
     <div id="recordTrailInfoLabel"></div>
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
+    <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 352</div>
+    <div id="buildBadge">BUILD 353</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12845,6 +12860,110 @@
       followBtn.classList.remove('active');
     }
   });
+
+  // ---------- 🧭 Compass + live GPS coordinates (right edge, under the wind button) ----------
+  // Tap to open a dial showing your heading + current lat/long. Heading comes from the phone's
+  // magnetometer: iOS gives TRUE north via webkitCompassHeading; Android via absolute-orientation
+  // alpha. A desktop has no compass sensor, so it shows coordinates and says the needle needs a phone.
+  var _compassBack = null, _compassCoordTimer = null, _compassHeading = null, _compassStarted = false;
+  function _cardinal(d){ var dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW']; return dirs[Math.round(d / 22.5) % 16]; }
+  function _onOrient(e){
+    var h = null;
+    if (e && typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)){
+      h = e.webkitCompassHeading;                    // iOS — degrees clockwise from TRUE north
+    } else if (e && e.absolute && typeof e.alpha === 'number'){
+      h = (360 - e.alpha) % 360;                     // Android absolute — alpha is CCW from north
+    }
+    if (h !== null && !isNaN(h)){ _compassHeading = h; _updateCompassUI(); }
+  }
+  function _startOrient(){
+    if (_compassStarted) return; _compassStarted = true;
+    window.addEventListener('deviceorientationabsolute', _onOrient, true);
+    window.addEventListener('deviceorientation', _onOrient, true);
+  }
+  function _updateCompassUI(){
+    if (!_compassBack) return;
+    var dial = _compassBack.querySelector('#compassDial');
+    var hdg = _compassBack.querySelector('#compassHdg');
+    var coords = _compassBack.querySelector('#compassCoords');
+    if (_compassHeading !== null){
+      if (dial) dial.setAttribute('transform', 'rotate(' + (-_compassHeading) + ' 100 100)');
+      if (hdg) hdg.textContent = Math.round(_compassHeading) + '°  ·  ' + _cardinal(_compassHeading);
+    } else if (hdg){ hdg.textContent = '—'; }
+    if (coords){
+      if (lastKnownPos){ coords.textContent = lastKnownPos.lat.toFixed(5) + ', ' + lastKnownPos.lng.toFixed(5) + (lastKnownPos.accuracy ? '  (±' + Math.round(lastKnownPos.accuracy) + 'm)' : ''); }
+      else { coords.textContent = 'waiting for GPS…'; }
+    }
+  }
+  function _closeCompass(){
+    window.removeEventListener('deviceorientationabsolute', _onOrient, true);
+    window.removeEventListener('deviceorientation', _onOrient, true);
+    _compassStarted = false;
+    if (_compassCoordTimer){ clearInterval(_compassCoordTimer); _compassCoordTimer = null; }
+    if (_compassBack && _compassBack.parentNode) _compassBack.parentNode.removeChild(_compassBack);
+    _compassBack = null;
+    var b = document.getElementById('compassBtn'); if (b) b.classList.remove('active');
+  }
+  function showCompass(){
+    if (_compassBack){ _closeCompass(); return; }        // tapping the button again closes it
+    var iosNeedsPerm = (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function');
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#1E2B23;color:#e8f0ea;border:1px solid #33473b;border-radius:16px;max-width:320px;width:100%;padding:20px 18px;text-align:center;box-shadow:0 12px 40px rgba(0,0,0,0.5);';
+    card.innerHTML =
+      '<div style="font-weight:700;font-size:16px;margin-bottom:12px;font-family:Oswald,sans-serif;text-transform:uppercase;letter-spacing:1.5px;">🧭 Compass</div>' +
+      '<svg viewBox="0 0 200 200" width="190" height="190" style="display:block;margin:0 auto;">' +
+        '<circle cx="100" cy="100" r="94" fill="#14201A" stroke="#3c4d42" stroke-width="2"/>' +
+        '<circle cx="100" cy="100" r="80" fill="none" stroke="#26332b" stroke-width="1"/>' +
+        '<g id="compassDial">' +
+          '<polygon points="100,20 89,100 111,100" fill="#D94A2E"/>' +
+          '<polygon points="100,180 89,100 111,100" fill="#6d7b70"/>' +
+          '<text x="100" y="43" text-anchor="middle" fill="#f0dca0" font-size="18" font-weight="700" font-family="Oswald,sans-serif">N</text>' +
+          '<text x="165" y="106" text-anchor="middle" fill="#9fb3a6" font-size="14" font-family="Oswald,sans-serif">E</text>' +
+          '<text x="100" y="171" text-anchor="middle" fill="#9fb3a6" font-size="14" font-family="Oswald,sans-serif">S</text>' +
+          '<text x="35" y="106" text-anchor="middle" fill="#9fb3a6" font-size="14" font-family="Oswald,sans-serif">W</text>' +
+        '</g>' +
+        '<polygon points="100,3 93,17 107,17" fill="#E8B04B"/>' +
+        '<circle cx="100" cy="100" r="4" fill="#e8f0ea"/>' +
+      '</svg>' +
+      '<div id="compassHdg" style="font-size:22px;font-weight:700;margin-top:10px;color:#f0dca0;font-variant-numeric:tabular-nums;">—</div>' +
+      '<div style="font-size:11px;color:#8a9a82;margin-top:2px;">the gold mark up top is the way you’re facing</div>' +
+      '<div id="compassHint" style="font-size:11px;color:#c9a24a;margin-top:6px;min-height:0;"></div>' +
+      '<div style="border-top:1px solid #2a3a30;margin:14px 0 10px;"></div>' +
+      '<div style="font-size:11px;color:#8a9a82;letter-spacing:1px;">GPS COORDINATES</div>' +
+      '<div id="compassCoords" style="font-size:15px;margin-top:3px;font-variant-numeric:tabular-nums;color:#dfe7e0;">waiting for GPS…</div>' +
+      (iosNeedsPerm ? '<button id="compassEnable" style="margin-top:14px;width:100%;padding:10px;border-radius:9px;border:1px solid #8a9a4e;background:#79883f;color:#f5f1e0;font-weight:700;cursor:pointer;">Enable compass</button>' : '') +
+      '<button id="compassClose" style="margin-top:10px;width:100%;padding:9px;border-radius:9px;border:1px solid #3c4d42;background:transparent;color:#9fb3a6;cursor:pointer;">Close</button>';
+    back.appendChild(card); document.body.appendChild(back);
+    _compassBack = back;
+    var btn = document.getElementById('compassBtn'); if (btn) btn.classList.add('active');
+    back.addEventListener('click', function(e){ if (e.target === back) _closeCompass(); });
+    card.querySelector('#compassClose').addEventListener('click', _closeCompass);
+    var enable = card.querySelector('#compassEnable');
+    if (enable){
+      enable.addEventListener('click', function(){
+        DeviceOrientationEvent.requestPermission().then(function(state){
+          if (state === 'granted'){ _startOrient(); enable.style.display = 'none'; }
+          else { enable.textContent = 'Compass permission denied'; }
+        }).catch(function(){ enable.textContent = 'Compass not available'; });
+      });
+    } else {
+      _startOrient();   // Android / desktop: no permission gate
+    }
+    // Coordinates: watchPosition keeps lastKnownPos current; nudge a fresh fix + refresh once a second.
+    if (navigator.geolocation){ try { navigator.geolocation.getCurrentPosition(function(p){ lastKnownPos = {lat:p.coords.latitude, lng:p.coords.longitude, accuracy:p.coords.accuracy}; _updateCompassUI(); }, function(){}, {enableHighAccuracy:true, timeout:8000}); } catch (e) {} }
+    _compassCoordTimer = setInterval(_updateCompassUI, 1000);
+    _updateCompassUI();
+    // No sensor after a beat (a desktop) → say so, so the "—" heading isn't mysterious.
+    setTimeout(function(){
+      if (_compassBack && !iosNeedsPerm && _compassHeading === null){
+        var hint = _compassBack.querySelector('#compassHint');
+        if (hint){ hint.textContent = 'No compass sensor on this device — that’s a phone feature. Your coordinates still show below.'; hint.style.minHeight = '28px'; }
+      }
+    }, 2500);
+  }
+  (function(){ var b = document.getElementById('compassBtn'); if (b) b.addEventListener('click', showCompass); })();
 
   // ---------- Hunt Events / Fishing Trips ----------
   var huntBarTimer = null;
