@@ -1846,7 +1846,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 345</div>
+    <div id="buildBadge">BUILD 346</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12562,6 +12562,7 @@
     savedTileCount().then(function(n){ var cb = card.querySelector('#omClear'); if (cb && n) cb.textContent = '🗑 Clear saved (' + n + ')'; });
     card.querySelector('#omSave').addEventListener('click', async function(){
       var status = card.querySelector('#omStatus'); status.style.display = 'block';
+      requestPersistentStorage(); // the user is deliberately saving maps → ask the OS to protect them
       var saveBtn = this; saveBtn.style.pointerEvents = 'none'; saveBtn.style.opacity = '0.5';
       var res = await saveTilesWithProgress(plan.urls, function(done, total){ status.textContent = 'Saving… ' + done + ' / ' + total; });
       status.textContent = '✅ Saved ' + res.added + ' tiles. This area will show offline.';
@@ -12579,6 +12580,20 @@
     });
   }
   (function(){ var b = document.getElementById('saveAreaBtn'); if (b) b.addEventListener('click', showOfflineMapsDialog); })();
+
+  // Ask the OS to mark our storage as PERSISTENT so saved offline maps + cached data aren't evicted
+  // to reclaim space. Best-effort (browsers grant this on engagement heuristics; installed/home-screen
+  // apps are the most likely to get it). Called on load and again when the user explicitly saves an area.
+  function requestPersistentStorage(){
+    try {
+      if (navigator.storage && navigator.storage.persist){
+        navigator.storage.persisted().then(function(already){
+          if (!already) navigator.storage.persist().catch(function(){});
+        }).catch(function(){});
+      }
+    } catch (e) {}
+  }
+  requestPersistentStorage();
 
   // Register the offline service worker (sw.js). Runs only over http(s); a no-op on file://.
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0){
