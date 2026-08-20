@@ -1846,7 +1846,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 344</div>
+    <div id="buildBadge">BUILD 345</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9574,7 +9574,13 @@
     var node = popup.getElement();
     if (!node) return;
     var delBtn = node.querySelector('[data-act="delete-obs"]');
-    if (delBtn) delBtn.addEventListener('click', function(){ removeObservation(id); map.closePopup(); });
+    if (delBtn) delBtn.addEventListener('click', async function(){
+      var ok = await showConfirm('Delete this sighting? This can\'t be undone.');
+      if (!ok) return;
+      map.closePopup();
+      try { await removeObservation(id); } catch (err) { console.error('Outdoor Companion: delete sighting failed', err); }
+      showToast('Sighting deleted');
+    });
 
     var editWeatherLink = node.querySelector('.edit-weather-link');
     if (editWeatherLink){
@@ -9847,14 +9853,30 @@
       if (_ps !== null && o.createdAt < _ps) return;
       var m = L.marker([o.lat,o.lng], {icon: obsMarkerIcon(o.type, o.headingDir)}).addTo(map);
       if (IS_TOUCH){
-        // No hover on touch — TAP shows the info card with an Edit button (which swaps to the edit form).
-        m.bindPopup('<div style="max-width:190px;">'+obsInfoBody(o)+'<button data-act="obs-edit" style="margin-top:8px;width:100%;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">✏️ Edit details</button></div>');
+        // No hover on touch — TAP shows the info card with Edit + Delete buttons. Delete is wired
+        // DIRECTLY here (not through the Edit-details → setContent → re-bind path, which could race on
+        // a phone and leave the form's Delete unwired — the reported "delete doesn't work on the phone").
+        m.bindPopup('<div style="max-width:200px;">'+obsInfoBody(o)+
+          '<div style="display:flex;gap:6px;margin-top:8px;">'+
+            '<button data-act="obs-edit" style="flex:1;padding:8px;border-radius:8px;border:1px solid #3c4d42;background:#2E4636;color:#dff0e4;font-weight:600;cursor:pointer;">✏️ Edit</button>'+
+            '<button data-act="obs-del" style="flex:1;padding:8px;border-radius:8px;border:1px solid #6b2b23;background:#3a2320;color:#f0c9c0;font-weight:600;cursor:pointer;">🗑 Delete</button>'+
+          '</div></div>');
         m.on('popupopen', function(e){
           var node = e.popup.getElement();
+          if (node) { try { L.DomEvent.disableClickPropagation(node); } catch (err) {} } // taps on the buttons shouldn't leak to the map
           var eb = node && node.querySelector('[data-act="obs-edit"]');
           if (eb) eb.addEventListener('click', function(){
             e.popup.setContent(obsPopupHtml(o));
             setTimeout(function(){ bindObsPopupActions(e.popup, o.id); }, 0);
+          });
+          var xb = node && node.querySelector('[data-act="obs-del"]');
+          if (xb) xb.addEventListener('click', async function(){
+            var lbl = (getActiveObsTypes()[o.type] || {}).label || 'sighting';
+            var ok = await showConfirm('Delete this ' + lbl + '? This can\'t be undone.');
+            if (!ok) return;
+            map.closePopup();
+            try { await removeObservation(o.id); } catch (err) { console.error('Outdoor Companion: delete sighting failed', err); }
+            showToast('Sighting deleted');
           });
         });
       } else {
