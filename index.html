@@ -1846,7 +1846,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 349</div>
+    <div id="buildBadge">BUILD 350</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12737,7 +12737,8 @@
   }
   function applyDefaultHomeView(){
     if (didInitialHomeView) return; didInitialHomeView = true;
-    if (gpsDidCenter) return;      // a real GPS fix already framed something useful — don't yank it
+    if (IS_TOUCH) return;          // DESKTOP ONLY — phones/tablets rely on GPS in the field; never override that
+    if (gpsDidCenter) return;      // even on desktop, if an accurate GPS fix already framed us, keep it
     centerOnHomeProperty();
   }
 
