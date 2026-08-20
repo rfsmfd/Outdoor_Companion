@@ -1846,7 +1846,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 348</div>
+    <div id="buildBadge">BUILD 349</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7316,10 +7316,13 @@
       } else {
         _invLine = '<div class="count" style="font-size:11px;opacity:.8;margin-top:2px;">🎯 ' + (siteCount - _camN) + ' stands · 📷 ' + _camN + ' cams · 🥾 ' + _trailN + ' trails · 👁 ' + catchCount + ' sightings · 📸 ' + _photoN + ' photos</div>';
       }
+      var isHome = false; try { isHome = localStorage.getItem('oc_home_property') === p.id; } catch (e) {}
+      var canBeHome = !!propBBox(p);   // needs a boundary or saved map view to frame on open
       row.innerHTML =
-        '<div><div class="nm">' + escapeHtml(p.name) + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + catchChip + (propAcresLabel(p) ? ' · ' + propAcresLabel(p) : '') + ' · setup ' + doneN + '/' + totalN + '</div>' + _invLine + '</div>' +
+        '<div><div class="nm">' + escapeHtml(p.name) + (isHome ? ' <span title="Your default view on open" style="color:#E8B04B;">🏠</span>' : '') + '</div><div class="count">' + siteCount + (siteCount === 1 ? ' site' : ' sites') + catchChip + (propAcresLabel(p) ? ' · ' + propAcresLabel(p) : '') + ' · setup ' + doneN + '/' + totalN + '</div>' + _invLine + '</div>' +
         '<div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">' +
           '<button class="btn-ghost" data-act="setup-prop" data-id="' + p.id + '" style="font-size:11px;padding:5px 10px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;">🗺 Set up</button>' +
+          (canBeHome ? '<button class="btn-ghost" data-act="home-prop" data-id="' + p.id + '" title="Set as your default map view when the app opens (before GPS)" style="font-size:11px;padding:5px 10px;' + (isHome ? 'background:#3a3320;color:#f0dca0;border-color:#c9a24a;' : '') + '">' + (isHome ? '🏠 Home ✓' : '🏠 Set home') + '</button>' : '') +
           (((p.boundary && p.boundary.length >= 3) || p.bounds) ? '<button class="btn-ghost" data-act="attach-prop" data-id="' + p.id + '" title="Link any stands, camera sites, trails or sightings inside the farm to it" style="font-size:11px;padding:5px 10px;">🔗 Attach inside</button>' : '') +
           ((myGroups && myGroups.length && (!p.__ownerUid || p.__ownerUid === (firebase.auth().currentUser && firebase.auth().currentUser.uid))) ? '<button class="btn-ghost" data-act="share-prop" data-id="' + p.id + '" title="Share this whole farm with a group" style="font-size:11px;padding:5px 10px;background:#243b52;color:#dbeafe;border-color:#2f5573;">' + ((p.__sharedGroups || []).length ? '🤝 Shared (' + p.__sharedGroups.length + ')' : '🤝 Share') + '</button>' : '') +
           '<button class="btn-ghost" data-act="move-prop" data-id="' + p.id + '" title="Wrong list? Move this to the other module" style="font-size:11px;padding:5px 9px;">→ ' + otherLabel + '</button>' +
@@ -7327,6 +7330,15 @@
         '</div>';
       list.appendChild(row);
       row.querySelector('[data-act="setup-prop"]').addEventListener('click', function(){ document.getElementById('managePropertiesModalBackdrop').classList.remove('show'); showPropertySetup(p); });
+      var _hmb = row.querySelector('[data-act="home-prop"]');
+      if (_hmb) _hmb.addEventListener('click', function(){
+        var cur = null; try { cur = localStorage.getItem('oc_home_property'); } catch (e) {}
+        try {
+          if (cur === p.id){ localStorage.removeItem('oc_home_property'); showToast('“' + p.name + '” is no longer your home view'); }
+          else { localStorage.setItem('oc_home_property', p.id); centerOnHomeProperty(); showToast('“' + p.name + '” set as your home view — the map opens here'); }
+        } catch (e) {}
+        renderPropertiesManageList();
+      });
       var _atb = row.querySelector('[data-act="attach-prop"]'); if (_atb) _atb.addEventListener('click', async function(){ await attachInsideFarm(p); renderPropertiesManageList(); });
       var _shb = row.querySelector('[data-act="share-prop"]'); if (_shb) _shb.addEventListener('click', function(){ sharePropertyFlow(p); });
       row.querySelector('[data-act="move-prop"]').addEventListener('click', async function(){
@@ -12687,6 +12699,7 @@
       var acc = Math.round(lastKnownPos.accuracy);
       if (lastKnownPos.accuracy <= AUTO_CENTER_ACCURACY_M){
         map.flyTo([lastKnownPos.lat, lastKnownPos.lng], zoomLevel || 17);
+        gpsDidCenter = true;   // a real fix framed us → don't let the home-view fallback override it
         setGpsStatus('located · accuracy ~' + acc + 'm', 'ok');
       } else {
         // Low-confidence fix (common on desktop/wifi-based location) — don't yank the map,
@@ -12702,6 +12715,30 @@
       }
       setGpsStatus(reason, 'err');
     }, {enableHighAccuracy:true, timeout:8000});
+  }
+
+  // ---------- Default "home" view ----------
+  // On open (especially DESKTOP, where GPS is weak/denied), frame the property you set as "home"
+  // instead of staring at the whole country. A high-confidence phone GPS fix still takes over for
+  // field use — this is just the sensible starting view when there's no good location yet.
+  var gpsDidCenter = false;       // set true once an accurate GPS fix has recentered the map
+  var didInitialHomeView = false; // only auto-frame home on the FIRST load, not on every scope switch
+  function getHomeProperty(){
+    var hid = null; try { hid = localStorage.getItem('oc_home_property'); } catch (e) {}
+    if (hid){ var h = properties.filter(function(p){ return p.id === hid; })[0]; if (h && propBBox(h)) return h; }
+    // No home set (or it lost its boundary) → fall back to the first property in this module that has one.
+    var cand = properties.filter(function(p){ return (p.module || 'hunting') === activeModule && propBBox(p); });
+    return cand[0] || null;
+  }
+  function centerOnHomeProperty(){
+    var home = getHomeProperty(); if (!home) return false;
+    var bb = propBBox(home); if (!bb) return false;
+    try { map.fitBounds([[bb.s, bb.w], [bb.n, bb.e]], { padding: [40, 40], maxZoom: 16 }); return true; } catch (e) { return false; }
+  }
+  function applyDefaultHomeView(){
+    if (didInitialHomeView) return; didInitialHomeView = true;
+    if (gpsDidCenter) return;      // a real GPS fix already framed something useful — don't yank it
+    centerOnHomeProperty();
   }
 
   // Auto-locate as soon as the map opens
@@ -14213,6 +14250,9 @@
     if (activeTab === 'analytics') renderAnalytics();
     // On open: greet with any buck whose recent movement has shifted into daylight (Huntability 3b).
     try { refreshHuntAlerts(true); } catch (e) {}
+    // Now that properties are loaded, frame the home farm as the default view (unless GPS already
+    // centered us). Runs once, on the first load — not on later scope switches.
+    try { applyDefaultHomeView(); } catch (e) {}
   }
 
   // ================= Cloud sync (Firebase) — Phase 1: login + per-user sync =================
