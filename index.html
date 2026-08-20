@@ -11,9 +11,11 @@
 <!-- Installable as a desktop/mobile app icon via the browser's own "Install page as
      app" feature (Chrome/Edge/Safari desktop support this natively, no manifest
      required) — this manifest just gives that installed icon a proper name and look
-     instead of a generic default. Deliberately NO service worker: one would cache the
-     app for offline use, which risks silently serving a stale old build after a new
-     one ships — a real conflict with how frequently this app gets updated. -->
+     instead of a generic default. Offline support is handled by sw.js (registered at
+     the bottom of the app script): the app SHELL is network-first (always the freshest
+     build when online, cached copy only when truly offline in the field), so the old
+     "stale build" risk that kept us from shipping a service worker is designed out. See
+     the header comment in sw.js for the full strategy. -->
 <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%20%22Outdoor%20Companion%22%2C%20%22short_name%22%3A%20%22Outdoor%20Co.%22%2C%20%22start_url%22%3A%20%22.%22%2C%20%22display%22%3A%20%22standalone%22%2C%20%22background_color%22%3A%20%22%231E2B23%22%2C%20%22theme_color%22%3A%20%22%231E2B23%22%2C%20%22icons%22%3A%20%5B%7B%22src%22%3A%20%22data%3Aimage/svg%2Bxml%2C%253Csvg%2520width%253D%2522512%2522%2520height%253D%2522512%2522%2520viewBox%253D%25220%25200%2520512%2520512%2522%2520xmlns%253D%2522http%253A//www.w3.org/2000/svg%2522%253E%253Crect%2520width%253D%2522512%2522%2520height%253D%2522512%2522%2520rx%253D%252296%2522%2520fill%253D%2522%25231E2B23%2522/%253E%253Cpath%2520d%253D%2522M256%252096%2520C%2520176%252096%2520112%2520160%2520112%2520240%2520C%2520112%2520336%2520256%2520432%2520256%2520432%2520C%2520256%2520432%2520400%2520336%2520400%2520240%2520C%2520400%2520160%2520336%252096%2520256%252096%2520Z%2522%2520fill%253D%2522%2523FF6A13%2522/%253E%253Ccircle%2520cx%253D%2522256%2522%2520cy%253D%2522232%2522%2520r%253D%252256%2522%2520fill%253D%2522%25231E2B23%2522/%253E%253C/svg%253E%22%2C%20%22sizes%22%3A%20%22any%22%2C%20%22type%22%3A%20%22image/svg%2Bxml%22%7D%5D%7D">
 <meta name="theme-color" content="#1E2B23">
 <meta name="apple-mobile-web-app-title" content="Outdoor Co.">
@@ -1807,6 +1809,7 @@
       <button class="layer-btn" data-layer="street">Street</button>
       <button class="layer-btn" data-layer="usgstopo" title="USGS Topo — official U.S. government topographic data">USGS</button>
       <button class="layer-btn" data-layer="opentopo" title="OpenTopoMap — worldwide contour/trail topo">Topo</button>
+      <button class="layer-btn" id="saveAreaBtn" title="Save this area's map for offline use — pre-load the imagery you're looking at so it still shows with no signal in the field" style="margin-left:6px;border-left:2px solid rgba(255,255,255,0.25);">⬇ Save area</button>
       <button class="layer-btn" id="roadsToggleBtn" title="Toggle road names &amp; labels on top of any layer" style="margin-left:6px;border-left:2px solid rgba(255,255,255,0.25);">🛣 Roads</button>
       <button class="layer-btn" id="hillshadeToggleBtn" title="Hillshade — real LiDAR terrain relief (USGS 3DEP) over any layer">🏔 Hillshade</button>
       <select id="hillshadeStyleSel" title="How to render the terrain relief" style="display:none;font-size:12px;padding:0 8px;background:#14201A;color:#e8f0ea;border:none;border-left:1px solid rgba(255,255,255,0.15);cursor:pointer;outline:none;">
@@ -1843,7 +1846,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 343</div>
+    <div id="buildBadge">BUILD 344</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2506,7 +2509,7 @@
 <script src="https://cdn.jsdelivr.net/npm/d3-array@3"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3-contour@4"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.js"></script>
@@ -3027,6 +3030,87 @@
     });
   });
 
+  // Apply a live color/line-style change to a trail that's already drawn: restyle the existing polyline
+  // in place (so the open popup stays open and the highlight casing isn't disturbed), persist it, and
+  // keep the Manage-Trails list swatch in sync. Used by the inline edit popup below.
+  function applyTrailStyleLive(trail){
+    var poly = savedTrailPolylines[trail.id];
+    if (poly){ poly.setStyle({ color: trail.color, dashArray: lineStyleToDashArray(trail.lineStyle) }); }
+    try{ saveTrail(trail); }catch(e){ console.error('Outdoor Companion: failed to save trail style', e); }
+    renderTrailsList();
+  }
+
+  // Build the interactive edit popup shown when you tap a trail on the map: name + length, mini color
+  // swatches, Solid/Dashed/Dotted chips, and Rename / Delete — so styling or removing a trail no longer
+  // means opening the Manage-Trails list. Returns a DOM node (Leaflet accepts an element as popup content),
+  // which lets us attach live handlers and stop clicks from bubbling out to the map's deselect handler.
+  function buildTrailPopup(trail){
+    var wrap = document.createElement('div');
+    wrap.style.cssText = 'min-width:184px;font-size:13px;';
+    wrap.innerHTML =
+      '<div style="font-weight:700;margin-bottom:1px;">' + escapeHtml(trail.name) + '</div>' +
+      '<div style="color:#8a8f98;font-size:11px;margin-bottom:8px;">' + trailTypeLabel(trail.type) + ' · ' + trailLenLabel(trail) + '</div>' +
+      '<div style="font-size:11px;color:#8a8f98;margin-bottom:4px;">Color</div>' +
+      '<div data-tp="colors" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px;"></div>' +
+      '<div style="font-size:11px;color:#8a8f98;margin-bottom:4px;">Line style</div>' +
+      '<div data-tp="styles" style="display:flex;gap:6px;margin-bottom:10px;"></div>' +
+      '<div style="display:flex;gap:6px;">' +
+        '<button type="button" data-tp="rename" class="btn-ghost" style="flex:1;font-size:12px;padding:6px 8px;">✏️ Rename</button>' +
+        '<button type="button" data-tp="delete" class="btn-ghost" style="flex:1;font-size:12px;padding:6px 8px;color:#D94A2E;">🗑 Delete</button>' +
+      '</div>';
+    // Color swatches — the selected one gets a white ring.
+    var colWrap = wrap.querySelector('[data-tp="colors"]');
+    TRAIL_COLORS.forEach(function(color){
+      var sw = document.createElement('button');
+      sw.type = 'button';
+      sw.style.cssText = 'width:26px;height:26px;border-radius:50%;background:'+color+';border:3px solid '+(color===trail.color?'#fff':'transparent')+';box-shadow:0 0 0 1px rgba(0,0,0,0.25);cursor:pointer;padding:0;';
+      sw.addEventListener('click', function(){
+        trail.color = color;
+        applyTrailStyleLive(trail);
+        var poly = savedTrailPolylines[trail.id];
+        if (poly) poly.setPopupContent(buildTrailPopup(trail));   // rebuild so the ring moves to the new color
+      });
+      colWrap.appendChild(sw);
+    });
+    // Line-style chips.
+    var styWrap = wrap.querySelector('[data-tp="styles"]');
+    [['solid','Solid'],['dashed','Dashed'],['dotted','Dotted']].forEach(function(pair){
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      var on = trail.lineStyle === pair[0];
+      chip.textContent = pair[1];
+      chip.style.cssText = 'flex:1;font-size:11px;padding:5px 4px;border-radius:6px;cursor:pointer;border:1px solid '+(on?'#3B9EFF':'#4a4f57')+';background:'+(on?'rgba(59,158,255,0.18)':'transparent')+';color:inherit;';
+      chip.addEventListener('click', function(){
+        trail.lineStyle = pair[0];
+        applyTrailStyleLive(trail);
+        var poly = savedTrailPolylines[trail.id];
+        if (poly) poly.setPopupContent(buildTrailPopup(trail));
+      });
+      styWrap.appendChild(chip);
+    });
+    // Rename → the full Edit Trail modal (name/type live there). Delete → confirm + remove inline.
+    wrap.querySelector('[data-tp="rename"]').addEventListener('click', function(){
+      map.closePopup();
+      selectTrail(trail.id, 'list');
+      openSaveTrailModal(true, trail);
+    });
+    wrap.querySelector('[data-tp="delete"]').addEventListener('click', async function(){
+      map.closePopup();
+      selectTrail(trail.id, 'map');
+      var confirmed = await showConfirm('Delete "' + trail.name + '"? This cannot be undone.');
+      if (!confirmed) return;
+      if (savedTrailPolylines[trail.id]){ map.removeLayer(savedTrailPolylines[trail.id]); delete savedTrailPolylines[trail.id]; }
+      trails = trails.filter(function(t){ return t.id !== trail.id; });
+      try{ await deleteTrailStorage(trail.id); }catch(err){ console.error('Outdoor Companion: failed to delete trail', err); }
+      if (selectedTrailId === trail.id) clearTrailSelection();
+      renderTrailsList();
+      showToast('Trail deleted');
+    });
+    // Keep clicks inside the popup from bubbling to the map (which would deselect the trail).
+    L.DomEvent.disableClickPropagation(wrap);
+    return wrap;
+  }
+
   function renderSavedTrailOnMap(trail){
     if (savedTrailPolylines[trail.id]){
       map.removeLayer(savedTrailPolylines[trail.id]);
@@ -3037,8 +3121,8 @@
     var poly = L.polyline(latlngs, {
       color: trail.color, weight: 4, opacity: 0.85, dashArray: lineStyleToDashArray(trail.lineStyle)
     }).addTo(map);
-    poly.bindPopup('<strong>' + escapeHtml(trail.name) + '</strong><br>' + trailTypeLabel(trail.type) + ' · ' + trailLenLabel(trail));
-    poly.on('click', function(){ selectTrail(trail.id, 'map'); });   // tap the line on the map → highlights it + its row in the list
+    poly.bindPopup(buildTrailPopup(trail));   // tap the line → name + inline color / line-style / rename / delete
+    poly.on('click', function(){ selectTrail(trail.id, 'map'); });   // …and highlight it + its row in the list
     savedTrailPolylines[trail.id] = poly;
   }
 
@@ -12351,6 +12435,136 @@
       updateContourColor();      // white contour lines on the aerial, black on the light bases
     });
   });
+
+  // ---------- Offline maps: save the imagery you're looking at so it shows with no signal ----------
+  // sw.js serves cached tiles when offline. This fills a dedicated "saved" tile cache on purpose for
+  // the area currently on screen, across a few zoom levels, so a whole property is usable in a dead
+  // zone. GPS needs no signal, so your location dot lands on the saved imagery. Areas never opened
+  // can't be pre-saved (there's no imagery to fetch with zero signal) — you pre-load them here first.
+  var OC_TILE_SAVED_CACHE = 'oc-tiles-saved';
+  var OC_SAVE_MAX_TILES = 2500; // guardrail — past this, ask the user to zoom into a tighter area
+  function lngToTileX(lng, z){ return Math.floor((lng + 180) / 360 * Math.pow(2, z)); }
+  function latToTileY(lat, z){
+    var r = lat * Math.PI / 180;
+    return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * Math.pow(2, z));
+  }
+  function layerLabelFor(key){ return ({ aerial: 'Aerial', street: 'Street', usgstopo: 'USGS Topo', opentopo: 'Topo' })[key] || key; }
+  function tileUrlFor(layer, z, x, y){
+    var tmpl = layer._url;
+    var subs = layer.options && layer.options.subdomains;
+    var s = (subs && subs.length) ? subs[(x + y) % subs.length] : '';
+    // Replace by NAME so the Esri {z}/{y}/{x} ordering is handled correctly.
+    return tmpl.replace('{s}', s).replace('{z}', z).replace('{x}', x).replace('{y}', y).replace('{r}', '');
+  }
+  // Tile URLs covering the current view, from one zoom out (context) to a couple deeper (detail),
+  // capped to the layer's real tile depth so we don't save blank upscaled tiles.
+  function tilesForCurrentView(){
+    var layer = baseLayers[currentBase];
+    if (!layer) return { urls: [], layerLabel: currentBase, zFrom: 0, zTo: 0 };
+    var b = map.getBounds();
+    var zNow = Math.round(map.getZoom());
+    var nativeMax = (layer.options && layer.options.maxNativeZoom) ? layer.options.maxNativeZoom : 18;
+    var zTo = Math.min(zNow + 2, nativeMax);       // a couple deeper for detail (capped to real tiles)
+    var zFrom = Math.max(zNow - 1, 1);             // one out for context
+    if (zFrom > zTo) zFrom = zTo;                  // keep the range valid when zoomed way out
+    var urls = [];
+    for (var z = zFrom; z <= zTo; z++){
+      var n = Math.pow(2, z);
+      // Clamp to the valid tile grid [0, 2^z − 1] — Leaflet bounds can run past the world edge,
+      // which would otherwise generate negative/out-of-range tile coords that 404.
+      var xMin = Math.max(0, Math.min(n - 1, lngToTileX(b.getWest(), z)));
+      var xMax = Math.max(0, Math.min(n - 1, lngToTileX(b.getEast(), z)));
+      var yMin = Math.max(0, Math.min(n - 1, latToTileY(b.getNorth(), z)));
+      var yMax = Math.max(0, Math.min(n - 1, latToTileY(b.getSouth(), z)));
+      for (var x = xMin; x <= xMax; x++){ for (var y = yMin; y <= yMax; y++){ urls.push(tileUrlFor(layer, z, x, y)); } }
+    }
+    return { urls: urls, layerLabel: layerLabelFor(currentBase), zFrom: zFrom, zTo: zTo };
+  }
+  async function savedTileCount(){
+    if (!('caches' in window)) return 0;
+    try { var c = await caches.open(OC_TILE_SAVED_CACHE); var k = await c.keys(); return k.length; } catch (e){ return 0; }
+  }
+  async function saveTilesWithProgress(urls, onProgress){
+    var cache = await caches.open(OC_TILE_SAVED_CACHE);
+    var before = (await cache.keys()).length;
+    var total = urls.length, done = 0;
+    // no-cors: these tile requests pass through the service worker, which returns opaque responses
+    // — cacheable and fine in an <img>. Coordinates are clamped upstream so URLs are valid. Keep
+    // concurrency modest (a burst of hundreds of tiles to one host trips connection limits and
+    // some fail), then make a gentle second pass over whatever failed.
+    async function run(list, conc){
+      var i = 0, failed = [];
+      async function worker(){
+        while (i < list.length){
+          var u = list[i++];
+          try { var r = await fetch(u, { mode: 'no-cors' }); await cache.put(u, r); }
+          catch (e){ failed.push(u); }
+          done++; if (onProgress && (done % 6 === 0 || done >= total)) onProgress(Math.min(done, total), total);
+        }
+      }
+      var ws = []; for (var w = 0; w < conc; w++){ ws.push(worker()); }
+      await Promise.all(ws);
+      return failed;
+    }
+    var failed = await run(urls, 4);
+    if (failed.length){ await run(failed, 2); } // one calmer retry pass for stragglers
+    var after = (await cache.keys()).length;
+    return { added: Math.max(0, after - before), after: after };
+  }
+  function showOfflineMapsDialog(){
+    if (!('caches' in window)){ showToast('Offline maps aren\'t supported in this browser.'); return; }
+    var plan = tilesForCurrentView();
+    var tooBig = plan.urls.length > OC_SAVE_MAX_TILES;
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:4000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#1E2B23;color:#e8f0ea;border:1px solid #33473b;border-radius:14px;max-width:340px;width:100%;padding:18px;font-size:14px;box-shadow:0 10px 40px rgba(0,0,0,0.5);';
+    card.innerHTML =
+      '<div style="font-weight:700;font-size:16px;margin-bottom:4px;">⬇ Offline maps</div>' +
+      '<div style="color:#9fb3a6;font-size:12px;line-height:1.5;margin-bottom:12px;">Save the imagery on screen so the map still shows with no signal. GPS works offline, so your location lands right on the saved map. (Ground you\'ve never opened can\'t be saved — pan there and pre-load it first.)</div>' +
+      '<div style="background:#16211B;border-radius:8px;padding:10px 12px;margin-bottom:12px;">' +
+        '<div><strong>' + plan.layerLabel + '</strong> · the area on screen</div>' +
+        '<div style="color:#9fb3a6;font-size:12px;margin-top:2px;">' + (tooBig ? ('~' + plan.urls.length + ' tiles — too big') : ('~' + plan.urls.length + ' tiles · zoom ' + plan.zFrom + '–' + plan.zTo)) + '</div>' +
+      '</div>' +
+      (tooBig ? '<div style="color:#E8B04B;font-size:12px;margin-bottom:12px;">That\'s a large area. Zoom into a single property for the sharpest offline detail, then reopen this.</div>' : '') +
+      '<div id="omStatus" style="display:none;font-size:12px;color:#9fb3a6;margin-bottom:10px;"></div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button id="omSave" class="btn-ghost" style="flex:1;padding:9px;font-size:13px;' + (tooBig ? 'opacity:0.5;pointer-events:none;' : '') + '">⬇ Save this area</button>' +
+        '<button id="omClear" class="btn-ghost" style="flex:1;padding:9px;font-size:13px;color:#D94A2E;">🗑 Clear saved</button>' +
+      '</div>' +
+      '<button id="omClose" class="btn-ghost" style="width:100%;margin-top:8px;padding:8px;font-size:12px;color:#9fb3a6;">Close</button>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) back.parentNode.removeChild(back); }
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('#omClose').addEventListener('click', close);
+    savedTileCount().then(function(n){ var cb = card.querySelector('#omClear'); if (cb && n) cb.textContent = '🗑 Clear saved (' + n + ')'; });
+    card.querySelector('#omSave').addEventListener('click', async function(){
+      var status = card.querySelector('#omStatus'); status.style.display = 'block';
+      var saveBtn = this; saveBtn.style.pointerEvents = 'none'; saveBtn.style.opacity = '0.5';
+      var res = await saveTilesWithProgress(plan.urls, function(done, total){ status.textContent = 'Saving… ' + done + ' / ' + total; });
+      status.textContent = '✅ Saved ' + res.added + ' tiles. This area will show offline.';
+      saveBtn.textContent = '✅ Saved';
+      savedTileCount().then(function(n){ var cb = card.querySelector('#omClear'); if (cb) cb.textContent = '🗑 Clear saved (' + n + ')'; });
+    });
+    card.querySelector('#omClear').addEventListener('click', async function(){
+      var n = await savedTileCount();
+      if (!n){ showToast('No offline maps saved yet.'); return; }
+      var ok = await showConfirm('Clear all ' + n + ' saved offline map tiles?');
+      if (!ok) return;
+      try { await caches.delete(OC_TILE_SAVED_CACHE); } catch (e){}
+      this.textContent = '🗑 Clear saved';
+      showToast('Cleared saved offline maps.');
+    });
+  }
+  (function(){ var b = document.getElementById('saveAreaBtn'); if (b) b.addEventListener('click', showOfflineMapsDialog); })();
+
+  // Register the offline service worker (sw.js). Runs only over http(s); a no-op on file://.
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0){
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('sw.js').catch(function(e){ console.warn('Outdoor Companion: service worker registration failed', e); });
+    });
+  }
+
   // ⛰ Layers pill (phone): tap to reveal/hide the whole layer tray so the map keeps the screen in the field
   (function(){
     var t = document.getElementById('layersToggleBtn'), dock = document.getElementById('layerDock');
