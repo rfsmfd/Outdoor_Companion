@@ -19,7 +19,7 @@
  * Bump VERSION on every build so old shell/lib caches are cleared on activate. The tile
  * caches are intentionally NOT version-suffixed — saved offline maps survive app updates.
  */
-var VERSION = 'b344-1';
+var VERSION = 'b355';
 var SHELL_CACHE = 'oc-shell-' + VERSION;
 var LIB_CACHE   = 'oc-lib-' + VERSION;
 var TILE_RUNTIME = 'oc-tiles-runtime';   // rolling, auto-filled as you pan (LRU-trimmed)
