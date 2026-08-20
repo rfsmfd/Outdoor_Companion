@@ -16,11 +16,11 @@
      build when online, cached copy only when truly offline in the field), so the old
      "stale build" risk that kept us from shipping a service worker is designed out. See
      the header comment in sw.js for the full strategy. -->
-<link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%20%22Outdoor%20Companion%22%2C%20%22short_name%22%3A%20%22Outdoor%20Co.%22%2C%20%22start_url%22%3A%20%22.%22%2C%20%22display%22%3A%20%22standalone%22%2C%20%22background_color%22%3A%20%22%231E2B23%22%2C%20%22theme_color%22%3A%20%22%231E2B23%22%2C%20%22icons%22%3A%20%5B%7B%22src%22%3A%20%22data%3Aimage/svg%2Bxml%2C%253Csvg%2520width%253D%2522512%2522%2520height%253D%2522512%2522%2520viewBox%253D%25220%25200%2520512%2520512%2522%2520xmlns%253D%2522http%253A//www.w3.org/2000/svg%2522%253E%253Crect%2520width%253D%2522512%2522%2520height%253D%2522512%2522%2520rx%253D%252296%2522%2520fill%253D%2522%25231E2B23%2522/%253E%253Cpath%2520d%253D%2522M256%252096%2520C%2520176%252096%2520112%2520160%2520112%2520240%2520C%2520112%2520336%2520256%2520432%2520256%2520432%2520C%2520256%2520432%2520400%2520336%2520400%2520240%2520C%2520400%2520160%2520336%252096%2520256%252096%2520Z%2522%2520fill%253D%2522%2523FF6A13%2522/%253E%253Ccircle%2520cx%253D%2522256%2522%2520cy%253D%2522232%2522%2520r%253D%252256%2522%2520fill%253D%2522%25231E2B23%2522/%253E%253C/svg%253E%22%2C%20%22sizes%22%3A%20%22any%22%2C%20%22type%22%3A%20%22image/svg%2Bxml%22%7D%5D%7D">
+<link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#1E2B23">
 <meta name="apple-mobile-web-app-title" content="Outdoor Co.">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20width%3D%22512%22%20height%3D%22512%22%20viewBox%3D%220%200%20512%20512%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Crect%20width%3D%22512%22%20height%3D%22512%22%20rx%3D%2296%22%20fill%3D%22%231E2B23%22/%3E%3Cpath%20d%3D%22M256%2096%20C%20176%2096%20112%20160%20112%20240%20C%20112%20336%20256%20432%20256%20432%20C%20256%20432%20400%20336%20400%20240%20C%20400%20160%20336%2096%20256%2096%20Z%22%20fill%3D%22%23FF6A13%22/%3E%3Ccircle%20cx%3D%22256%22%20cy%3D%22232%22%20r%3D%2256%22%20fill%3D%22%231E2B23%22/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css">
 <style>
@@ -1846,7 +1846,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 346</div>
+    <div id="buildBadge">BUILD 347</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
