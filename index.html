@@ -1846,7 +1846,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 350</div>
+    <div id="buildBadge">BUILD 351</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12682,7 +12682,7 @@
 
   var AUTO_CENTER_ACCURACY_M = 2000; // only auto-fly the map if the fix is confident to ~2km or better
 
-  function locateAndCenter(zoomLevel){
+  function locateAndCenter(zoomLevel, isAutoOpen){
     if (!navigator.geolocation){
       setGpsStatus('not supported by this browser', 'err');
       return;
@@ -12698,9 +12698,17 @@
       showMeMarker(lastKnownPos.lat, lastKnownPos.lng);
       var acc = Math.round(lastKnownPos.accuracy);
       if (lastKnownPos.accuracy <= AUTO_CENTER_ACCURACY_M){
-        map.flyTo([lastKnownPos.lat, lastKnownPos.lng], zoomLevel || 17);
-        gpsDidCenter = true;   // a real fix framed us → don't let the home-view fallback override it
-        setGpsStatus('located · accuracy ~' + acc + 'm', 'ok');
+        if (isAutoOpen && !IS_TOUCH){
+          // DESKTOP auto-open: a laptop/desktop has no GPS chip, so "location" is the ISP/wifi city
+          // (e.g. Portsmouth) reported with an optimistic accuracy — under the 2km bar but often just
+          // wrong. Don't fly there on open; keep the home-farm view. The 🧭 Follow Me / 📍 My Location
+          // buttons still center on the reported location on demand.
+          setGpsStatus('desktop location is approximate — opened on your home farm instead', 'ok');
+        } else {
+          map.flyTo([lastKnownPos.lat, lastKnownPos.lng], zoomLevel || 17);
+          gpsDidCenter = true;   // a real fix framed us → don't let the home-view fallback override it
+          setGpsStatus('located · accuracy ~' + acc + 'm', 'ok');
+        }
       } else {
         // Low-confidence fix (common on desktop/wifi-based location) — don't yank the map,
         // just report it. This is typical without a real GPS chip.
@@ -12742,8 +12750,9 @@
     centerOnHomeProperty();
   }
 
-  // Auto-locate as soon as the map opens
-  locateAndCenter(17);
+  // Auto-locate as soon as the map opens (isAutoOpen=true → on desktop this won't fly to the
+  // unreliable browser location; the home-farm view is used instead).
+  locateAndCenter(17, true);
 
   // Keep a continuously-updated position in the background (no user action needed)
   // so Quick Log taps never have to wait on a GPS fix. Never auto-recenters the map —
