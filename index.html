@@ -1846,7 +1846,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 347</div>
+    <div id="buildBadge">BUILD 348</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -14947,6 +14947,15 @@
       '#oc-auth-card input{width:100%;box-sizing:border-box;padding:14px 15px;margin-top:12px;border-radius:11px;border:1px solid #566637;background:rgba(15,20,11,.5);color:#efe8d1;font-size:15px;letter-spacing:.3px;}' +
       '#oc-auth-card input::placeholder{color:#9aa382;}' +
       '#oc-auth-card input:focus{outline:none;border-color:#c9a24a;background:rgba(15,20,11,.72);}' +
+      '#oc-auth-pass-wrap{position:relative;width:100%;margin-top:12px;}' +
+      '#oc-auth-pass-wrap input{margin-top:0;padding-right:46px;}' +
+      '#oc-auth-eye{position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;color:#9aa382;cursor:pointer;font-size:18px;padding:8px 10px;line-height:1;}' +
+      '#oc-auth-eye:hover{color:#efe8d1;}' +
+      // While we\'re still checking whether you\'re already signed in, show ONLY the emblem/splash
+      // (not the login form) so a returning user sees a clean loading screen, never a flash of the form.
+      '#oc-auth-loading{margin-top:14px;text-align:center;color:#9aa382;font-size:13px;letter-spacing:1.5px;}' +
+      '#oc-auth-overlay:not(.oc-checking) #oc-auth-loading{display:none;}' +
+      '#oc-auth-overlay.oc-checking #oc-auth-email,#oc-auth-overlay.oc-checking #oc-auth-pass-wrap,#oc-auth-overlay.oc-checking #oc-auth-btn,#oc-auth-overlay.oc-checking #oc-auth-or,#oc-auth-overlay.oc-checking #oc-auth-secondary,#oc-auth-overlay.oc-checking #oc-auth-forgot,#oc-auth-overlay.oc-checking #oc-auth-msg{display:none !important;}' +
       '#oc-auth-btn{width:100%;margin-top:18px;padding:15px;border:1px solid #8a9a4e;border-radius:11px;background:#79883f;color:#f5f1e0;font-size:16px;font-weight:700;letter-spacing:1.6px;cursor:pointer;}' +
       '#oc-auth-btn:hover{background:#86964a;}' +
       '#oc-auth-btn:disabled{opacity:.6;cursor:default;}' +
@@ -14969,8 +14978,12 @@
     overlay.innerHTML =
       '<div id="oc-auth-card">' +
       '<img id="oc-auth-emblem" src="icons/splash-emblem.jpg" alt="Outdoor Companion — your woods and waters, one companion" />' +
+      '<div id="oc-auth-loading">LOADING…</div>' +
       '<input id="oc-auth-email" type="email" autocomplete="email" placeholder="Email" aria-label="Email" />' +
-      '<input id="oc-auth-pass" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />' +
+      '<div id="oc-auth-pass-wrap">' +
+        '<input id="oc-auth-pass" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />' +
+        '<button id="oc-auth-eye" type="button" aria-label="Show password" title="Show password">👁</button>' +
+      '</div>' +
       '<button id="oc-auth-btn" type="button">LOG IN</button>' +
       '<div id="oc-auth-msg"></div>' +
       '<div id="oc-auth-or">OR</div>' +
@@ -14978,6 +14991,7 @@
       '<div id="oc-auth-forgot"><a id="oc-auth-reset">Forgot password?</a></div>' +
       '</div>';
     document.body.appendChild(overlay);
+    overlay.classList.add('oc-checking'); // start as a clean splash; the auth check reveals the form only if signed out
 
     var signout = document.createElement('div');
     signout.id = 'oc-signout';
@@ -14990,6 +15004,18 @@
     var btn = document.getElementById('oc-auth-btn');
     var msg = document.getElementById('oc-auth-msg');
     var secondary = document.getElementById('oc-auth-secondary');
+
+    // 👁 Show/hide the password so you can check what you typed on a phone keyboard.
+    var eyeBtn = document.getElementById('oc-auth-eye');
+    if (eyeBtn) eyeBtn.addEventListener('click', function(){
+      var showing = passEl.type === 'text';
+      passEl.type = showing ? 'password' : 'text';
+      eyeBtn.textContent = showing ? '👁' : '🙈';
+      var label = showing ? 'Show password' : 'Hide password';
+      eyeBtn.setAttribute('aria-label', label);
+      eyeBtn.setAttribute('title', label);
+      try { passEl.focus(); } catch (e) {}
+    });
 
     function setMsg(text, ok){ msg.textContent = text || ''; msg.className = ok ? 'ok' : ''; }
     function setMode(m){
@@ -15038,7 +15064,7 @@
     document.getElementById('oc-scope-select').addEventListener('change', onScopeSelectChange);
   }
 
-  function showAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o){ o.style.display = 'flex'; var b=document.getElementById('oc-auth-btn'); if(b) b.disabled=false; } }
+  function showAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o){ o.classList.remove('oc-checking'); o.style.display = 'flex'; var b=document.getElementById('oc-auth-btn'); if(b) b.disabled=false; } }
   function hideAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o) o.style.display = 'none'; }
   function showSignoutButton(email){ var s = document.getElementById('oc-signout'); if (s){ s.style.display = 'flex'; var e=document.getElementById('oc-signout-email'); if(e) e.textContent = email || ''; } }
   function hideSignoutButton(){ var s = document.getElementById('oc-signout'); if (s) s.style.display = 'none'; }
