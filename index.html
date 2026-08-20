@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 354</div>
+    <div id="buildBadge">BUILD 355</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2556,11 +2556,6 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-<!-- leaflet-rotate — enables optional "heading-up" map rotation (course-up navigation). Loaded right
-     after Leaflet core so it patches L.Map before the app creates the map. Harmless when unused: at
-     bearing 0 the map behaves exactly as north-up, and if the script is ever missing the rotate option
-     is simply ignored (setBearing is feature-detected before use). -->
-<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/d3-array@3"></script>
@@ -2746,10 +2741,7 @@
     return base + '?cam=' + encodeURIComponent(camId);
   }
 
-  // rotate:true enables optional heading-up rotation (leaflet-rotate). rotateControl/touchRotate/
-  // shiftKeyRotate are OFF so rotation ONLY happens programmatically (from the compass) — no stray
-  // two-finger or shift-drag rotation to fight the existing pinch-zoom. Default bearing 0 = north-up.
-  var map = L.map('map', {zoomControl:true, zoomSnap:0, zoomDelta:0.25, zoomAnimation:false, rotate:true, rotateControl:false, touchRotate:false, shiftKeyRotate:false, bearing:0}).setView([39.5, -98.35], 5);
+  var map = L.map('map', {zoomControl:true, zoomSnap:0, zoomDelta:0.25, zoomAnimation:false}).setView([39.5, -98.35], 5);
 
   // Tracks whether ANY marker popup is currently open. renderObsMarkers()/renderMarkers()
   // destroy and recreate every marker (including whatever popup is open), which would
@@ -9939,7 +9931,13 @@
           var eb = node && node.querySelector('[data-act="obs-edit"]');
           if (eb) eb.addEventListener('click', function(){
             e.popup.setContent(obsPopupHtml(o));
-            setTimeout(function(){ bindObsPopupActions(e.popup, o.id); }, 0);
+            // Bind the swapped-in FORM synchronously (the old setTimeout(0) could race on a phone and
+            // leave every field/button "locked"), and re-guard the new content so touches reach its
+            // inputs/buttons instead of leaking to the map. setContent updates the DOM synchronously,
+            // so the form nodes exist right now.
+            var fnode = e.popup.getElement();
+            if (fnode) { try { L.DomEvent.disableClickPropagation(fnode); L.DomEvent.disableScrollPropagation(fnode); } catch (err) {} }
+            bindObsPopupActions(e.popup, o.id);
           });
           var xb = node && node.querySelector('[data-act="obs-del"]');
           if (xb) xb.addEventListener('click', async function(){
@@ -12873,9 +12871,7 @@
   // Tap to open a dial showing your heading + current lat/long. Heading comes from the phone's
   // magnetometer: iOS gives TRUE north via webkitCompassHeading; Android via absolute-orientation
   // alpha. A desktop has no compass sensor, so it shows coordinates and says the needle needs a phone.
-  var _compassBack = null, _compassCoordTimer = null, _compassHeading = null;
-  var _orientOn = false, _compassModalOpen = false, _headingUpMode = false;
-  var HEADING_UP_SIGN = 1;   // flip to -1 if the field test shows the map turns the wrong way
+  var _compassBack = null, _compassCoordTimer = null, _compassHeading = null, _compassStarted = false;
   function _cardinal(d){ var dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW']; return dirs[Math.round(d / 22.5) % 16]; }
   function _onOrient(e){
     var h = null;
@@ -12884,56 +12880,12 @@
     } else if (e && e.absolute && typeof e.alpha === 'number'){
       h = (360 - e.alpha) % 360;                     // Android absolute — alpha is CCW from north
     }
-    if (h !== null && !isNaN(h)){
-      _compassHeading = h;
-      if (_compassModalOpen) _updateCompassUI();
-      if (_headingUpMode && map.setBearing){ try { map.setBearing(HEADING_UP_SIGN * h); } catch (err) {} }  // course-up: turn the map to your heading
-    }
+    if (h !== null && !isNaN(h)){ _compassHeading = h; _updateCompassUI(); }
   }
-  // Orientation listeners stay attached while EITHER the compass panel is open OR heading-up is on,
-  // so heading-up keeps working after you close the compass and walk.
-  function _ensureOrient(){
-    if (_orientOn) return; _orientOn = true;
+  function _startOrient(){
+    if (_compassStarted) return; _compassStarted = true;
     window.addEventListener('deviceorientationabsolute', _onOrient, true);
     window.addEventListener('deviceorientation', _onOrient, true);
-  }
-  function _maybeStopOrient(){
-    if (_compassModalOpen || _headingUpMode) return;   // still needed
-    _orientOn = false;
-    window.removeEventListener('deviceorientationabsolute', _onOrient, true);
-    window.removeEventListener('deviceorientation', _onOrient, true);
-  }
-  // iOS 13+ requires a user-gesture permission for motion/orientation; other platforms don't gate it.
-  function _requestOrientPerm(){
-    return new Promise(function(resolve){
-      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-        DeviceOrientationEvent.requestPermission().then(function(s){ resolve(s === 'granted'); }).catch(function(){ resolve(false); });
-      } else { resolve(true); }
-    });
-  }
-  function _reflectHeadingUpUI(){
-    if (_compassBack){
-      var t = _compassBack.querySelector('#compassHeadingUp');
-      if (t){ t.textContent = _headingUpMode ? '🔄 Heading-up: ON' : '🔄 Heading-up: OFF'; t.style.background = _headingUpMode ? '#3B9EFF' : 'transparent'; t.style.color = _headingUpMode ? '#08243b' : '#9fb3a6'; }
-    }
-    var cb = document.getElementById('compassBtn'); if (cb) cb.classList.toggle('active', _headingUpMode || !!_compassBack);
-  }
-  // Toggle course-up: the whole map turns so the way you're facing is UP. Default OFF (north-up).
-  function setHeadingUp(on){
-    if (on){
-      _requestOrientPerm().then(function(granted){
-        if (!granted){ showToast('Compass access is needed for heading-up. Enable it and try again.'); return; }
-        _headingUpMode = true; _ensureOrient();
-        if (_compassHeading !== null && map.setBearing){ try { map.setBearing(HEADING_UP_SIGN * _compassHeading); } catch (e) {} }
-        _reflectHeadingUpUI();
-        showToast('Heading-up ON — the map turns to face your direction. Tap it again for north-up.');
-      });
-    } else {
-      _headingUpMode = false;
-      if (map.setBearing){ try { map.setBearing(0); } catch (e) {} }   // back to north-up
-      _maybeStopOrient();
-      _reflectHeadingUpUI();
-    }
   }
   function _updateCompassUI(){
     if (!_compassBack) return;
@@ -12950,12 +12902,13 @@
     }
   }
   function _closeCompass(){
-    _compassModalOpen = false;
+    window.removeEventListener('deviceorientationabsolute', _onOrient, true);
+    window.removeEventListener('deviceorientation', _onOrient, true);
+    _compassStarted = false;
     if (_compassCoordTimer){ clearInterval(_compassCoordTimer); _compassCoordTimer = null; }
     if (_compassBack && _compassBack.parentNode) _compassBack.parentNode.removeChild(_compassBack);
     _compassBack = null;
-    _maybeStopOrient();       // keeps orientation running if heading-up is still on
-    _reflectHeadingUpUI();    // button stays 'active' while heading-up mode is on
+    var b = document.getElementById('compassBtn'); if (b) b.classList.remove('active');
   }
   function showCompass(){
     if (_compassBack){ _closeCompass(); return; }        // tapping the button again closes it
@@ -12987,27 +12940,22 @@
       '<div style="font-size:11px;color:#8a9a82;letter-spacing:1px;">GPS COORDINATES</div>' +
       '<div id="compassCoords" style="font-size:15px;margin-top:3px;font-variant-numeric:tabular-nums;color:#dfe7e0;">waiting for GPS…</div>' +
       (iosNeedsPerm ? '<button id="compassEnable" style="margin-top:14px;width:100%;padding:10px;border-radius:9px;border:1px solid #8a9a4e;background:#79883f;color:#f5f1e0;font-weight:700;cursor:pointer;">Enable compass</button>' : '') +
-      '<button id="compassHeadingUp" style="margin-top:12px;width:100%;padding:10px;border-radius:9px;border:1px solid #3B9EFF;background:transparent;color:#9fb3a6;font-weight:700;cursor:pointer;">🔄 Heading-up: OFF</button>' +
-      '<div style="font-size:10.5px;color:#8a9a82;margin-top:4px;line-height:1.4;">Turns the whole map so the way you’re facing is up — like a car GPS. Close this and the map keeps turning as you walk. Tap again for north-up.</div>' +
-      '<button id="compassClose" style="margin-top:12px;width:100%;padding:9px;border-radius:9px;border:1px solid #3c4d42;background:transparent;color:#9fb3a6;cursor:pointer;">Close</button>';
+      '<button id="compassClose" style="margin-top:10px;width:100%;padding:9px;border-radius:9px;border:1px solid #3c4d42;background:transparent;color:#9fb3a6;cursor:pointer;">Close</button>';
     back.appendChild(card); document.body.appendChild(back);
     _compassBack = back;
-    _compassModalOpen = true;
     var btn = document.getElementById('compassBtn'); if (btn) btn.classList.add('active');
     back.addEventListener('click', function(e){ if (e.target === back) _closeCompass(); });
     card.querySelector('#compassClose').addEventListener('click', _closeCompass);
-    card.querySelector('#compassHeadingUp').addEventListener('click', function(){ setHeadingUp(!_headingUpMode); });
-    _reflectHeadingUpUI();   // show the current heading-up state (it may already be on)
     var enable = card.querySelector('#compassEnable');
     if (enable){
       enable.addEventListener('click', function(){
-        _requestOrientPerm().then(function(granted){
-          if (granted){ _ensureOrient(); enable.style.display = 'none'; }
+        DeviceOrientationEvent.requestPermission().then(function(state){
+          if (state === 'granted'){ _startOrient(); enable.style.display = 'none'; }
           else { enable.textContent = 'Compass permission denied'; }
-        });
+        }).catch(function(){ enable.textContent = 'Compass not available'; });
       });
     } else {
-      _ensureOrient();   // Android / desktop: no permission gate
+      _startOrient();   // Android / desktop: no permission gate
     }
     // Coordinates: watchPosition keeps lastKnownPos current; nudge a fresh fix + refresh once a second.
     if (navigator.geolocation){ try { navigator.geolocation.getCurrentPosition(function(p){ lastKnownPos = {lat:p.coords.latitude, lng:p.coords.longitude, accuracy:p.coords.accuracy}; _updateCompassUI(); }, function(){}, {enableHighAccuracy:true, timeout:8000}); } catch (e) {} }
