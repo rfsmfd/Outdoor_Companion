@@ -569,9 +569,10 @@
     overflow:hidden;
     box-shadow:0 2px 8px rgba(0,0,0,0.4);
   }
-  /* ⛰ Layers pill — shown only on narrow (field) screens; collapses the whole layer tray so the map isn't buried */
+  /* ⛰ Layers pill — now shown on ALL screens; tapping it opens the layer choices as an OVERLAY
+     panel above the map, so the drawing tools + side icons can never block a choice. */
   .layers-toggle{
-    display:none;
+    display:inline-flex; align-items:center;
     background:var(--panel);
     color:var(--text);
     border:1px solid var(--line);
@@ -584,6 +585,41 @@
     cursor:pointer;
   }
   .layers-toggle.on{ background:var(--accent); color:#1A1204; border-color:var(--accent); }
+  /* Collapsed by default on every screen — the tray only appears (as an overlay) when opened. */
+  #layerDock:not(.open) #layerSwitch{ display:none; }
+  /* Backdrop behind the open layer panel — dims the map and closes on tap-outside. */
+  #layerBackdrop{ display:none; position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:2900; }
+  #layerBackdrop.show{ display:block; }
+  /* Lift the whole dock above the backdrop when open (its children paint inside its stacking context). */
+  #layerDock.open{ z-index:3000; }
+  /* The open layer panel: a centered card floating ABOVE all the map-edge buttons. */
+  #layerDock.open #layerSwitch{
+    position:fixed;
+    left:50%; top:50%;
+    transform:translate(-50%,-50%);
+    z-index:3000;
+    width:min(520px, calc(100vw - 32px));
+    max-height:78vh;
+    overflow-y:auto;
+    flex-wrap:wrap;
+    gap:8px;
+    padding:16px;
+    border-radius:14px;
+    background:var(--panel);
+    box-shadow:0 12px 40px rgba(0,0,0,0.55);
+    align-content:flex-start;
+  }
+  /* In the overlay, each choice becomes a rounded, tappable chip (no more edge-to-edge segmented row). */
+  #layerDock.open #layerSwitch .layer-btn{
+    border:1px solid var(--line) !important;
+    border-radius:9px;
+    background:rgba(255,255,255,0.03);
+  }
+  #layerDock.open #layerSwitch .layer-btn.active{ background:var(--accent); color:#1A1204; }
+  #layerDock.open #layerSwitch::before{
+    content:'Map Layers'; width:100%; font-family:Oswald,sans-serif; text-transform:uppercase;
+    letter-spacing:1.5px; font-size:13px; color:var(--text-dim); margin-bottom:2px;
+  }
   .layer-btn{
     background:transparent;
     color:var(--text-dim);
@@ -1803,6 +1839,7 @@
   <div id="map-wrap">
     <button id="mobileMenuBtn" title="Menu">☰</button>
     <div id="hint">TAP THE MAP TO PLACE YOUR SITE</div>
+    <div id="layerBackdrop"></div>
     <div id="layerDock">
       <div id="layerSwitch">
       <button class="layer-btn active" data-layer="aerial">Aerial</button>
@@ -1846,7 +1883,7 @@
     <div id="windInfoLabel"></div>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 351</div>
+    <div id="buildBadge">BUILD 352</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12617,12 +12654,16 @@
   // ⛰ Layers pill (phone): tap to reveal/hide the whole layer tray so the map keeps the screen in the field
   (function(){
     var t = document.getElementById('layersToggleBtn'), dock = document.getElementById('layerDock');
+    var back = document.getElementById('layerBackdrop');
     if (!t || !dock) return;
-    t.addEventListener('click', function(){
-      var open = dock.classList.toggle('open');
+    function setOpen(open){
+      dock.classList.toggle('open', open);
       t.classList.toggle('on', open);
       t.setAttribute('aria-expanded', open ? 'true' : 'false');
-    });
+      if (back) back.classList.toggle('show', open);
+    }
+    t.addEventListener('click', function(){ setOpen(!dock.classList.contains('open')); });
+    if (back) back.addEventListener('click', function(){ setOpen(false); }); // tap outside the panel closes it
   })();
 
   // 🧰 Tools & Data group: field flow stays up top, utilities tuck one tap away. display:contents keeps the buttons
