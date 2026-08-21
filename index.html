@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 358</div>
+    <div id="buildBadge">BUILD 359</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18128,6 +18128,7 @@
           if (!choice){ resolve(false); return; }
           if (choice.mode === 'existing'){ campullSetMap(unresolved[i].deviceId, choice.ocCamId); i++; next(); }
           else if (choice.mode === 'skip'){ i++; next(); }
+          else if (choice.mode === 'site'){ createCameraAtExistingSite(unresolved[i], manifest, choice.site).then(function(camId){ campullSetMap(unresolved[i].deviceId, camId); i++; next(); }); }
           else { createCameraFromCampull(unresolved[i], manifest, choice.loc).then(function(camId){ campullSetMap(unresolved[i].deviceId, camId); i++; next(); }); }
         });
       }
@@ -18141,25 +18142,40 @@
     back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:6000;display:flex;align-items:center;justify-content:center;padding:18px;';
     var camOpts = cameras.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
       .map(function(c){ return '<option value="' + c.id + '">' + escapeHtml(c.name || '(unnamed)') + '</option>'; }).join('');
+    // Saved locations (sites) — the way this user's places are actually named. Pre-select the one
+    // whose name matches the WiseEye camera name so it's a single click.
+    var uname = (u.name || '').trim().toLowerCase();
+    var siteList = sites.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); });
+    var matchSiteId = (siteList.filter(function(s){ return (s.name||'').trim().toLowerCase() === uname; })[0] || {}).id || '';
+    var siteOpts = siteList.map(function(s){ return '<option value="' + s.id + '"' + (s.id === matchSiteId ? ' selected' : '') + '>' + escapeHtml(s.name || '(unnamed)') + '</option>'; }).join('');
     var card = document.createElement('div');
     card.style.cssText = 'background:var(--panel);color:#e8f0ea;border:1px solid #33473b;border-radius:14px;max-width:400px;width:100%;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,0.5);';
     card.innerHTML =
       '<div style="font-weight:700;font-size:16px;font-family:Oswald,sans-serif;text-transform:uppercase;letter-spacing:1px;">New camera to set up</div>' +
       '<div style="margin:6px 0 14px;font-size:13px;color:#c9d4cc;line-height:1.5;">Outdoor Companion doesn\'t know <strong style="color:#f0dca0;">' + escapeHtml(u.name) + '</strong> yet (' + u.count + ' photo' + (u.count===1?'':'s') + '). Set it up once — it\'s remembered forever by its device id.</div>' +
+      (siteOpts ?
+        '<label style="font-size:12px;color:#9fb3a6;">This camera sits at one of my saved locations:</label>' +
+        '<div style="display:flex;gap:8px;margin:4px 0 12px;">' +
+          '<select id="cpChoiceSite" style="flex:1;padding:9px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">' + siteOpts + '</select>' +
+          '<button id="cpUseSite" class="btn-primary" style="padding:9px 12px;white-space:nowrap;">Use location</button>' +
+        '</div>' + (matchSiteId ? '<div style="font-size:11px;color:#7fae6a;margin:-6px 0 12px;">✓ Matched to your <strong>' + escapeHtml((siteList.filter(function(s){return s.id===matchSiteId;})[0]||{}).name||'') + '</strong> — just tap “Use location”.</div>' : '') +
+        '<div style="text-align:center;font-size:11px;color:#8a9a82;margin:6px 0;">— or —</div>'
+        : '') +
       (camOpts ?
-        '<label style="font-size:12px;color:#9fb3a6;">This is one of my existing cameras:</label>' +
+        '<label style="font-size:12px;color:#9fb3a6;">This is one of my registered cameras:</label>' +
         '<div style="display:flex;gap:8px;margin:4px 0 12px;">' +
           '<select id="cpChoiceCam" style="flex:1;padding:9px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">' + camOpts + '</select>' +
           '<button id="cpUseExisting" class="btn-ghost" style="padding:9px 12px;white-space:nowrap;">Use this</button>' +
         '</div><div style="text-align:center;font-size:11px;color:#8a9a82;margin:6px 0;">— or —</div>'
         : '') +
-      '<button id="cpCreateNew" class="btn-primary" style="width:100%;padding:11px;">📍 Create it &amp; drop it on the map</button>' +
+      '<button id="cpCreateNew" class="btn-ghost" style="width:100%;padding:11px;">📍 New spot — drop it on the map</button>' +
       '<div style="display:flex;gap:8px;margin-top:12px;">' +
         '<button id="cpSkip" class="btn-ghost" style="flex:1;padding:8px;font-size:12px;color:#9fb3a6;">Skip this camera</button>' +
         '<button id="cpCancel" class="btn-ghost" style="flex:1;padding:8px;font-size:12px;color:#D94A2E;">Cancel import</button>' +
       '</div>';
     back.appendChild(card); document.body.appendChild(back);
     function close(){ if (back.parentNode) back.parentNode.removeChild(back); }
+    var us = card.querySelector('#cpUseSite'); if (us) us.addEventListener('click', function(){ var id = card.querySelector('#cpChoiceSite').value; var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s){ alert('Pick a location first.'); return; } close(); cb({ mode: 'site', site: s }); });
     var ue = card.querySelector('#cpUseExisting'); if (ue) ue.addEventListener('click', function(){ var id = card.querySelector('#cpChoiceCam').value; close(); cb({ mode: 'existing', ocCamId: id }); });
     card.querySelector('#cpCreateNew').addEventListener('click', function(){
       close();
@@ -18178,6 +18194,19 @@
     cameras.push(cam); try { await saveCamera(cam); } catch(e){ console.error('campull saveCamera', e); }
     var site = { id: uid(), name: loc.name, type: 'camera', notes: 'Camera location (set during photo import)', lat: loc.lat, lng: loc.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: loc.propertyId || (farmForPoint(loc.lat, loc.lng) || {}).id || null };
     sites.push(site); try { await saveSite(site); } catch(e){ console.error('campull saveSite', e); }
+    var earliest = (manifest.photos || []).filter(function(p){ return p.cameraId === u.deviceId && p.timestamp; })
+      .map(function(p){ return new Date(p.timestamp).getTime(); }).filter(function(t){ return isFinite(t); }).sort(function(a,b){ return a - b; })[0] || Date.now();
+    try { await ensureCoastingDeployment(cam.id, site, earliest); } catch(e){ console.error('campull deployment', e); }
+    cam.currentSiteId = site.id; cam.lastDeployedAt = earliest; try { await saveCamera(cam); } catch(e){}
+    return cam.id;
+  }
+
+  // Map a device to an EXISTING saved location: make a camera for the device and deploy it at
+  // that site (back-dated to the earliest photo), so its photos place on the site the user
+  // already has — no duplicate site/pin. Returns the new camera id.
+  async function createCameraAtExistingSite(u, manifest, site){
+    var cam = { id: uid(), name: u.name, createdAt: Date.now(), currentSiteId: null, lastDeployedAt: null, make: (manifest.source || ''), model: '', notes: 'From ' + (manifest.source || 'cam pull') + ' · device ' + u.deviceId };
+    cameras.push(cam); try { await saveCamera(cam); } catch(e){ console.error('campull saveCamera', e); }
     var earliest = (manifest.photos || []).filter(function(p){ return p.cameraId === u.deviceId && p.timestamp; })
       .map(function(p){ return new Date(p.timestamp).getTime(); }).filter(function(t){ return isFinite(t); }).sort(function(a,b){ return a - b; })[0] || Date.now();
     try { await ensureCoastingDeployment(cam.id, site, earliest); } catch(e){ console.error('campull deployment', e); }
