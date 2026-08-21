@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 360</div>
+    <div id="buildBadge">BUILD 361</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17874,6 +17874,26 @@
           var _man = null; try { _man = JSON.parse(await _mz.files[_mn].async('string')); } catch(e){}
           if (_man && typeof _man.format === 'string' && _man.format.indexOf('oc-cam-pull/') === 0){
             await runManifestImport(_mz, _man);
+            return;
+          }
+        }
+        // Reveal NATIVE export? No oc-cam-pull manifest, but Reveal's own "Download" ZIP names every
+        // file {deviceId}-{n}-{n}-{MMDDYYYYHHMMSS}-{imgid}.jpg — camera + exact time baked in. Parse the
+        // filenames into a manifest and auto-sort just like the companion tool (no scraping needed).
+        if (!_mn){
+          var _revRe = /(?:^|\/)(\d{6,})-\d+-\d+-(\d{14})-[^\/]*\.jpe?g$/i;
+          var _revPhotos = [], _revCams = {};
+          Object.keys(_mz.files).forEach(function(n){
+            if (_mz.files[n].dir) return;
+            var m = n.match(_revRe);
+            if (!m) return;
+            var did = m[1], d = m[2];
+            var ts = d.slice(4,8)+'-'+d.slice(0,2)+'-'+d.slice(2,4)+'T'+d.slice(8,10)+':'+d.slice(10,12)+':'+d.slice(12,14);
+            if (!(did in _revCams)) _revCams[did] = null;   // native export carries no camera names
+            _revPhotos.push({ file: n, cameraId: did, cameraName: null, timestamp: ts, category: null });
+          });
+          if (_revPhotos.length){
+            await runManifestImport(_mz, { source: 'reveal', format: 'oc-cam-pull/1', cameras: _revCams, photos: _revPhotos });
             return;
           }
         }
