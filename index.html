@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 361</div>
+    <div id="buildBadge">BUILD 362</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2271,6 +2271,7 @@
         <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
         <div style="border-top:1px solid var(--border,#33443a);margin:12px 0 0;padding-top:8px;">
           <button type="button" class="btn-ghost" id="galleryDiagnoseBtn" style="width:100%;font-size:11.5px;opacity:.8;">🔍 Diagnose locations (read-only)</button>
+          <button type="button" class="btn-ghost" id="galleryCameraAuditBtn" style="width:100%;font-size:11.5px;opacity:.8;margin-top:6px;">📷 Camera audit (read-only)</button>
         </div>
       </div>
       <div id="galleryGrid"></div>
@@ -6348,6 +6349,76 @@
     });
   }
   document.getElementById('galleryDiagnoseBtn').addEventListener('click', diagnoseLocations);
+
+  // ---------- Camera audit (read-only) ----------
+  // Lays out every camera: photo count, date span, where it is deployed, which cellular serial(s)
+  // are linked to it (oc_campull_map), which locations its photos actually sit at, and flags
+  // duplicate names / orphaned photos / serials pointing at a missing camera. Pure diagnostic.
+  function buildCameraAuditText(){
+    var map = {}; try { map = JSON.parse(localStorage.getItem('oc_campull_map') || '{}'); } catch(e){}
+    var devByCam = {};
+    Object.keys(map).forEach(function(did){ var c = map[did]; (devByCam[c] = devByCam[c] || []).push(did); });
+    var statByCam = {};
+    (typeof importedPhotos !== 'undefined' ? importedPhotos : []).forEach(function(p){
+      var cid = p.cameraId || '(none)';
+      var s = statByCam[cid] = statByCam[cid] || { count:0, min:null, max:null, sites:{}, noSite:0 };
+      s.count++;
+      if (p.timestamp){ if (s.min === null || p.timestamp < s.min) s.min = p.timestamp; if (s.max === null || p.timestamp > s.max) s.max = p.timestamp; }
+      var sn = p.matchedSiteName || (p.matchedSiteId ? ('(site …' + String(p.matchedSiteId).slice(-4) + ')') : null);
+      if (sn) s.sites[sn] = (s.sites[sn] || 0) + 1; else s.noSite++;
+    });
+    var nameCount = {}; cameras.forEach(function(c){ var n = (c.name || '(unnamed)').trim().toLowerCase(); nameCount[n] = (nameCount[n] || 0) + 1; });
+    var camIds = {}; cameras.forEach(function(c){ camIds[c.id] = true; });
+    var fmt = function(iso){ return iso ? String(iso).slice(0, 10) : '?'; };
+    var L = [];
+    L.push('CAMERA AUDIT  ·  ' + cameras.length + ' cameras, ' + (typeof importedPhotos !== 'undefined' ? importedPhotos.length : 0) + ' photos total');
+    L.push('');
+    cameras.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); }).forEach(function(c){
+      var s = statByCam[c.id] || { count:0, min:null, max:null, sites:{}, noSite:0 };
+      var site = c.currentSiteId ? ((sites.filter(function(x){ return x.id === c.currentSiteId; })[0] || {}).name || '(site gone)') : null;
+      var dup = nameCount[(c.name || '(unnamed)').trim().toLowerCase()] > 1;
+      L.push('■ ' + (c.name || '(unnamed)') + (dup ? '   [!] DUPLICATE NAME' : '') + '   (id …' + String(c.id).slice(-6) + ')');
+      L.push('   photos: ' + s.count + (s.count ? ('   dates ' + fmt(s.min) + ' to ' + fmt(s.max)) : ''));
+      L.push('   deployed now at: ' + (site || '(not deployed)'));
+      var devs = devByCam[c.id] || [];
+      if (devs.length) L.push('   cellular serial(s): ' + devs.join(', '));
+      var sn = Object.keys(s.sites);
+      if (sn.length){ sn.sort(function(a,b){ return s.sites[b] - s.sites[a]; }); L.push('   photos by location: ' + sn.slice(0,6).map(function(n){ return n + ' (' + s.sites[n] + ')'; }).join(', ') + (sn.length > 6 ? ', …' : '')); }
+      if (s.noSite) L.push('   [!] ' + s.noSite + ' photos with NO location');
+      L.push('');
+    });
+    Object.keys(statByCam).forEach(function(cid){ if (cid !== '(none)' && !camIds[cid]){ L.push('[!] ORPHAN: ' + statByCam[cid].count + ' photos point at a camera id (…' + String(cid).slice(-6) + ') that no longer exists'); } });
+    if (statByCam['(none)']) L.push('[!] ' + statByCam['(none)'].count + ' photos have NO camera at all');
+    var badDevs = Object.keys(map).filter(function(did){ return !camIds[map[did]]; });
+    if (badDevs.length) L.push('[!] cellular serial(s) linked to a missing camera: ' + badDevs.join(', '));
+    return L.join('\n');
+  }
+  function cameraAudit(){
+    if (!hasChatStorage){ alert('Sign in first so the audit can read your cloud data.'); return; }
+    var txt = buildCameraAuditText();
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100003;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:520px;width:100%;max-height:85vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    card.innerHTML =
+      '<div style="font-weight:700;font-size:15px;margin-bottom:10px;">📷 Camera audit <span style="font-weight:400;font-size:11px;color:#9db0a3;">· read-only</span></div>' +
+      '<pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;background:#1E2B23;border:1px solid #3c4d42;border-radius:8px;padding:11px;margin:0;">' + escapeHtml(txt) + '</pre>' +
+      '<div style="display:flex;gap:8px;margin-top:14px;">' +
+        '<button id="camAuditCopy" style="flex:1;padding:9px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:600;cursor:pointer;">📋 Copy report</button>' +
+        '<button id="camAuditClose" style="flex:1;padding:9px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Close</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.querySelector('#camAuditClose').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('#camAuditCopy').addEventListener('click', function(){
+      var btn = this;
+      var done = function(){ btn.textContent = '✓ Copied — paste it to me'; };
+      if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done, function(){ btn.textContent = '(copy failed — select the text above)'; }); }
+      else { try{ var ta=document.createElement('textarea'); ta.value=txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); done(); }catch(e){ btn.textContent='(copy failed — select the text above)'; } }
+    });
+  }
+  document.getElementById('galleryCameraAuditBtn').addEventListener('click', cameraAudit);
 
   // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
   // Every photo the AI tagged as non-game is a cleanup candidate — empty frames AND humans,
