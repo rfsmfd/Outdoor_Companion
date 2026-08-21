@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 364</div>
+    <div id="buildBadge">BUILD 365</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18331,24 +18331,40 @@
       unresolved.push({ deviceId: did, name: name || ('Camera ' + did.slice(-4)), count: counts[did] });
     });
     if (unresolved.length){
-      var ok = await resolveUnknownCampullCameras(unresolved, manifest);
+      var ok = await resolveUnknownCampullCameras(unresolved, manifest, zip);
       if (!ok){ progress.textContent = ''; return; } // cancelled
     }
     await continueManifestImport(zip, manifest);
   }
 
   // Handle unknown cameras one at a time. Resolves true when all handled, false if cancelled.
-  function resolveUnknownCampullCameras(unresolved, manifest){
+  // Shows a sample photo from each unknown camera so you can recognize the spot (shared cams
+  // arrive with only a serial number, no name).
+  function resolveUnknownCampullCameras(unresolved, manifest, zip){
     return new Promise(function(resolve){
       var i = 0;
+      function sampleUrlFor(deviceId){
+        return new Promise(function(res){
+          try {
+            var ph = (manifest.photos || []).filter(function(p){ return p.cameraId === deviceId; })[0];
+            if (!ph || !ph.file || !zip){ res(null); return; }
+            var key = Object.keys(zip.files).filter(function(n){ return n.toLowerCase() === String(ph.file).toLowerCase(); })[0];
+            if (!key){ res(null); return; }
+            zip.files[key].async('blob').then(function(blob){ res(URL.createObjectURL(blob)); }, function(){ res(null); });
+          } catch(e){ res(null); }
+        });
+      }
       function next(){
         if (i >= unresolved.length){ resolve(true); return; }
-        showCampullCameraChoice(unresolved[i], function(choice){
-          if (!choice){ resolve(false); return; }
-          if (choice.mode === 'existing'){ campullSetMap(unresolved[i].deviceId, choice.ocCamId); i++; next(); }
-          else if (choice.mode === 'skip'){ i++; next(); }
-          else if (choice.mode === 'site'){ createCameraAtExistingSite(unresolved[i], manifest, choice.site).then(function(camId){ campullSetMap(unresolved[i].deviceId, camId); i++; next(); }); }
-          else { createCameraFromCampull(unresolved[i], manifest, choice.loc).then(function(camId){ campullSetMap(unresolved[i].deviceId, camId); i++; next(); }); }
+        sampleUrlFor(unresolved[i].deviceId).then(function(thumb){
+          showCampullCameraChoice(unresolved[i], function(choice){
+            if (thumb){ try { URL.revokeObjectURL(thumb); } catch(e){} }
+            if (!choice){ resolve(false); return; }
+            if (choice.mode === 'existing'){ campullSetMap(unresolved[i].deviceId, choice.ocCamId); i++; next(); }
+            else if (choice.mode === 'skip'){ i++; next(); }
+            else if (choice.mode === 'site'){ createCameraAtExistingSite(unresolved[i], manifest, choice.site).then(function(camId){ campullSetMap(unresolved[i].deviceId, camId); i++; next(); }); }
+            else { createCameraFromCampull(unresolved[i], manifest, choice.loc).then(function(camId){ campullSetMap(unresolved[i].deviceId, camId); i++; next(); }); }
+          }, thumb);
         });
       }
       next();
@@ -18356,7 +18372,8 @@
   }
 
   // Small modal for ONE unknown camera: map to an existing camera, or create + drop it on the map.
-  function showCampullCameraChoice(u, cb){
+  // `thumb` (optional) is an object-URL of a sample photo so you can recognize the spot.
+  function showCampullCameraChoice(u, cb, thumb){
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:6000;display:flex;align-items:center;justify-content:center;padding:18px;';
     var camOpts = cameras.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
@@ -18371,6 +18388,7 @@
     card.style.cssText = 'background:var(--panel);color:#e8f0ea;border:1px solid #33473b;border-radius:14px;max-width:400px;width:100%;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,0.5);';
     card.innerHTML =
       '<div style="font-weight:700;font-size:16px;font-family:Oswald,sans-serif;text-transform:uppercase;letter-spacing:1px;">New camera to set up</div>' +
+      (thumb ? '<img src="' + thumb + '" alt="sample photo from this camera" style="width:100%;height:150px;object-fit:cover;border-radius:8px;margin:10px 0 4px;border:1px solid #3c4d42;"><div style="font-size:11px;color:#9db0a3;margin-bottom:8px;text-align:center;">☝ a sample photo from this camera — recognize the spot?</div>' : '') +
       '<div style="margin:6px 0 14px;font-size:13px;color:#c9d4cc;line-height:1.5;">Outdoor Companion doesn\'t know <strong style="color:#f0dca0;">' + escapeHtml(u.name) + '</strong> yet (' + u.count + ' photo' + (u.count===1?'':'s') + '). Set it up once — it\'s remembered forever by its device id.</div>' +
       (siteOpts ?
         '<label style="font-size:12px;color:#9fb3a6;">This camera sits at one of my saved locations:</label>' +
