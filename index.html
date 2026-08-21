@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 362</div>
+    <div id="buildBadge">BUILD 363</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2272,6 +2272,7 @@
         <div style="border-top:1px solid var(--border,#33443a);margin:12px 0 0;padding-top:8px;">
           <button type="button" class="btn-ghost" id="galleryDiagnoseBtn" style="width:100%;font-size:11.5px;opacity:.8;">🔍 Diagnose locations (read-only)</button>
           <button type="button" class="btn-ghost" id="galleryCameraAuditBtn" style="width:100%;font-size:11.5px;opacity:.8;margin-top:6px;">📷 Camera audit (read-only)</button>
+          <button type="button" class="btn-ghost" id="galleryCameraMergeBtn" style="width:100%;font-size:11.5px;opacity:.8;margin-top:6px;">🔧 Merge / fix a camera</button>
         </div>
       </div>
       <div id="galleryGrid"></div>
@@ -6369,7 +6370,7 @@
     });
     var nameCount = {}; cameras.forEach(function(c){ var n = (c.name || '(unnamed)').trim().toLowerCase(); nameCount[n] = (nameCount[n] || 0) + 1; });
     var camIds = {}; cameras.forEach(function(c){ camIds[c.id] = true; });
-    var fmt = function(iso){ return iso ? String(iso).slice(0, 10) : '?'; };
+    var fmt = function(t){ if (t === null || t === undefined || t === '') return '?'; var n = Number(t); var d = isFinite(n) ? new Date(n) : new Date(t); return isNaN(d.getTime()) ? String(t) : d.toISOString().slice(0, 10); };
     var L = [];
     L.push('CAMERA AUDIT  ·  ' + cameras.length + ' cameras, ' + (typeof importedPhotos !== 'undefined' ? importedPhotos.length : 0) + ' photos total');
     L.push('');
@@ -6419,6 +6420,108 @@
     });
   }
   document.getElementById('galleryCameraAuditBtn').addEventListener('click', cameraAudit);
+
+  // ---------- Merge / fix a camera ----------
+  // Move photos from one camera into another (optionally only those at a given location), carry the
+  // cellular serial mapping over, optionally re-place the moved photos at the target camera's real
+  // deployment location, and delete the source camera if it's left empty. Fixes duplicate/junk
+  // cameras created by an import that didn't know a serial belonged to an existing camera.
+  async function _savePhotoDoc(p){ if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); }catch(e){ console.error('merge save photo', e); } } }
+  function cameraMergeTool(){
+    if (!hasChatStorage){ alert('Sign in first — this edits your cloud data.'); return; }
+    var camOpts = function(sel){ return cameras.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
+      .map(function(c){ var n = (typeof importedPhotos!=='undefined'?importedPhotos:[]).filter(function(p){return p.cameraId===c.id;}).length; return '<option value="'+c.id+'"'+(c.id===sel?' selected':'')+'>'+escapeHtml(c.name||'(unnamed)')+' — '+n+' photos</option>'; }).join(''); };
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:460px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    card.innerHTML =
+      '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">🔧 Merge / fix a camera</div>' +
+      '<div style="font-size:11.5px;color:#9db0a3;margin-bottom:12px;line-height:1.5;">Move photos from one camera into another. Nothing is deleted except an emptied source camera (if you check that box).</div>' +
+      '<label style="font-size:12px;color:#9fb3a6;">Move photos FROM this camera:</label>' +
+      '<select id="mgSrc" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">'+camOpts(null)+'</select>' +
+      '<label style="font-size:12px;color:#9fb3a6;">Only photos currently at location:</label>' +
+      '<select id="mgLoc" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;"></select>' +
+      '<label style="font-size:12px;color:#9fb3a6;">INTO this camera:</label>' +
+      '<select id="mgTgt" style="width:100%;padding:9px;margin:4px 0 12px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">'+camOpts(null)+'</select>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#c9d4cc;margin:0 0 8px;"><input type="checkbox" id="mgReplace" style="margin-top:2px;"> Re-place moved photos at the target camera\'s real location <span style="color:#9db0a3;">(use this when the old location was wrong, e.g. a junk pin)</span></label>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#c9d4cc;margin:0 0 8px;"><input type="checkbox" id="mgSerial" checked style="margin-top:2px;"> Move the cellular serial link to the target too</label>' +
+      '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#c9d4cc;margin:0 0 12px;"><input type="checkbox" id="mgDelSrc" checked style="margin-top:2px;"> Delete the source camera if it ends up empty</label>' +
+      '<div id="mgCount" style="font-size:12.5px;color:#f0dca0;margin-bottom:12px;">—</div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button id="mgGo" style="flex:1;padding:10px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:700;cursor:pointer;">Move photos</button>' +
+        '<button id="mgCancel" style="flex:1;padding:10px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    var srcSel = card.querySelector('#mgSrc'), locSel = card.querySelector('#mgLoc'), tgtSel = card.querySelector('#mgTgt'), countEl = card.querySelector('#mgCount');
+    function photosFor(srcId, locVal){
+      return (typeof importedPhotos!=='undefined'?importedPhotos:[]).filter(function(p){
+        if (p.cameraId !== srcId) return false;
+        if (locVal === '__all__') return true;
+        if (locVal === '__none__') return !p.matchedSiteId;
+        return p.matchedSiteId === locVal;
+      });
+    }
+    function refreshLoc(){
+      var srcId = srcSel.value;
+      var mine = (typeof importedPhotos!=='undefined'?importedPhotos:[]).filter(function(p){ return p.cameraId===srcId; });
+      var byLoc = {}; var noneN = 0;
+      mine.forEach(function(p){ if (p.matchedSiteId){ var k=p.matchedSiteId; byLoc[k]=byLoc[k]||{name:p.matchedSiteName||'(site)',n:0}; byLoc[k].n++; } else noneN++; });
+      var opts = ['<option value="__all__">All locations ('+mine.length+')</option>'];
+      Object.keys(byLoc).sort(function(a,b){return byLoc[b].n-byLoc[a].n;}).forEach(function(k){ opts.push('<option value="'+k+'">'+escapeHtml(byLoc[k].name)+' ('+byLoc[k].n+')</option>'); });
+      if (noneN) opts.push('<option value="__none__">No location ('+noneN+')</option>');
+      locSel.innerHTML = opts.join('');
+      refreshCount();
+    }
+    function refreshCount(){
+      var n = photosFor(srcSel.value, locSel.value).length;
+      var same = srcSel.value === tgtSel.value;
+      countEl.textContent = same ? '⚠️ Source and target are the same camera — pick different cameras.' : ('Will move ' + n + ' photo' + (n===1?'':'s') + '.');
+      card.querySelector('#mgGo').disabled = same || n === 0;
+      card.querySelector('#mgGo').style.opacity = (same || n===0) ? '.5' : '1';
+    }
+    srcSel.addEventListener('change', refreshLoc);
+    locSel.addEventListener('change', refreshCount);
+    tgtSel.addEventListener('change', refreshCount);
+    card.querySelector('#mgCancel').addEventListener('click', close);
+    refreshLoc();
+    card.querySelector('#mgGo').addEventListener('click', async function(){
+      var srcId = srcSel.value, tgtId = tgtSel.value, locVal = locSel.value;
+      if (srcId === tgtId) return;
+      var move = photosFor(srcId, locVal);
+      var srcCam = cameras.filter(function(c){return c.id===srcId;})[0] || {};
+      var tgtCam = cameras.filter(function(c){return c.id===tgtId;})[0] || {};
+      var replace = card.querySelector('#mgReplace').checked;
+      if (!confirm('Move ' + move.length + ' photo(s) from "' + (srcCam.name||'?') + '" into "' + (tgtCam.name||'?') + '"' + (replace?', re-placed at '+(tgtCam.name||'target')+'\'s location':', keeping their current location') + '?\n\nThis can\'t be auto-undone.')) return;
+      var go = this; go.disabled = true; go.textContent = 'Moving…';
+      for (var i=0;i<move.length;i++){
+        var p = move[i];
+        p.cameraId = tgtId;
+        if (replace){ var ms = p.timestamp ? findSiteForCameraAtTime(tgtId, p.timestamp) : null; if (ms){ p.matchedSiteId = ms.id; p.matchedSiteName = ms.name; } }
+        await _savePhotoDoc(p);
+        go.textContent = 'Moving… ' + (i+1) + '/' + move.length;
+      }
+      // carry the cellular serial link across
+      if (card.querySelector('#mgSerial').checked){
+        try { var m = JSON.parse(localStorage.getItem('oc_campull_map')||'{}'); var changed=false; Object.keys(m).forEach(function(did){ if (m[did]===srcId){ m[did]=tgtId; changed=true; } }); if (changed) localStorage.setItem('oc_campull_map', JSON.stringify(m)); } catch(e){}
+      }
+      // delete the source camera if it's now empty
+      var srcLeft = (typeof importedPhotos!=='undefined'?importedPhotos:[]).filter(function(p){ return p.cameraId===srcId; }).length;
+      var deletedCam = false;
+      if (card.querySelector('#mgDelSrc').checked && srcLeft === 0){
+        cameras = cameras.filter(function(c){ return c.id !== srcId; });
+        try { await deleteCameraStorage(srcId); } catch(e){}
+        deletedCam = true;
+      }
+      renderAll();
+      try { populateGalleryFilters(); renderGallery(); } catch(e){}
+      close();
+      alert('Done — moved ' + move.length + ' photo(s) into "' + (tgtCam.name||'?') + '".' + (deletedCam ? '\nDeleted the emptied "' + (srcCam.name||'?') + '" camera.' : '') + '\n\nRun the Camera audit again to confirm.');
+    });
+    refreshCount();
+  }
+  document.getElementById('galleryCameraMergeBtn').addEventListener('click', cameraMergeTool);
 
   // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
   // Every photo the AI tagged as non-game is a cleanup candidate — empty frames AND humans,
