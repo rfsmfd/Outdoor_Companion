@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 357</div>
+    <div id="buildBadge">BUILD 358</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17807,10 +17807,18 @@
   document.getElementById('importLocModalBackdrop').addEventListener('click', function(e){
     if (e.target === this) closeImportLocPicker(true);
   });
+  var _campullOnPlace = null; // when the cam-pull setup flow is placing a camera, the drop-pin Save routes here
   document.getElementById('importLocSaveBtn').addEventListener('click', function(){
     if (!importLocPos) return;
     var name = (document.getElementById('importLocName').value || '').trim();
     if (!name){ alert('Give this location a name so you can reuse it later.'); return; }
+    if (_campullOnPlace){
+      var cb = _campullOnPlace; _campullOnPlace = null;
+      var loc = { lat: importLocPos.lat, lng: importLocPos.lng, name: name, propertyId: importLocSelectedPropertyId || (farmForPoint(importLocPos.lat, importLocPos.lng) || {}).id || null };
+      closeImportLocPicker(false);
+      cb(loc);
+      return;
+    }
     importBatchLocation = {type:'new', lat:importLocPos.lat, lng:importLocPos.lng, name:name};
     updateImportChosenLoc();
     closeImportLocPicker(true);
@@ -17853,10 +17861,26 @@
   }
 
   document.getElementById('importProcessBtn').addEventListener('click', async function(){
-    var cameraId = document.getElementById('importCameraSelect').value;
     var files = document.getElementById('importFileInput').files;
-    if (!cameraId){ alert('Please register a camera first.'); return; }
     if (!files || files.length === 0){ alert('Please choose a ZIP file or select some photos.'); return; }
+    // Companion-tool ZIP? A ZIP with an `oc-cam-pull` manifest.json auto-sorts every photo by its OWN
+    // camera + timestamp (no "pick one camera") — including new/shared cameras you place once. Detected
+    // BEFORE the "register a camera" gate below, since the manifest path never needs a picked camera.
+    if (files.length === 1 && /\.zip$/i.test(files[0].name)){
+      try {
+        var _mz = await JSZip.loadAsync(files[0]);
+        var _mn = Object.keys(_mz.files).filter(function(n){ return /(^|\/)manifest\.json$/i.test(n) && !_mz.files[n].dir; })[0];
+        if (_mn){
+          var _man = null; try { _man = JSON.parse(await _mz.files[_mn].async('string')); } catch(e){}
+          if (_man && typeof _man.format === 'string' && _man.format.indexOf('oc-cam-pull/') === 0){
+            await runManifestImport(_mz, _man);
+            return;
+          }
+        }
+      } catch(e){ console.error('Outdoor Companion: manifest peek failed', e); }
+    }
+    var cameraId = document.getElementById('importCameraSelect').value;
+    if (!cameraId){ alert('Please register a camera first.'); return; }
 
     var progress = document.getElementById('importProgress');
     progress.style.display = 'block';
@@ -18056,6 +18080,178 @@
       }
     }
   });
+
+  // ================= Companion cam-pull: smart import by manifest =================
+  // A ZIP from the Cam-Pull companion tool carries a manifest.json ({cameras, photos:[{file, cameraId
+  // (device), cameraName, timestamp, category}]}). We auto-sort every photo onto the right camera
+  // (matched by the permanent DEVICE id) and its deployment site by timestamp. New/shared cameras are
+  // set up ONCE (map to an existing camera, or create + drop a pin), remembered by device id forever.
+  // Moves ride on deployment history (no special logic). Photos are cloud-only (needs sign-in).
+  function campullGetMap(){ try { return JSON.parse(localStorage.getItem('oc_campull_map') || '{}'); } catch(e){ return {}; } }
+  function campullSetMap(deviceId, ocCamId){ try { var m = campullGetMap(); m[deviceId] = ocCamId; localStorage.setItem('oc_campull_map', JSON.stringify(m)); } catch(e){} }
+
+  async function runManifestImport(zip, manifest){
+    var progress = document.getElementById('importProgress');
+    if (!cloudPhotosAvailable()){ alert('Please sign in first — imported photos are saved to your cloud account.'); return; }
+    var manCams = manifest.cameras || {};
+    var photos = manifest.photos || [];
+    var counts = {};
+    photos.forEach(function(p){ if (p.cameraId) counts[p.cameraId] = (counts[p.cameraId] || 0) + 1; });
+    var ids = Object.keys(counts);
+    if (!ids.length){ alert('That ZIP\'s manifest has no photos in it.'); return; }
+    // Resolve each device id → an Outdoor Companion camera: (a) remembered map, (b) auto-match by name.
+    var map = campullGetMap();
+    var unresolved = [];
+    ids.forEach(function(did){
+      var name = manCams[did] || null;
+      if (map[did] && cameras.some(function(c){ return c.id === map[did]; })) return;
+      if (name){
+        var m = cameras.filter(function(c){ return (c.name || '').trim().toLowerCase() === name.trim().toLowerCase(); })[0];
+        if (m){ campullSetMap(did, m.id); return; }
+      }
+      unresolved.push({ deviceId: did, name: name || ('Camera ' + did.slice(-4)), count: counts[did] });
+    });
+    if (unresolved.length){
+      var ok = await resolveUnknownCampullCameras(unresolved, manifest);
+      if (!ok){ progress.textContent = ''; return; } // cancelled
+    }
+    await continueManifestImport(zip, manifest);
+  }
+
+  // Handle unknown cameras one at a time. Resolves true when all handled, false if cancelled.
+  function resolveUnknownCampullCameras(unresolved, manifest){
+    return new Promise(function(resolve){
+      var i = 0;
+      function next(){
+        if (i >= unresolved.length){ resolve(true); return; }
+        showCampullCameraChoice(unresolved[i], function(choice){
+          if (!choice){ resolve(false); return; }
+          if (choice.mode === 'existing'){ campullSetMap(unresolved[i].deviceId, choice.ocCamId); i++; next(); }
+          else if (choice.mode === 'skip'){ i++; next(); }
+          else { createCameraFromCampull(unresolved[i], manifest, choice.loc).then(function(camId){ campullSetMap(unresolved[i].deviceId, camId); i++; next(); }); }
+        });
+      }
+      next();
+    });
+  }
+
+  // Small modal for ONE unknown camera: map to an existing camera, or create + drop it on the map.
+  function showCampullCameraChoice(u, cb){
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:6000;display:flex;align-items:center;justify-content:center;padding:18px;';
+    var camOpts = cameras.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
+      .map(function(c){ return '<option value="' + c.id + '">' + escapeHtml(c.name || '(unnamed)') + '</option>'; }).join('');
+    var card = document.createElement('div');
+    card.style.cssText = 'background:var(--panel);color:#e8f0ea;border:1px solid #33473b;border-radius:14px;max-width:400px;width:100%;padding:18px;box-shadow:0 12px 40px rgba(0,0,0,0.5);';
+    card.innerHTML =
+      '<div style="font-weight:700;font-size:16px;font-family:Oswald,sans-serif;text-transform:uppercase;letter-spacing:1px;">New camera to set up</div>' +
+      '<div style="margin:6px 0 14px;font-size:13px;color:#c9d4cc;line-height:1.5;">Outdoor Companion doesn\'t know <strong style="color:#f0dca0;">' + escapeHtml(u.name) + '</strong> yet (' + u.count + ' photo' + (u.count===1?'':'s') + '). Set it up once — it\'s remembered forever by its device id.</div>' +
+      (camOpts ?
+        '<label style="font-size:12px;color:#9fb3a6;">This is one of my existing cameras:</label>' +
+        '<div style="display:flex;gap:8px;margin:4px 0 12px;">' +
+          '<select id="cpChoiceCam" style="flex:1;padding:9px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">' + camOpts + '</select>' +
+          '<button id="cpUseExisting" class="btn-ghost" style="padding:9px 12px;white-space:nowrap;">Use this</button>' +
+        '</div><div style="text-align:center;font-size:11px;color:#8a9a82;margin:6px 0;">— or —</div>'
+        : '') +
+      '<button id="cpCreateNew" class="btn-primary" style="width:100%;padding:11px;">📍 Create it &amp; drop it on the map</button>' +
+      '<div style="display:flex;gap:8px;margin-top:12px;">' +
+        '<button id="cpSkip" class="btn-ghost" style="flex:1;padding:8px;font-size:12px;color:#9fb3a6;">Skip this camera</button>' +
+        '<button id="cpCancel" class="btn-ghost" style="flex:1;padding:8px;font-size:12px;color:#D94A2E;">Cancel import</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) back.parentNode.removeChild(back); }
+    var ue = card.querySelector('#cpUseExisting'); if (ue) ue.addEventListener('click', function(){ var id = card.querySelector('#cpChoiceCam').value; close(); cb({ mode: 'existing', ocCamId: id }); });
+    card.querySelector('#cpCreateNew').addEventListener('click', function(){
+      close();
+      _campullOnPlace = function(loc){ cb({ mode: 'new', loc: loc }); };
+      openImportLocPicker();
+      setTimeout(function(){ var ni = document.getElementById('importLocName'); if (ni && !ni.value) ni.value = u.name; }, 60);
+    });
+    card.querySelector('#cpSkip').addEventListener('click', function(){ close(); cb({ mode: 'skip' }); });
+    card.querySelector('#cpCancel').addEventListener('click', function(){ close(); cb(null); });
+  }
+
+  // Create an OC camera + a camera-site at the dropped pin + a back-dated deployment so ALL this
+  // camera's pulled photos place on the first pass. Returns the new camera id.
+  async function createCameraFromCampull(u, manifest, loc){
+    var cam = { id: uid(), name: u.name, createdAt: Date.now(), currentSiteId: null, lastDeployedAt: null, make: (manifest.source || ''), model: '', notes: 'From ' + (manifest.source || 'cam pull') + ' · device ' + u.deviceId };
+    cameras.push(cam); try { await saveCamera(cam); } catch(e){ console.error('campull saveCamera', e); }
+    var site = { id: uid(), name: loc.name, type: 'camera', notes: 'Camera location (set during photo import)', lat: loc.lat, lng: loc.lng, createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: loc.propertyId || (farmForPoint(loc.lat, loc.lng) || {}).id || null };
+    sites.push(site); try { await saveSite(site); } catch(e){ console.error('campull saveSite', e); }
+    var earliest = (manifest.photos || []).filter(function(p){ return p.cameraId === u.deviceId && p.timestamp; })
+      .map(function(p){ return new Date(p.timestamp).getTime(); }).filter(function(t){ return isFinite(t); }).sort(function(a,b){ return a - b; })[0] || Date.now();
+    try { await ensureCoastingDeployment(cam.id, site, earliest); } catch(e){ console.error('campull deployment', e); }
+    cam.currentSiteId = site.id; cam.lastDeployedAt = earliest; try { await saveCamera(cam); } catch(e){}
+    return cam.id;
+  }
+
+  // Import the manifest's photos — each onto its own camera + deployment-site by timestamp.
+  async function continueManifestImport(zip, manifest){
+    document.getElementById('importPhotosModalBackdrop').classList.add('show');   // the picker may have closed it
+    var fx = document.getElementById('importPhotosFixedClose'); if (fx) fx.classList.add('show');
+    var progress = document.getElementById('importProgress');
+    progress.style.display = 'block';
+    document.getElementById('importPickerArea').style.display = 'none';
+    var map = campullGetMap();
+    var photos = manifest.photos || [];
+    var entryByName = {}; Object.keys(zip.files).forEach(function(n){ entryByName[n.toLowerCase()] = n; });
+    var seenHash = {}, seenMeta = {};
+    importedPhotos.forEach(function(p){ if (p.contentHash) seenHash[p.contentHash] = true; if (!p.usedFallbackDate) seenMeta[(p.cameraId||'') + '|' + (p.timestamp||'') + '|' + (p.filename||'')] = true; });
+    var results = [], skipped = 0, noCam = 0;
+    for (var i = 0; i < photos.length; i++){
+      var mp = photos[i];
+      progress.textContent = 'Importing ' + (i+1) + ' of ' + photos.length + '…';
+      var ocCamId = map[mp.cameraId];
+      if (!ocCamId){ noCam++; continue; }
+      var realName = entryByName[(mp.file || '').toLowerCase()];
+      if (!realName || !zip.files[realName]) continue;
+      var blob = await zip.files[realName].async('blob');
+      var ts = mp.timestamp ? new Date(mp.timestamp).getTime() : null;
+      if (!isFinite(ts)) ts = null;
+      var contentHash = await sha256Hex(blob);
+      var metaKey = ts ? (ocCamId + '|' + ts + '|' + mp.file) : null;
+      if ((contentHash && seenHash[contentHash]) || (metaKey && seenMeta[metaKey])){ skipped++; continue; }
+      if (contentHash) seenHash[contentHash] = true;
+      if (metaKey) seenMeta[metaKey] = true;
+      var matchedSite = ts ? findSiteForCameraAtTime(ocCamId, ts) : null;
+      var objectUrl = URL.createObjectURL(blob);
+      var record = {
+        id: uid(), cameraId: ocCamId, filename: mp.file, timestamp: ts,
+        usedFallbackDate: !ts, timestampSource: ts ? 'filename' : 'file date', contentHash: contentHash,
+        matchedSiteId: matchedSite ? matchedSite.id : null, matchedSiteName: matchedSite ? matchedSite.name : null,
+        objectUrl: objectUrl, blob: blob
+      };
+      if (cloudPhotosAvailable()) progress.textContent = 'Uploading ' + (i+1) + ' of ' + photos.length + '…';
+      await persistImportedPhoto(record);
+      results.push(record);
+    }
+    renderAll();
+    results.sort(function(a,b){ return (a.timestamp||0) - (b.timestamp||0); });
+    var grid = document.getElementById('importResultsGrid'); grid.innerHTML = '';
+    results.forEach(function(r){
+      var pdoc = importedPhotos.filter(function(d){ return d.id === r.id; })[0] || r;
+      var card = document.createElement('div'); card.className = 'import-photo-card'; card.setAttribute('data-photo-id', r.id);
+      var dateStr = r.timestamp ? new Date(r.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'}) : 'No date';
+      var camName = (cameras.filter(function(c){ return c.id === r.cameraId; })[0] || {}).name || '';
+      card.innerHTML =
+        '<img src="' + r.objectUrl + '" alt="">' +
+        '<div class="meta">' +
+          '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
+          '<div class="site' + (r.matchedSiteName ? '' : ' unmatched') + '">' + escapeHtml(camName) + (r.matchedSiteName ? ' · ' + escapeHtml(r.matchedSiteName) : ' · No site') + '</div>' +
+          '<div class="cond">' + photoConditionHtml(pdoc) + '</div>' +
+        '</div>';
+      grid.appendChild(card);
+    });
+    var notes = [];
+    if (skipped) notes.push('skipped ' + skipped + ' already imported');
+    if (noCam) notes.push(noCam + ' from skipped cameras');
+    progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' sorted by camera + date' + (notes.length ? ' (' + notes.join(', ') + ')' : '') + '.';
+    var newDocs = importedPhotos.filter(function(d){ return results.some(function(r){ return r.id === d.id; }); });
+    if (newDocs.length){
+      enrichPhotoDocs(newDocs, function(done, total){ progress.textContent = 'Done — ' + results.length + ' sorted. Adding conditions ' + done + '/' + total + '…'; })
+        .then(function(){ progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' sorted by camera + date, conditions added.'; });
+    }
+  }
 
   async function deleteCameraFlow(camId){
     var cam = cameras.filter(function(c){ return c.id === camId; })[0];
