@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 359</div>
+    <div id="buildBadge">BUILD 360</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18226,15 +18226,30 @@
     var entryByName = {}; Object.keys(zip.files).forEach(function(n){ entryByName[n.toLowerCase()] = n; });
     var seenHash = {}, seenMeta = {};
     importedPhotos.forEach(function(p){ if (p.contentHash) seenHash[p.contentHash] = true; if (!p.usedFallbackDate) seenMeta[(p.cameraId||'') + '|' + (p.timestamp||'') + '|' + (p.filename||'')] = true; });
-    var results = [], skipped = 0, noCam = 0;
+    var results = [], skipped = 0, noCam = 0, failed = 0, done = 0;
+    var total = photos.length;
+    var BATCH = 4;               // upload this many photos concurrently (fast without slamming Firebase)
+    var pending = [];
+    // Upload the current pending batch in parallel; a single failure is logged and counted,
+    // never aborts the whole import.
+    function fireBatch(){
+      var batch = pending; pending = [];
+      return Promise.all(batch.map(function(rec){
+        return persistImportedPhoto(rec).then(function(){ results.push(rec); },
+          function(err){ console.error('campull persist', err); failed++; try { URL.revokeObjectURL(rec.objectUrl); } catch(e){} });
+      })).then(function(){ done += batch.length; progress.textContent = 'Uploading ' + Math.min(done, total) + ' of ' + total + '…'; });
+    }
+    // Building each record (unzip + hash + dedup) stays sequential so the dedup guard can't race
+    // itself; only the slow network upload is batched.
     for (var i = 0; i < photos.length; i++){
       var mp = photos[i];
-      progress.textContent = 'Importing ' + (i+1) + ' of ' + photos.length + '…';
+      if ((i % 8) === 0) progress.textContent = 'Reading ' + (i+1) + ' of ' + total + '…';
       var ocCamId = map[mp.cameraId];
       if (!ocCamId){ noCam++; continue; }
       var realName = entryByName[(mp.file || '').toLowerCase()];
       if (!realName || !zip.files[realName]) continue;
-      var blob = await zip.files[realName].async('blob');
+      var blob;
+      try { blob = await zip.files[realName].async('blob'); } catch(e){ console.error('campull unzip', e); failed++; continue; }
       var ts = mp.timestamp ? new Date(mp.timestamp).getTime() : null;
       if (!isFinite(ts)) ts = null;
       var contentHash = await sha256Hex(blob);
@@ -18250,10 +18265,10 @@
         matchedSiteId: matchedSite ? matchedSite.id : null, matchedSiteName: matchedSite ? matchedSite.name : null,
         objectUrl: objectUrl, blob: blob
       };
-      if (cloudPhotosAvailable()) progress.textContent = 'Uploading ' + (i+1) + ' of ' + photos.length + '…';
-      await persistImportedPhoto(record);
-      results.push(record);
+      pending.push(record);
+      if (pending.length >= BATCH) await fireBatch();
     }
+    if (pending.length) await fireBatch();
     renderAll();
     results.sort(function(a,b){ return (a.timestamp||0) - (b.timestamp||0); });
     var grid = document.getElementById('importResultsGrid'); grid.innerHTML = '';
@@ -18274,6 +18289,7 @@
     var notes = [];
     if (skipped) notes.push('skipped ' + skipped + ' already imported');
     if (noCam) notes.push(noCam + ' from skipped cameras');
+    if (failed) notes.push(failed + ' failed to upload');
     progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' sorted by camera + date' + (notes.length ? ' (' + notes.join(', ') + ')' : '') + '.';
     var newDocs = importedPhotos.filter(function(d){ return results.some(function(r){ return r.id === d.id; }); });
     if (newDocs.length){
