@@ -19,7 +19,7 @@
  * Bump VERSION on every build so old shell/lib caches are cleared on activate. The tile
  * caches are intentionally NOT version-suffixed — saved offline maps survive app updates.
  */
-var VERSION = 'b355';
+var VERSION = 'b357';
 var SHELL_CACHE = 'oc-shell-' + VERSION;
 var LIB_CACHE   = 'oc-lib-' + VERSION;
 var TILE_RUNTIME = 'oc-tiles-runtime';   // rolling, auto-filled as you pan (LRU-trimmed)
@@ -33,6 +33,7 @@ var LIBS = [
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
+  'https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate.js',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js',
   'https://cdn.jsdelivr.net/npm/d3-array@3',
