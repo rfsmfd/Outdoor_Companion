@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 363</div>
+    <div id="buildBadge">BUILD 364</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6442,8 +6442,8 @@
       '<select id="mgSrc" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">'+camOpts(null)+'</select>' +
       '<label style="font-size:12px;color:#9fb3a6;">Only photos currently at location:</label>' +
       '<select id="mgLoc" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;"></select>' +
-      '<label style="font-size:12px;color:#9fb3a6;">INTO this camera:</label>' +
-      '<select id="mgTgt" style="width:100%;padding:9px;margin:4px 0 12px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">'+camOpts(null)+'</select>' +
+      '<label style="font-size:12px;color:#9fb3a6;">INTO this camera (or delete):</label>' +
+      '<select id="mgTgt" style="width:100%;padding:9px;margin:4px 0 12px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;"><option value="__delete__">🗑 Delete these photos instead (permanent)</option>'+camOpts(null)+'</select>' +
       '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#c9d4cc;margin:0 0 8px;"><input type="checkbox" id="mgReplace" style="margin-top:2px;"> Re-place moved photos at the target camera\'s real location <span style="color:#9db0a3;">(use this when the old location was wrong, e.g. a junk pin)</span></label>' +
       '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#c9d4cc;margin:0 0 8px;"><input type="checkbox" id="mgSerial" checked style="margin-top:2px;"> Move the cellular serial link to the target too</label>' +
       '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:#c9d4cc;margin:0 0 12px;"><input type="checkbox" id="mgDelSrc" checked style="margin-top:2px;"> Delete the source camera if it ends up empty</label>' +
@@ -6455,6 +6455,7 @@
     back.appendChild(card); document.body.appendChild(back);
     function close(){ if (back.parentNode) document.body.removeChild(back); }
     var srcSel = card.querySelector('#mgSrc'), locSel = card.querySelector('#mgLoc'), tgtSel = card.querySelector('#mgTgt'), countEl = card.querySelector('#mgCount');
+    tgtSel.selectedIndex = Math.min(1, tgtSel.options.length - 1); // default to a real camera, not the delete option
     function photosFor(srcId, locVal){
       return (typeof importedPhotos!=='undefined'?importedPhotos:[]).filter(function(p){
         if (p.cameraId !== srcId) return false;
@@ -6476,10 +6477,17 @@
     }
     function refreshCount(){
       var n = photosFor(srcSel.value, locSel.value).length;
-      var same = srcSel.value === tgtSel.value;
-      countEl.textContent = same ? '⚠️ Source and target are the same camera — pick different cameras.' : ('Will move ' + n + ' photo' + (n===1?'':'s') + '.');
-      card.querySelector('#mgGo').disabled = same || n === 0;
-      card.querySelector('#mgGo').style.opacity = (same || n===0) ? '.5' : '1';
+      var isDel = tgtSel.value === '__delete__';
+      var same = !isDel && srcSel.value === tgtSel.value;
+      var go = card.querySelector('#mgGo');
+      countEl.textContent = same ? '⚠️ Source and target are the same camera — pick different cameras.'
+        : (isDel ? ('🗑 Will PERMANENTLY DELETE ' + n + ' photo' + (n===1?'':'s') + '.') : ('Will move ' + n + ' photo' + (n===1?'':'s') + '.'));
+      go.textContent = isDel ? 'Delete photos' : 'Move photos';
+      go.style.background = isDel ? '#D94A2E' : '#FF6A13';
+      go.disabled = same || n === 0;
+      go.style.opacity = (same || n===0) ? '.5' : '1';
+      // re-place is meaningless when deleting
+      var rp = card.querySelector('#mgReplace'); if (rp){ rp.disabled = isDel; rp.parentElement.style.opacity = isDel ? '.4' : '1'; }
     }
     srcSel.addEventListener('change', refreshLoc);
     locSel.addEventListener('change', refreshCount);
@@ -6488,9 +6496,26 @@
     refreshLoc();
     card.querySelector('#mgGo').addEventListener('click', async function(){
       var srcId = srcSel.value, tgtId = tgtSel.value, locVal = locSel.value;
-      if (srcId === tgtId) return;
-      var move = photosFor(srcId, locVal);
       var srcCam = cameras.filter(function(c){return c.id===srcId;})[0] || {};
+      var move = photosFor(srcId, locVal);
+      var go = this;
+      // ---- DELETE branch ----
+      if (tgtId === '__delete__'){
+        if (!move.length) return;
+        var locName = locVal === '__all__' ? 'all locations' : (locVal === '__none__' ? 'no location' : ((locSel.options[locSel.selectedIndex]||{}).text || 'this location'));
+        if (!confirm('PERMANENTLY delete ' + move.length + ' photo(s) from "' + (srcCam.name||'?') + '" (' + locName + ')?\n\nThis frees their cloud storage and CANNOT be undone.')) return;
+        go.disabled = true; go.textContent = 'Deleting…';
+        for (var d=0; d<move.length; d++){ var dp = move[d]; try { await deletePhotoStorage(dp); } catch(e){ console.error('merge delete', e); } importedPhotos = importedPhotos.filter(function(x){ return x.id !== dp.id; }); go.textContent = 'Deleting… ' + (d+1) + '/' + move.length; }
+        var leftAfterDel = importedPhotos.filter(function(p){ return p.cameraId===srcId; }).length;
+        var delCam = false;
+        if (card.querySelector('#mgDelSrc').checked && leftAfterDel === 0){ cameras = cameras.filter(function(c){ return c.id !== srcId; }); try { await deleteCameraStorage(srcId); } catch(e){} delCam = true; }
+        renderAll(); try { populateGalleryFilters(); renderGallery(); } catch(e){}
+        close();
+        alert('Done — deleted ' + move.length + ' photo(s) from "' + (srcCam.name||'?') + '".' + (delCam ? '\nDeleted the emptied "' + (srcCam.name||'?') + '" camera.' : '') + '\nThe location stays on your map.');
+        return;
+      }
+      // ---- MOVE branch ----
+      if (srcId === tgtId) return;
       var tgtCam = cameras.filter(function(c){return c.id===tgtId;})[0] || {};
       var replace = card.querySelector('#mgReplace').checked;
       if (!confirm('Move ' + move.length + ' photo(s) from "' + (srcCam.name||'?') + '" into "' + (tgtCam.name||'?') + '"' + (replace?', re-placed at '+(tgtCam.name||'target')+'\'s location':', keeping their current location') + '?\n\nThis can\'t be auto-undone.')) return;
