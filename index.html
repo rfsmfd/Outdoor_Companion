@@ -1928,7 +1928,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 391</div>
+    <div id="buildBadge">BUILD 392</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17076,6 +17076,25 @@
     var sunLabels = sunOrder.filter(function(s){ return sunCounts[s]; });
     if (sunLabels.length){
       buildBarChart(makeChartCanvas(chartsGrid, '☀️ By Time of Day', 'chartSun'), sunLabels, sunLabels.map(function(s){ return sunCounts[s]; }), 'Count');
+    }
+
+    // By Hour of Day — the actual clock hour (0–23), finer than the sun-phase buckets, for
+    // pinpointing exact movement windows day AND night (founder request 2026-08-22). All 24 hours
+    // are shown (zeros included) so the daily rhythm reads as a continuous curve — the dawn/dusk
+    // peaks and the midday lull. Hour comes from each event's capture time (local).
+    var hourCounts = groupCount(relevantObs, function(o){
+      if (!o.createdAt) return null;
+      var h = new Date(o.createdAt).getHours();
+      return isFinite(h) ? h : null;
+    });
+    var hourLabels = [], hourData = [], anyHour = false;
+    for (var _h = 0; _h < 24; _h++){
+      var ap = _h < 12 ? 'a' : 'p', hr = _h % 12; if (hr === 0) hr = 12;
+      hourLabels.push(hr + ap);
+      var c = hourCounts[_h] || 0; hourData.push(c); if (c) anyHour = true;
+    }
+    if (anyHour){
+      buildBarChart(makeChartCanvas(chartsGrid, '🕐 By Hour of Day', 'chartHour'), hourLabels, hourData, 'Count');
     }
 
     // By Solunar Period
