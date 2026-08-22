@@ -1901,7 +1901,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 375</div>
+    <div id="buildBadge">BUILD 376</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -15492,21 +15492,11 @@
     signout.innerHTML = '<button type="button" id="oc-refresh-btn" title="Reload the app">🔄 Refresh</button><select id="oc-scope-select" title="Switch between your private data and a shared group"></select><span id="oc-signout-email"></span><button type="button">Sign out</button>';
     document.body.appendChild(signout);
     var refreshBtn = document.getElementById('oc-refresh-btn');
-    if (refreshBtn) refreshBtn.addEventListener('click', async function(){
-      // TEMPORARY DIAGNOSTIC (B375): isolate what makes Refresh sign you out. Runs NO data reload —
-      // just reports state + a forced token renew, so we can see exactly where the session dies.
-      var L = [];
-      var u = null; try { u = firebase.auth().currentUser; } catch(e){ L.push('currentUser threw: ' + e); }
-      L.push('1. signedIn: ' + !!u);
-      L.push('2. hasChatStorage: ' + hasChatStorage);
-      L.push('3. scope: ' + JSON.stringify(activeScope));
-      if (u && u.getIdToken){
-        try { var t = await u.getIdToken(true); L.push('4. token renew: OK (' + (t ? t.length : 0) + ' chars)'); }
-        catch(e){ L.push('4. token renew: ERROR code=' + (e && e.code) + ' msg=' + (e && e.message)); }
-      } else { L.push('4. (no currentUser to renew)'); }
-      var after = null; try { after = firebase.auth().currentUser; } catch(e){}
-      L.push('5. signedIn AFTER renew: ' + !!after);
-      alert('REFRESH DIAGNOSTIC — nothing else ran.\nRead these lines back to Claude:\n\n' + L.join('\n'));
+    if (refreshBtn) refreshBtn.addEventListener('click', function(){
+      // A clean reload re-inits Firebase and re-reads your saved login from storage — the same path
+      // the desktop-icon launch uses, which keeps you signed in. (Touching the token IN PLACE was
+      // dropping the session — see B375 diagnostic — so we reload instead.)
+      try { location.reload(); } catch(e){ window.location.href = window.location.href; }
     });
 
     var mode = 'signin';
