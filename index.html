@@ -1214,6 +1214,18 @@
   .query-builder-row{ display:flex; flex-wrap:wrap; gap:12px; }
   .query-builder-group{ min-width:150px; flex:1; }
   .query-builder-group label{ display:block; font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px; }
+  /* Attribute-condition builder (ArcGIS-style rows) */
+  .qb-conditions-section{ margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--line); }
+  .qb-cond-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:6px; }
+  .qb-cond-head label{ font-size:10.5px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.4px; }
+  .qb-comb-btn{ font-size:10.5px; padding:3px 8px; border-radius:5px; border:1px solid var(--line); background:transparent; color:var(--text-dim); cursor:pointer; }
+  .qb-comb-btn.active{ background:var(--accent); color:#14201a; border-color:var(--accent); font-weight:700; }
+  .qb-cond-row{ display:flex; align-items:center; flex-wrap:wrap; gap:6px; margin-bottom:6px; }
+  .qb-cond-row select, .qb-cond-row input{ padding:5px 7px; font-size:12px; border-radius:5px; }
+  .qb-joiner{ font-size:10px; font-weight:700; color:var(--accent); min-width:40px; text-align:right; letter-spacing:0.5px; }
+  .qb-joiner.qb-where{ color:var(--text-dim); }
+  .qb-del{ background:transparent; border:none; color:#D94A2E; cursor:pointer; font-size:14px; padding:2px 5px; line-height:1; }
+  .qb-del:hover{ color:#ff6a4a; }
   .query-count-result{
     font-family:'Oswald',sans-serif;
     font-size:32px;
@@ -1928,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 393</div>
+    <div id="buildBadge">BUILD 394</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2765,6 +2777,8 @@
   var queryPropertyId = null;
   var queryGroupBy = 'moon'; // dimension to break the results down by
   var queryVizType = 'bar'; // 'bar' | 'pie' | 'count'
+  var queryConditions = []; // ArcGIS-style attribute expressions: [{field, op, val, val2}]
+  var queryCombiner = 'AND'; // how the conditions combine: 'AND' (match all) | 'OR' (match any)
   var queryDrawnLayer = null; // the Leaflet.draw shape, if one has been drawn
   var queryDrawControl = null;
   var queryDrawnItems = null;
@@ -16038,6 +16052,137 @@
   // downloading this code at all below the breakpoint) is a locked-in requirement before
   // this section grows large enough for that download cost to matter — not yet needed at
   // today's size, but not to be skipped later under time pressure either.
+  // ---------- Attribute query engine (ArcGIS "Select By Attributes"–style, no AI) ----------
+  // Each queryable FIELD knows how to pull its value off a detection event, its type (category vs
+  // number), and (for categories) the set of allowed values. Conditions are evaluated purely in JS.
+  function qbFields(){
+    var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    var wx = function(o){ return (o.weatherStatus === 'ok' && o.weather) ? o.weather : null; };
+    var f = [
+      { key:'species', label:'Species', type:'cat', get:function(o){ return o.species || null; } },
+      { key:'isBuck', label:'Is a buck', type:'cat', vals:['yes','no'], get:function(o){ return o.isBuck ? 'yes' : 'no'; } },
+      { key:'site', label:'Site', type:'cat', get:function(o){ if (!o.siteId) return 'Unlinked'; var s = sites.filter(function(x){ return x.id === o.siteId; })[0]; return s ? s.name : 'Unlinked'; } },
+      { key:'property', label:'Property', type:'cat', get:function(o){ if (!o.propertyId) return 'Unassigned'; var p = properties.filter(function(x){ return x.id === o.propertyId; })[0]; return p ? p.name : 'Unassigned'; } },
+      { key:'hour', label:'Hour of day (0–23)', type:'num', get:function(o){ return o.createdAt ? new Date(o.createdAt).getHours() : null; } },
+      { key:'month', label:'Month', type:'cat', vals:monthNames, get:function(o){ return o.createdAt ? monthNames[new Date(o.createdAt).getMonth()] : null; } },
+      { key:'moon', label:'Moon phase', type:'cat', vals:['New Moon','Waxing Crescent','First Quarter','Waxing Gibbous','Full Moon','Waning Gibbous','Last Quarter','Waning Crescent'], get:function(o){ return o.moonPhase ? o.moonPhase.name : null; } },
+      { key:'solunar', label:'Solunar period', type:'cat', vals:['Major Period','Minor Period','Neither'], get:function(o){ return o.solunarPeriod || 'Neither'; } },
+      { key:'sunPhase', label:'Time of day', type:'cat', vals:['Dawn','Sunrise','Daytime','Sunset','Dusk','Night'], get:function(o){ var w = wx(o); return w ? w.sunPhase : null; } },
+      { key:'windDir', label:'Wind direction', type:'cat', vals:['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'], get:function(o){ var w = wx(o); return w ? w.windDir : null; } },
+      { key:'windMph', label:'Wind speed (mph)', type:'num', get:function(o){ var w = wx(o); return w ? w.windMph : null; } },
+      { key:'pressureTrend', label:'Pressure trend', type:'cat', vals:['Rising','Falling','Steady'], get:function(o){ var w = wx(o); return w ? w.pressureTrend : null; } },
+      { key:'pressureInHg', label:'Pressure (inHg)', type:'num', get:function(o){ var w = wx(o); return w ? w.pressureInHg : null; } },
+      { key:'tempF', label:'Temperature (°F)', type:'num', get:function(o){ var w = wx(o); return w ? w.tempF : null; } }
+    ];
+    if (activeModule === 'fishing'){
+      f.push({ key:'lure', label:'Lure', type:'cat', get:function(o){ return o.lure || null; } });
+      f.push({ key:'lureColor', label:'Lure color', type:'cat', get:function(o){ return o.lureColor || null; } });
+      f.push({ key:'weight', label:'Weight (lb)', type:'num', get:function(o){ return (typeof o.weight === 'number') ? o.weight : null; } });
+      f.push({ key:'length', label:'Length (in)', type:'num', get:function(o){ return (typeof o.length === 'number') ? o.length : null; } });
+    }
+    return f;
+  }
+  function qbFieldByKey(k){ var a = qbFields(); for (var i=0;i<a.length;i++){ if (a[i].key === k) return a[i]; } return null; }
+  // Distinct values a category field actually takes across the (unfiltered) event set — so the value
+  // dropdown only offers values that exist. Falls back to the field's declared `vals` when present.
+  function qbDistinctValues(field){
+    if (field.vals) return field.vals.slice();
+    var seen = {}, evs = buildAnalyticsEvents();
+    evs.forEach(function(o){ var v = field.get(o); if (v != null && v !== '') seen[v] = true; });
+    return Object.keys(seen).sort();
+  }
+  var QB_OPS_NUM = [['eq','='],['ne','≠'],['lt','<'],['le','≤'],['gt','>'],['ge','≥'],['between','between']];
+  var QB_OPS_CAT = [['is','is'],['isnot','is not']];
+  function qbEval(o, c){
+    var f = qbFieldByKey(c.field); if (!f) return true;
+    var v = f.get(o);
+    if (f.type === 'num'){
+      var x = (typeof v === 'number') ? v : parseFloat(v);
+      if (isNaN(x)) return false;
+      var a = parseFloat(c.val), b = parseFloat(c.val2);
+      switch (c.op){
+        case 'eq': return x === a;
+        case 'ne': return x !== a;
+        case 'lt': return x < a;
+        case 'le': return x <= a;
+        case 'gt': return x > a;
+        case 'ge': return x >= a;
+        case 'between': return (isNaN(a)||isNaN(b)) ? true : (x >= Math.min(a,b) && x <= Math.max(a,b));
+      }
+      return true;
+    }
+    var sv = (v == null) ? '' : String(v);
+    return (c.op === 'isnot') ? (sv !== c.val) : (sv === c.val);
+  }
+  // A condition is "complete" enough to apply once it has a value (blank rows are ignored, so a
+  // half-typed row never silently zeroes the results).
+  function qbConditionReady(c){
+    if (!c.field || !c.op) return false;
+    if (c.op === 'between') return c.val !== '' && c.val != null && c.val2 !== '' && c.val2 != null;
+    return c.val !== '' && c.val != null;
+  }
+  function qbMatches(o){
+    var active = queryConditions.filter(qbConditionReady);
+    if (!active.length) return true;
+    var res = active.map(function(c){ return qbEval(o, c); });
+    return queryCombiner === 'AND' ? res.every(Boolean) : res.some(Boolean);
+  }
+  // Render the stackable condition rows into #qb_conditions (rebuilt on every change so the value
+  // control always matches the chosen field/operator). Pure attribute logic — no AI.
+  function renderQbConditions(){
+    var host = document.getElementById('qb_conditions');
+    if (!host) return;
+    var fields = qbFields();
+    var fieldOpts = fields.map(function(f){ return '<option value="'+f.key+'">'+escapeHtml(f.label)+'</option>'; }).join('');
+    host.innerHTML = queryConditions.map(function(c, i){
+      var f = qbFieldByKey(c.field) || fields[0];
+      var ops = (f.type === 'num') ? QB_OPS_NUM : QB_OPS_CAT;
+      var opOpts = ops.map(function(p){ return '<option value="'+p[0]+'"'+(c.op===p[0]?' selected':'')+'>'+p[1]+'</option>'; }).join('');
+      var valCtrl;
+      if (f.type === 'num'){
+        valCtrl = '<input type="number" class="qb-val" data-i="'+i+'" value="'+(c.val==null?'':escapeHtml(String(c.val)))+'" placeholder="value" style="width:80px;">';
+        if (c.op === 'between') valCtrl += ' <span style="color:var(--text-dim);">and</span> <input type="number" class="qb-val2" data-i="'+i+'" value="'+(c.val2==null?'':escapeHtml(String(c.val2)))+'" placeholder="value" style="width:80px;">';
+      } else {
+        var vals = qbDistinctValues(f);
+        valCtrl = '<select class="qb-val" data-i="'+i+'"><option value="">— value —</option>' +
+          vals.map(function(v){ return '<option value="'+escapeHtml(v)+'"'+(String(c.val)===String(v)?' selected':'')+'>'+escapeHtml(v)+'</option>'; }).join('') + '</select>';
+      }
+      var fieldSel = '<select class="qb-field" data-i="'+i+'">' + fields.map(function(ff){ return '<option value="'+ff.key+'"'+(ff.key===f.key?' selected':'')+'>'+escapeHtml(ff.label)+'</option>'; }).join('') + '</select>';
+      var joiner = i > 0 ? '<span class="qb-joiner">'+escapeHtml(queryCombiner)+'</span>' : '<span class="qb-joiner qb-where">WHERE</span>';
+      return '<div class="qb-cond-row">' + joiner + fieldSel +
+        '<select class="qb-op" data-i="'+i+'">'+opOpts+'</select>' + valCtrl +
+        '<button type="button" class="qb-del" data-i="'+i+'" title="Remove condition">✕</button></div>';
+    }).join('');
+
+    // Wire the row controls. Changing field/op rebuilds the row (value control differs by type).
+    Array.prototype.forEach.call(host.querySelectorAll('.qb-field'), function(sel){
+      sel.addEventListener('change', function(){
+        var i = +sel.getAttribute('data-i'), c = queryConditions[i];
+        c.field = sel.value;
+        var nf = qbFieldByKey(c.field);
+        c.op = (nf && nf.type === 'num') ? 'eq' : 'is';   // reset operator to a valid default for the new type
+        c.val = ''; c.val2 = '';
+        renderQbConditions();
+      });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('.qb-op'), function(sel){
+      sel.addEventListener('change', function(){ var i = +sel.getAttribute('data-i'); queryConditions[i].op = sel.value; renderQbConditions(); });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('.qb-val'), function(el){
+      el.addEventListener('input', function(){ queryConditions[+el.getAttribute('data-i')].val = el.value; });
+      el.addEventListener('change', function(){ queryConditions[+el.getAttribute('data-i')].val = el.value; });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('.qb-val2'), function(el){
+      el.addEventListener('input', function(){ queryConditions[+el.getAttribute('data-i')].val2 = el.value; });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('.qb-del'), function(btn){
+      btn.addEventListener('click', function(){ queryConditions.splice(+btn.getAttribute('data-i'), 1); renderQbConditions(); });
+    });
+    // AND/OR combiner toggle only matters with 2+ conditions.
+    var comb = document.getElementById('qb_combiner_wrap');
+    if (comb) comb.style.display = queryConditions.length > 1 ? 'inline-flex' : 'none';
+  }
+
   function renderQueryBuilder(container){
     var section = document.createElement('div');
     section.className = 'query-builder';
@@ -16053,7 +16198,19 @@
     section.innerHTML =
       '<button type="button" class="query-builder-toggle" id="qb_toggle">🔧 Custom Query <span id="qb_caret">'+(queryBuilderOpen?'▾':'▸')+'</span></button>' +
       '<div id="qb_body" style="display:'+(queryBuilderOpen?'block':'none')+';margin-top:12px;">' +
-        '<p class="query-builder-desc">Runs on whatever the filters above have narrowed to — just choose how to break it down and see it.</p>' +
+        '<p class="query-builder-desc">Add attribute conditions (like ArcGIS “Select By Attributes”), then choose how to break it down and see it. Runs on whatever the filters above have narrowed to.</p>' +
+        '<div class="qb-conditions-section">' +
+          '<div class="qb-cond-head">' +
+            '<label style="margin:0;">Conditions</label>' +
+            '<span id="qb_combiner_wrap" style="display:none;align-items:center;gap:4px;">' +
+              '<span style="font-size:10.5px;color:var(--text-dim);">match</span>' +
+              '<button type="button" class="qb-comb-btn'+(queryCombiner==='AND'?' active':'')+'" id="qb_comb_and">ALL (AND)</button>' +
+              '<button type="button" class="qb-comb-btn'+(queryCombiner==='OR'?' active':'')+'" id="qb_comb_or">ANY (OR)</button>' +
+            '</span>' +
+          '</div>' +
+          '<div id="qb_conditions"></div>' +
+          '<button type="button" class="btn-ghost" id="qb_add_cond" style="margin-top:6px;font-size:12px;">+ Add condition</button>' +
+        '</div>' +
         '<div class="query-builder-row">' +
           '<div class="query-builder-group" id="qb_groupby_group"><label>Break Down By</label><select id="qb_groupby">' + groupByOptionsHtml + '</select></div>' +
           '<div class="query-builder-group"><label>Show As</label><select id="qb_viztype">' +
@@ -16095,6 +16252,21 @@
       renderAnalytics();
     });
     section.querySelector('#qb_run_btn').addEventListener('click', function(){ runCustomQuery(); });
+    // Attribute conditions: add a row, and flip the AND/OR combiner.
+    section.querySelector('#qb_add_cond').addEventListener('click', function(){
+      var first = qbFields()[0];
+      queryConditions.push({ field: first.key, op: (first.type === 'num' ? 'eq' : 'is'), val: '', val2: '' });
+      renderQbConditions();
+    });
+    function setCombiner(v){
+      queryCombiner = v;
+      var a = document.getElementById('qb_comb_and'), o = document.getElementById('qb_comb_or');
+      if (a) a.classList.toggle('active', v === 'AND');
+      if (o) o.classList.toggle('active', v === 'OR');
+    }
+    section.querySelector('#qb_comb_and').addEventListener('click', function(){ setCombiner('AND'); });
+    section.querySelector('#qb_comb_or').addEventListener('click', function(){ setCombiner('OR'); });
+    renderQbConditions();
   }
 
   function startQueryAreaDraw(){
@@ -16563,6 +16735,7 @@
     var source = buildAnalyticsEvents().filter(function(o){
       if (!passesSharedAnalyticsFilter(o)) return false; // one shared filter set (date/property/species/buck)
       if (queryDrawnLayer && !pointInShape(o.lat, o.lng, queryDrawnLayer)) return false;
+      if (!qbMatches(o)) return false;                   // ArcGIS-style attribute conditions (AND/OR)
       return true;
     });
 
