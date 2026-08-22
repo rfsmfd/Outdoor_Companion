@@ -1928,7 +1928,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 388</div>
+    <div id="buildBadge">BUILD 389</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6713,7 +6713,11 @@
     var btn = document.getElementById('galleryBlankFinderBtn');
     var oldLabel = btn ? btn.textContent : '';
     if (btn){ btn.disabled = true; }
-    var THRESH = 10;        // mean abs diff (0=identical, 255=opposite); <10 ≈ no meaningful change
+    var THRESH = 6;         // mean abs diff (0=identical, 255=opposite). Deliberately CONSERVATIVE:
+                            // testing showed a small/distant animal scores ~8 vs the empty scene, so
+                            // a threshold of 6 flags only truly near-identical wind-burst frames and
+                            // leaves small-animal frames alone. Better to miss a blank (AI catches it)
+                            // than to flag a real animal. Anything missed just falls through to tagging.
     var WINDOW_MIN = 45;    // only compare frames within this many minutes (a burst), not across a day
     var byCam = {};
     all.forEach(function(p){ var k = p.cameraId || '?'; (byCam[k] = byCam[k] || []).push(p); });
