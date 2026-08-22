@@ -1928,7 +1928,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 387</div>
+    <div id="buildBadge">BUILD 388</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2297,6 +2297,7 @@
         <!-- The buck workflow reads top-to-bottom as a cheap-to-expensive funnel: tag (done) →
              group by eye (free) → review the AI's free guesses → and only LAST, pay to match the
              hard leftovers. The DOM order here IS the funnel; don't reshuffle without reason. -->
+        <button type="button" class="btn-ghost" id="galleryBlankFinderBtn" style="width:100%;border-color:#3d7a52;color:#8fd6a6;">🔍 Find blank frames · free (do this first)</button>
         <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
         <button type="button" class="btn-ghost" id="galleryBuckClusterBtn" style="width:100%;margin-top:6px;display:none;">🧩 Group look-alike bucks (free, no AI)</button>
         <button type="button" class="btn-ghost" id="galleryBuckReviewBtn" style="width:100%;margin-top:6px;display:none;">🦌 Review buck suggestions</button>
@@ -2320,8 +2321,8 @@
   <!-- Bulk cleanup: review + delete AI-flagged empty/misfire photos to free storage -->
   <div class="oc-modal-backdrop" id="photoCleanupModalBackdrop">
     <div class="oc-modal" id="photoCleanupModal">
-      <h3>🧹 Clean Up Empty Frames <button class="close-x" id="photoCleanupClose">&times;</button></h3>
-      <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.45;">
+      <h3><span id="photoCleanupTitle">🧹 Clean Up Empty Frames</span> <button class="close-x" id="photoCleanupClose">&times;</button></h3>
+      <div id="photoCleanupIntro" style="font-size:12px;color:var(--text-dim);margin-bottom:8px;line-height:1.45;">
         These are photos the AI flagged as <strong>empty / no game</strong> — misfires, wind, a passing car. <strong style="color:#D94A2E;">Checked photos will be permanently deleted</strong> and their cloud storage freed; this can't be undone. Spot a real animal the AI missed? Just uncheck it to keep it.
       </div>
       <div style="display:flex;gap:8px;margin-bottom:8px;">
@@ -6616,31 +6617,33 @@
     btn.disabled = (n === 0);
     btn.textContent = n === 0 ? '🗑 Nothing selected' : ('🗑 Delete ' + n + ' selected');
   }
-  function openCleanupModal(){
+  function setCleanupHeader(titleHtml, introHtml){
+    var t = document.getElementById('photoCleanupTitle'); if (t) t.innerHTML = titleHtml;
+    var i = document.getElementById('photoCleanupIntro'); if (i) i.innerHTML = introHtml;
+  }
+  // Shared review-grid renderer for BOTH the AI cleanup and the free blank finder. `reasonFn(p)`
+  // returns the plain-text "why flagged" line under each thumbnail. Every candidate starts checked;
+  // the reviewer unchecks keepers (or taps 🔍 to enlarge) before deleting. Nothing auto-deletes.
+  function renderCleanupCards(list, emptyText, reasonFn){
     var grid = document.getElementById('cleanupGrid');
     var emptyMsg = document.getElementById('cleanupEmpty');
     document.getElementById('cleanupStatus').textContent = '';
-    var list = galleryEmptiesInView();
     grid.innerHTML = '';
     if (!list.length){
       emptyMsg.style.display = 'block';
-      emptyMsg.textContent = 'No empty or non-animal frames in the current view. Tag some photos with AI first, or widen your filters.';
+      emptyMsg.textContent = emptyText;
     } else {
       emptyMsg.style.display = 'none';
       grid.innerHTML = list.map(function(p){
         var src = p.thumb || p.downloadURL || '';
         var dateStr = p.timestamp ? new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : '';
-        var conf = (p.ai && p.ai.confidence) ? (escapeHtml(p.ai.confidence) + ' confidence') : '';
-        // Why this frame is flagged — 'empty', or the non-game species (human / dog / vehicle) —
-        // so the reviewer can spot a real animal the AI mislabeled before deleting.
-        var reason = (p.ai && p.ai.hasAnimal) ? (p.ai.primarySpecies || 'non-animal') : 'empty';
         return '<label class="cleanup-card import-photo-card">' +
           '<input type="checkbox" class="cleanup-cb" data-photo-id="' + p.id + '" checked>' +
           '<span class="keep-badge">✓ keep</span>' +
           '<button type="button" class="cleanup-zoom" data-photo-id="' + p.id + '" title="Enlarge to check the background">🔍</button>' +
           '<img src="' + src + '" alt="" loading="lazy">' +
           '<div class="meta"><div class="dt">' + escapeHtml(dateStr) + '</div>' +
-          '<div class="cond">' + escapeHtml(reason) + (conf ? ' · ' + conf : '') + '</div></div>' +
+          '<div class="cond">' + escapeHtml(reasonFn(p) || '') + '</div></div>' +
         '</label>';
       }).join('');
       Array.prototype.forEach.call(grid.querySelectorAll('.cleanup-cb'), function(cb){
@@ -6659,9 +6662,92 @@
       });
     }
     updateCleanupDeleteBtn();
+  }
+  function openCleanupModal(){
+    setCleanupHeader('🧹 Clean Up Empty Frames',
+      'These are photos the AI flagged as <strong>empty / no game</strong> — misfires, wind, a passing car. <strong style="color:#D94A2E;">Checked photos will be permanently deleted</strong> and their cloud storage freed; this can\'t be undone. Spot a real animal the AI missed? Just uncheck it to keep it.');
+    var list = galleryEmptiesInView();
+    renderCleanupCards(list,
+      'No empty or non-animal frames in the current view. Tag some photos with AI first, or widen your filters.',
+      function(p){
+        var conf = (p.ai && p.ai.confidence) ? (p.ai.confidence + ' confidence') : '';
+        var reason = (p.ai && p.ai.hasAnimal) ? (p.ai.primarySpecies || 'non-animal') : 'empty';
+        return reason + (conf ? ' · ' + conf : '');
+      });
     closeAllModals();
     document.getElementById('photoCleanupModalBackdrop').classList.add('show');
   }
+
+  // ---------- Free blank finder: flag no-motion / near-duplicate frames WITHOUT any AI ----------
+  // Trail-cam blanks are almost always wind/heat misfire BURSTS: the same camera fires several
+  // near-identical frames of an empty scene. We downscale each thumbnail to a 24x24 grayscale
+  // fingerprint (all in-memory, base64 thumbs — no network, no cost) and flag any frame that's
+  // nearly identical to its neighbor from the SAME camera within a time window. It's "dumb" about
+  // WHAT changed (a dead-still animal can match too), so it only ever PROPOSES — the review grid
+  // lets you uncheck keepers before anything is deleted. Isolated single blanks won't match a
+  // neighbor and won't be caught here; that's what the AI tag pass is for.
+  var _blankFpCache = {}; // photoId -> Uint8Array (session-only; makes re-runs instant)
+  function _blankFingerprint(src){
+    return new Promise(function(resolve){
+      if (!src){ resolve(null); return; }
+      var img = new Image();
+      img.onload = function(){
+        try{
+          var N = 24, c = document.createElement('canvas'); c.width = N; c.height = N;
+          var ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0, N, N);
+          var d = ctx.getImageData(0, 0, N, N).data, g = new Uint8Array(N*N);
+          for (var i=0, j=0; i<d.length; i+=4, j++){ g[j] = (d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114) | 0; }
+          resolve(g);
+        } catch(e){ resolve(null); } // tainted canvas etc.
+      };
+      img.onerror = function(){ resolve(null); };
+      img.src = src;
+    });
+  }
+  function _blankMad(a, b){ if (!a || !b) return 255; var s = 0, n = a.length; for (var i=0; i<n; i++){ s += Math.abs(a[i]-b[i]); } return s/n; }
+  function _tms(p){ return (new Date(p.timestamp).getTime()) || 0; }
+  async function runBlankFinder(){
+    if (!cloudPhotosAvailable()){ alert('Sign in to use the blank finder.'); return; }
+    var all = galleryPhotoList().slice();
+    if (!all.length){ alert('No photos in the current view to scan.'); return; }
+    var btn = document.getElementById('galleryBlankFinderBtn');
+    var oldLabel = btn ? btn.textContent : '';
+    if (btn){ btn.disabled = true; }
+    var THRESH = 10;        // mean abs diff (0=identical, 255=opposite); <10 ≈ no meaningful change
+    var WINDOW_MIN = 45;    // only compare frames within this many minutes (a burst), not across a day
+    var byCam = {};
+    all.forEach(function(p){ var k = p.cameraId || '?'; (byCam[k] = byCam[k] || []).push(p); });
+    var cams = Object.keys(byCam), candidates = [], reasons = {}, total = all.length, done = 0;
+    for (var ci=0; ci<cams.length; ci++){
+      var lst = byCam[cams[ci]].slice().sort(function(a, b){ return _tms(a) - _tms(b); });
+      var fps = [];
+      for (var i=0; i<lst.length; i++){
+        var p = lst[i];
+        if (_blankFpCache[p.id] !== undefined){ fps[i] = _blankFpCache[p.id]; }
+        else { fps[i] = await _blankFingerprint(p.thumb || null); _blankFpCache[p.id] = fps[i]; }
+        done++;
+        if (btn && (done % 20 === 0)){ btn.textContent = '🔍 Scanning… ' + done + '/' + total; await new Promise(function(r){ setTimeout(r, 0); }); }
+      }
+      for (var k=0; k<lst.length; k++){
+        if (!fps[k]) continue;
+        var t = _tms(lst[k]), flagged = false, best = 255;
+        if (k>0 && fps[k-1] && Math.abs(t - _tms(lst[k-1]))/60000 <= WINDOW_MIN){ var m = _blankMad(fps[k], fps[k-1]); if (m < best) best = m; if (m < THRESH) flagged = true; }
+        if (k<lst.length-1 && fps[k+1] && Math.abs(t - _tms(lst[k+1]))/60000 <= WINDOW_MIN){ var m2 = _blankMad(fps[k], fps[k+1]); if (m2 < best) best = m2; if (m2 < THRESH) flagged = true; }
+        if (flagged){ candidates.push(lst[k]); reasons[lst[k].id] = 'no motion · ' + Math.round((1 - best/255) * 100) + '% match to neighbor'; }
+      }
+    }
+    if (btn){ btn.disabled = false; btn.textContent = oldLabel; }
+    candidates.sort(function(a, b){ return _tms(a) - _tms(b); });
+    setCleanupHeader('🔍 Blank / No-Motion Frames · free',
+      'Found <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' nearly identical to the shot beside them from the same camera — the classic wind/heat misfire burst, found with <strong>no AI and no cost</strong>. <strong style="color:#D94A2E;">Checked photos will be permanently deleted</strong>; this can\'t be undone. See an animal that just held still? Tap 🔍 to enlarge, then uncheck it to keep it.');
+    renderCleanupCards(candidates,
+      'No obvious blank/duplicate bursts in this view. The free finder only catches frames nearly identical to a neighbor — isolated single blanks won\'t match. Run “Tag all with AI” to catch the rest.',
+      function(p){ return reasons[p.id] || 'no motion'; });
+    closeAllModals();
+    document.getElementById('photoCleanupModalBackdrop').classList.add('show');
+  }
+  var _blankFinderBtnEl = document.getElementById('galleryBlankFinderBtn');
+  if (_blankFinderBtnEl) _blankFinderBtnEl.addEventListener('click', runBlankFinder);
   function closeCleanupModal(reopenGallery){
     document.getElementById('photoCleanupModalBackdrop').classList.remove('show');
     if (reopenGallery) openPhotoGallery();
