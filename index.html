@@ -1472,6 +1472,9 @@
     margin-bottom:10px;
   }
   #importLocMiniMap{ width:100%; height:100%; background:#0e1712; }
+  /* Reference labels for your existing cameras/sites on the drop-a-pin map, so you can orient. */
+  .import-ref-label{ background:rgba(20,28,22,.82); color:#e8f0ea; border:1px solid #3c4d42; border-radius:4px; padding:0 4px; font-size:10px; font-weight:600; white-space:nowrap; box-shadow:0 1px 3px rgba(0,0,0,.5); }
+  .import-ref-label::before{ display:none; } /* hide tooltip arrow for a clean chip */
   #importLocCrosshair{
     position:absolute;
     top:50%; left:50%;
@@ -1898,7 +1901,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 367</div>
+    <div id="buildBadge">BUILD 368</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17991,7 +17994,25 @@
     closeAllModals();
     document.getElementById('importLocModalBackdrop').classList.add('show');
     ensureImportLocMap();
-    setTimeout(function(){ importLocMap.invalidateSize(); importLocMap.setView([importLocPos.lat, importLocPos.lng], Math.min(map.getZoom(), 16)); }, 50);
+    setTimeout(function(){ importLocMap.invalidateSize(); importLocMap.setView([importLocPos.lat, importLocPos.lng], Math.min(map.getZoom(), 16)); showImportLocRefMarkers(); }, 50);
+  }
+  // Plot your EXISTING sites/cameras (with name labels) on the drop-a-pin map, so when you place a
+  // camera during import you can see where your others are and drop it in the right spot.
+  var importLocRefLayer = null;
+  function showImportLocRefMarkers(){
+    if (!importLocMap) return;
+    if (importLocRefLayer){ try { importLocMap.removeLayer(importLocRefLayer); } catch(e){} importLocRefLayer = null; }
+    importLocRefLayer = L.layerGroup();
+    sites.forEach(function(s){
+      if (typeof s.lat !== 'number' || typeof s.lng !== 'number') return;
+      var mk = L.marker([s.lat, s.lng], {
+        interactive: false, keyboard: false, zIndexOffset: -500,
+        icon: L.divIcon({ className: '', iconSize: [10, 10], iconAnchor: [5, 5], html: '<div style="width:10px;height:10px;border-radius:50%;background:#8FA05C;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.6);"></div>' })
+      });
+      mk.bindTooltip(s.name || '(site)', { permanent: true, direction: 'right', className: 'import-ref-label', offset: [6, 0] });
+      importLocRefLayer.addLayer(mk);
+    });
+    importLocRefLayer.addTo(importLocMap);
   }
   function closeImportLocPicker(reopenImport){
     document.getElementById('importLocModalBackdrop').classList.remove('show');
