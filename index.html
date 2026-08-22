@@ -1898,7 +1898,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 366</div>
+    <div id="buildBadge">BUILD 367</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18076,24 +18076,32 @@
             return;
           }
         }
-        // Reveal NATIVE export? No oc-cam-pull manifest, but Reveal's own "Download" ZIP names every
-        // file {deviceId}-{n}-{n}-{MMDDYYYYHHMMSS}-{imgid}.jpg — camera + exact time baked in. Parse the
-        // filenames into a manifest and auto-sort just like the companion tool (no scraping needed).
+        // Native brand export? No oc-cam-pull manifest, but most brands bake the camera id + capture
+        // time into each filename. Recognize each brand's pattern, synthesize a manifest, and auto-sort
+        // just like the companion tool — no scraping. Add a brand by adding one {re, ts} entry.
         if (!_mn){
-          var _revRe = /(?:^|\/)(\d{6,})-\d+-\d+-(\d{14})-[^\/]*\.jpe?g$/i;
-          var _revPhotos = [], _revCams = {};
-          Object.keys(_mz.files).forEach(function(n){
-            if (_mz.files[n].dir) return;
-            var m = n.match(_revRe);
-            if (!m) return;
-            var did = m[1], d = m[2];
-            var ts = d.slice(4,8)+'-'+d.slice(0,2)+'-'+d.slice(2,4)+'T'+d.slice(8,10)+':'+d.slice(10,12)+':'+d.slice(12,14);
-            if (!(did in _revCams)) _revCams[did] = null;   // native export carries no camera names
-            _revPhotos.push({ file: n, cameraId: did, cameraName: null, timestamp: ts, category: null });
-          });
-          if (_revPhotos.length){
-            await runManifestImport(_mz, { source: 'reveal', format: 'oc-cam-pull/1', cameras: _revCams, photos: _revPhotos });
-            return;
+          var _brandParsers = [
+            // Reveal:   {deviceId}-{n}-{n}-{MMDDYYYYHHMMSS}-{imgid}.jpg
+            { source: 'reveal', re: /(?:^|\/)(\d{6,})-\d+-\d+-(\d{14})-[^\/]*\.jpe?g$/i,
+              ts: function(d){ return d.slice(4,8)+'-'+d.slice(0,2)+'-'+d.slice(2,4)+'T'+d.slice(8,10)+':'+d.slice(10,12)+':'+d.slice(12,14); } },
+            // GardePro: {cameraId}_{YYYYMMDDHHMMSS}_thumbN.JPG
+            { source: 'gardepro', re: /(?:^|\/)(\d+)_(\d{14})_[^\/]*\.jpe?g$/i,
+              ts: function(d){ return d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8)+'T'+d.slice(8,10)+':'+d.slice(10,12)+':'+d.slice(12,14); } }
+          ];
+          var _names = Object.keys(_mz.files).filter(function(n){ return !_mz.files[n].dir; });
+          for (var _bi = 0; _bi < _brandParsers.length; _bi++){
+            var _bp = _brandParsers[_bi], _bPhotos = [], _bCams = {};
+            for (var _ni = 0; _ni < _names.length; _ni++){
+              var _n = _names[_ni], m = _n.match(_bp.re);
+              if (!m) continue;
+              var did = m[1];
+              if (!(did in _bCams)) _bCams[did] = null;   // native export carries no camera names
+              _bPhotos.push({ file: _n, cameraId: did, cameraName: null, timestamp: _bp.ts(m[2]), category: null });
+            }
+            if (_bPhotos.length){
+              await runManifestImport(_mz, { source: _bp.source, format: 'oc-cam-pull/1', cameras: _bCams, photos: _bPhotos });
+              return;
+            }
           }
         }
       } catch(e){ console.error('Outdoor Companion: manifest peek failed', e); }
