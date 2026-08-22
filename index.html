@@ -1475,6 +1475,16 @@
   /* Reference labels for your existing cameras/sites on the drop-a-pin map, so you can orient. */
   .import-ref-label{ background:rgba(20,28,22,.82); color:#e8f0ea; border:1px solid #3c4d42; border-radius:4px; padding:0 4px; font-size:10px; font-weight:600; white-space:nowrap; box-shadow:0 1px 3px rgba(0,0,0,.5); }
   .import-ref-label::before{ display:none; } /* hide tooltip arrow for a clean chip */
+  .verify-card{ background:var(--card,#1b2620); border:1px solid var(--border,#33473b); border-radius:10px; padding:12px 14px; margin-top:10px; font-size:13px; color:var(--text,#e8f0ea); }
+  .verify-head{ font-weight:700; font-size:14px; margin-bottom:8px; word-break:break-all; }
+  .verify-grid{ display:grid; grid-template-columns:1fr 1fr; gap:6px 14px; }
+  .verify-grid > div{ display:flex; justify-content:space-between; gap:8px; border-bottom:1px solid rgba(255,255,255,.06); padding:2px 0; }
+  .verify-grid span{ color:var(--text-dim,#9db0a3); }
+  .verify-grid .verify-span{ grid-column:1 / -1; }
+  .verify-cams{ width:100%; border-collapse:collapse; margin-top:10px; font-size:12.5px; }
+  .verify-cams th{ text-align:left; color:var(--text-dim,#9db0a3); font-weight:600; border-bottom:1px solid rgba(255,255,255,.12); padding:3px 4px; }
+  .verify-cams td{ padding:3px 4px; border-bottom:1px solid rgba(255,255,255,.05); }
+  .verify-note{ margin-top:10px; font-size:12px; color:var(--text-dim,#9db0a3); line-height:1.45; }
   #importLocCrosshair{
     position:absolute;
     top:50%; left:50%;
@@ -1901,7 +1911,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 379</div>
+    <div id="buildBadge">BUILD 380</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2132,8 +2142,10 @@
           <span>🔺 <strong>SD card — upgrade to full-res.</strong> Replaces matching cellular photos (same camera + time) with these higher-res versions, <strong>keeping their tags &amp; site</strong>. New shots come in as new; photos you deleted stay deleted. Pick the matching camera above.</span>
         </label>
         <button class="btn-primary" id="importProcessBtn" style="width:100%;margin-top:12px;">Process Photos</button>
+        <button class="btn-ghost" id="importVerifyBtn" style="width:100%;margin-top:8px;">🔍 Verify ZIP first — show what's inside</button>
       </div>
 
+      <div id="importVerifyOut" style="display:none;"></div>
       <div id="importProgress" style="display:none;"></div>
       <div id="importResultsGrid"></div>
     </div>
@@ -18130,6 +18142,90 @@
     deployments.push(autoDep);
     try{ await saveDeployment(autoDep); }catch(e){ console.error('Outdoor Companion: failed to save auto deployment', e); }
   }
+
+  // ---- Verify ZIP: read a Cam-Pull / native-export ZIP and REPORT what's inside (photos, cameras,
+  // date span, any empty/corrupt files) WITHOUT importing. This is the same integrity check we'd run
+  // by hand, surfaced as a one-click gut-check before committing to an import.
+  document.getElementById('importVerifyBtn').addEventListener('click', async function(){
+    var files = document.getElementById('importFileInput').files;
+    var out = document.getElementById('importVerifyOut');
+    out.style.display = 'block';
+    if (!files || files.length === 0){ out.innerHTML = '<div class="verify-card">Pick a ZIP above first, then tap Verify.</div>'; return; }
+    if (files.length !== 1 || !/\.zip$/i.test(files[0].name)){
+      out.innerHTML = '<div class="verify-card">Verify works on a single <strong>.zip</strong> file. (Loose photos don\'t need verifying — just Process them.)</div>'; return;
+    }
+    out.innerHTML = '<div class="verify-card">🔍 Reading the ZIP…</div>';
+    try {
+      var zip = await JSZip.loadAsync(files[0]);
+      var all = Object.keys(zip.files).filter(function(n){ return !zip.files[n].dir; });
+      var photos = all.filter(function(n){ return /\.(jpe?g|png)$/i.test(n); });
+      var mn = all.filter(function(n){ return /(^|\/)manifest\.json$/i.test(n); })[0];
+      var man = null;
+      if (mn){ try { man = JSON.parse(await zip.files[mn].async('string')); } catch(e){} }
+
+      // Empty / corrupt check: a 0-byte entry is a failed download.
+      var empties = [];
+      for (var i=0;i<photos.length;i++){
+        var d = zip.files[photos[i]]._data;
+        var sz = d && (d.uncompressedSize != null ? d.uncompressedSize : d.compressedSize);
+        if (sz === 0) empties.push(photos[i]);
+      }
+
+      // Build per-camera counts + date span, from the manifest if present, else from brand filename patterns.
+      var camCounts = {}, camNames = {}, tsList = [], source = (man && man.source) || 'unknown', usedManifest = false;
+      if (man && man.photos && man.photos.length){
+        usedManifest = true;
+        if (man.cameras){ Object.keys(man.cameras).forEach(function(id){ camNames[id] = man.cameras[id] || id; }); }
+        man.photos.forEach(function(p){
+          var key = p.cameraName || camNames[p.cameraId] || p.cameraId || 'Unknown';
+          camCounts[key] = (camCounts[key]||0)+1;
+          if (p.timestamp) tsList.push(p.timestamp);
+        });
+      } else {
+        var parsers = [
+          { source:'reveal', re:/(?:^|\/)(\d{6,})-\d+-\d+-(\d{14})-[^\/]*\.jpe?g$/i, ts:function(d){ return d.slice(4,8)+'-'+d.slice(0,2)+'-'+d.slice(2,4)+'T'+d.slice(8,10)+':'+d.slice(10,12)+':'+d.slice(12,14); } },
+          { source:'gardepro', re:/(?:^|\/)(\d+)_(\d{14})_[^\/]*\.jpe?g$/i, ts:function(d){ return d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8)+'T'+d.slice(8,10)+':'+d.slice(10,12)+':'+d.slice(12,14); } }
+        ];
+        for (var pi=0; pi<parsers.length; pi++){
+          var pp = parsers[pi], hit = false;
+          for (var ni=0; ni<photos.length; ni++){
+            var mm = photos[ni].match(pp.re);
+            if (!mm) continue;
+            hit = true; source = pp.source;
+            camCounts[mm[1]] = (camCounts[mm[1]]||0)+1;
+            tsList.push(pp.ts(mm[2]));
+          }
+          if (hit) break;
+        }
+      }
+      tsList.sort();
+      var camRows = Object.keys(camCounts).sort(function(a,b){ return camCounts[b]-camCounts[a]; })
+        .map(function(k){ return '<tr><td>'+_esc(k)+'</td><td style="text-align:right;">'+camCounts[k]+'</td></tr>'; }).join('');
+      var span = tsList.length ? (_fmtTs(tsList[0])+' → '+_fmtTs(tsList[tsList.length-1])) : '—';
+      var okAll = empties.length === 0 && photos.length > 0;
+
+      out.innerHTML =
+        '<div class="verify-card">' +
+          '<div class="verify-head">'+(okAll?'✅':'⚠️')+' '+_esc(files[0].name)+'</div>' +
+          '<div class="verify-grid">' +
+            '<div><span>Photos</span><strong>'+photos.length+'</strong></div>' +
+            '<div><span>Cameras</span><strong>'+(Object.keys(camCounts).length||'—')+'</strong></div>' +
+            '<div><span>Brand</span><strong>'+_esc(source)+'</strong></div>' +
+            '<div><span>Packing slip</span><strong>'+(usedManifest?'yes':'from filenames')+'</strong></div>' +
+            '<div><span>Empty / corrupt</span><strong style="color:'+(empties.length?'var(--danger,#c0392b)':'inherit')+'">'+empties.length+'</strong></div>' +
+            '<div class="verify-span"><span>Date span</span><strong>'+_esc(span)+'</strong></div>' +
+          '</div>' +
+          (camRows ? '<table class="verify-cams"><thead><tr><th>Camera</th><th style="text-align:right;">Photos</th></tr></thead><tbody>'+camRows+'</tbody></table>' : '') +
+          '<div class="verify-note">'+(okAll
+            ? 'Looks complete — every photo has data. Safe to Process.'
+            : (photos.length===0 ? 'No photos found in this ZIP.' : empties.length+' file(s) came through empty — re-pull that date range, then re-import (duplicates are skipped).'))+'</div>' +
+        '</div>';
+    } catch(e){
+      out.innerHTML = '<div class="verify-card">⚠️ Couldn\'t read this ZIP — it may be damaged or not a photo ZIP. ('+_esc(String(e&&e.message||e))+')</div>';
+    }
+  });
+  function _esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function _fmtTs(t){ var s=String(t||''); return s.length>=16 ? s.slice(0,10)+' '+s.slice(11,16) : s; }
 
   document.getElementById('importProcessBtn').addEventListener('click', async function(){
     var files = document.getElementById('importFileInput').files;
