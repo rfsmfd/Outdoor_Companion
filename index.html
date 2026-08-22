@@ -1356,26 +1356,34 @@
     margin-top:10px;
   }
   #photoGalleryModal{ width:min(1200px, 96vw); max-width:96vw; }
+  /* Workflow "step" buttons flow in a compact wrap-row (1-2 lines) instead of one full-width
+     button per line — reclaims vertical space for more rows of (bigger) thumbnails. The status
+     line and the read-only tools group each break to their own line via flex-basis:100%. */
+  #galleryAiRow{ display:flex; flex-wrap:wrap; gap:6px; align-items:stretch; }
+  #galleryAiRow > button{ width:auto !important; margin:0 !important; flex:1 1 auto; min-width:150px; }
+  #galleryAiRow > #galleryTagAllStatus{ flex:1 1 100%; margin:2px 0 0 !important; }
+  #galleryAiRow > div{ flex:1 1 100%; display:flex; flex-wrap:wrap; gap:6px; border-top:1px solid var(--border,#33443a); margin-top:6px; padding-top:8px; }
+  #galleryAiRow > div > button{ width:auto !important; margin:0 !important; flex:1 1 auto; min-width:150px; }
   .photo-gallery-filters{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
   .photo-gallery-filters select{ flex:1 1 30%; min-width:110px; }
   #galleryGrid{
     display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(160px, 1fr));
-    gap:10px;
-    max-height:70vh;
+    grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));
+    gap:12px;
+    max-height:76vh;
     overflow-y:auto;
   }
   #galleryGrid .import-photo-card{ cursor:pointer; }
   #galleryGrid .import-photo-card:hover{ border-color:var(--accent); }
   /* Gallery thumbnails run larger than the compact import/cleanup grids so the animal is
      actually readable at a glance (tapping still opens the full lightbox). */
-  #galleryGrid .import-photo-card img{ height:150px; }
+  #galleryGrid .import-photo-card img{ height:185px; }
   #galleryGrid .import-photo-card .loc{ font-size:12.5px; font-weight:700; }
   #galleryGrid .import-photo-card .loc.unmatched{ color:#D94A2E; }
   #galleryGrid .import-photo-card .cam{ font-size:10px; color:var(--text-dim); margin-top:1px; }
   /* Group-by-location: each section spans the full grid width, with its own thumbnail row. */
   #galleryGrid .gallery-loc-group{ grid-column:1 / -1; }
-  #galleryGrid .gallery-loc-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(160px, 1fr)); gap:10px; }
+  #galleryGrid .gallery-loc-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:12px; }
   .gallery-loc-hdr{ display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; padding:7px 10px; margin:4px 0 9px; background:var(--panel-alt); border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:8px; }
   .gallery-loc-hdr .pin{ font-size:13px; }
   .gallery-loc-hdr .sname{ font-size:13.5px; font-weight:700; }
@@ -1395,14 +1403,18 @@
   .import-photo-card .cond{ font-size:9.5px; color:var(--text-dim); line-height:1.35; margin-top:3px; }
   .import-photo-card .cond .cond-pending{ color:var(--accent); opacity:0.85; }
   .import-photo-card .cond .cond-dim{ opacity:0.6; }
-  /* Bulk cleanup review grid — reuses the gallery card look, adds a select box. */
+  /* Bulk cleanup review grid — reuses the gallery card look, adds a select box.
+     Wide + big thumbnails so you can actually SEE whether a flagged frame is truly
+     empty before deleting it (uses the full modal width — see #photoCleanupModal). */
+  #photoCleanupModal{ width:min(1200px, 96vw); max-width:96vw; }
   #cleanupGrid{
     display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(130px, 1fr));
-    gap:10px;
-    max-height:58vh;
+    grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));
+    gap:12px;
+    max-height:66vh;
     overflow-y:auto;
   }
+  #cleanupGrid .cleanup-card img{ height:165px; }
   .cleanup-card{ position:relative; cursor:pointer; display:block; opacity:0.55; transition:opacity .12s, outline-color .12s; outline:2px solid transparent; }
   .cleanup-card:has(.cleanup-cb:checked){ opacity:1; outline:2px solid #D94A2E; outline-offset:-2px; }
   .cleanup-card .cleanup-cb{ position:absolute; top:6px; left:6px; width:20px; height:20px; z-index:2; cursor:pointer; accent-color:#D94A2E; }
@@ -1911,7 +1923,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 381</div>
+    <div id="buildBadge">BUILD 382</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
