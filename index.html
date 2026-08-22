@@ -1928,7 +1928,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 392</div>
+    <div id="buildBadge">BUILD 393</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17047,11 +17047,13 @@
       buildBarChart(makeChartCanvas(chartsGrid, '💨 By Wind Direction', 'chartWind'), windLabels, windLabels.map(function(w){ return windCounts[w]; }), 'Count');
     }
 
-    // By Pressure Trend
+    // By Pressure Trend — ALWAYS show all three (Rising/Falling/Steady) even at zero, so a genuinely
+    // empty bucket reads as "Falling — 0", not a missing/broken category (it's a fixed 3-way set).
     var trendCounts = groupCount(relevantObs, function(o){ return (o.weatherStatus === 'ok' && o.weather) ? o.weather.pressureTrend : null; });
-    var trendLabels = ['Rising','Falling','Steady'].filter(function(t){ return trendCounts[t]; });
-    if (trendLabels.length){
-      buildPieChart(makeChartCanvas(chartsGrid, '📈 By Pressure Trend', 'chartPressure'), trendLabels, trendLabels.map(function(t){ return trendCounts[t]; }));
+    var trendOrder = ['Rising','Falling','Steady'];
+    var trendTotal = trendOrder.reduce(function(s,t){ return s + (trendCounts[t]||0); }, 0);
+    if (trendTotal){
+      buildPieChart(makeChartCanvas(chartsGrid, '📈 By Pressure Trend', 'chartPressure'), trendOrder, trendOrder.map(function(t){ return trendCounts[t]||0; }));
     }
 
     // By Barometric Pressure — the actual reading (in ranges), not just the trend direction
@@ -17097,12 +17099,13 @@
       buildBarChart(makeChartCanvas(chartsGrid, '🕐 By Hour of Day', 'chartHour'), hourLabels, hourData, 'Count');
     }
 
-    // By Solunar Period
+    // By Solunar Period — ALWAYS show all three (Major/Minor/Neither) even at zero, so an empty
+    // bucket reads as "Minor Period — 0" instead of vanishing (it's a fixed 3-way set).
     var solunarCounts = groupCount(relevantObs, function(o){ return o.solunarPeriod || 'Neither'; });
     var solunarOrder = ['Major Period','Minor Period','Neither'];
-    var solunarLabels = solunarOrder.filter(function(s){ return solunarCounts[s]; });
-    if (solunarLabels.length){
-      buildPieChart(makeChartCanvas(chartsGrid, '⭐ By Solunar Period', 'chartSolunar'), solunarLabels, solunarLabels.map(function(s){ return solunarCounts[s]; }));
+    var solunarTotal = solunarOrder.reduce(function(s,k){ return s + (solunarCounts[k]||0); }, 0);
+    if (solunarTotal){
+      buildPieChart(makeChartCanvas(chartsGrid, '⭐ By Solunar Period', 'chartSolunar'), solunarOrder, solunarOrder.map(function(s){ return solunarCounts[s]||0; }));
     }
 
     // By Site — which stand/spot actually produces
