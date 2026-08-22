@@ -1911,7 +1911,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 380</div>
+    <div id="buildBadge">BUILD 381</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18057,7 +18057,19 @@
     closeAllModals();
     document.getElementById('importLocModalBackdrop').classList.add('show');
     ensureImportLocMap();
-    setTimeout(function(){ importLocMap.invalidateSize(); importLocMap.setView([importLocPos.lat, importLocPos.lng], Math.min(map.getZoom(), 16)); showImportLocRefMarkers(); }, 50);
+    var _z = Math.min(map.getZoom(), 16);
+    // Give the map a view immediately so it isn't view-less, then re-measure SEVERAL times as the modal
+    // finishes animating open. A single 50ms invalidateSize can fire while the container is still 0-height
+    // (mid-transition) → Leaflet loads no tiles and the map stays a dark grey box. Staggered re-measures fix it.
+    try { importLocMap.setView([importLocPos.lat, importLocPos.lng], _z); } catch(e){}
+    [60, 250, 550, 900].forEach(function(ms){
+      setTimeout(function(){
+        if (!importLocMap) return;
+        importLocMap.invalidateSize();
+        importLocMap.setView([importLocPos.lat, importLocPos.lng], _z);
+        showImportLocRefMarkers();
+      }, ms);
+    });
   }
   // Plot your EXISTING sites/cameras (with name labels) on the drop-a-pin map, so when you place a
   // camera during import you can see where your others are and drop it in the right spot.
