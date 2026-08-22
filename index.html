@@ -1901,7 +1901,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 373</div>
+    <div id="buildBadge">BUILD 374</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -15492,21 +15492,25 @@
     signout.innerHTML = '<button type="button" id="oc-refresh-btn" title="Reload the app">🔄 Refresh</button><select id="oc-scope-select" title="Switch between your private data and a shared group"></select><span id="oc-signout-email"></span><button type="button">Sign out</button>';
     document.body.appendChild(signout);
     var refreshBtn = document.getElementById('oc-refresh-btn');
-    if (refreshBtn) refreshBtn.addEventListener('click', function(){
-      // Re-sync in place — NEVER a page reload, so it can't bounce you to the login screen.
+    if (refreshBtn) refreshBtn.addEventListener('click', async function(){
+      // Re-sync in place — NEVER a page reload. First force-renew the auth token so the data reads
+      // can't trip a stale-token sign-out (the reason a refresh was bouncing you to the login screen).
       var b = this, old = b.textContent;
-      if (!hasChatStorage || typeof applyScope !== 'function'){
-        // signed out / session not ready — reloading would only force a re-login; just redraw what we have
+      var user = null; try { user = firebase.auth().currentUser; } catch(e){}
+      if (!user || !hasChatStorage || typeof applyScope !== 'function'){
         try { renderAll(); } catch(e){}
         try { if (typeof showToast === 'function') showToast('Sign in to sync your latest data'); } catch(e){}
         return;
       }
       b.disabled = true; b.textContent = '⏳ Refreshing…';
-      var scope = activeScope || { type: 'user', id: (firebase.auth().currentUser || {}).uid };
-      Promise.resolve(applyScope(scope)).then(
-        function(){ b.disabled = false; b.textContent = old; try{ if (typeof showToast === 'function') showToast('Data refreshed'); }catch(e){} },
-        function(){ b.disabled = false; b.textContent = old; try{ if (typeof showToast === 'function') showToast('Could not refresh — check your connection'); }catch(e){} }
-      );
+      try {
+        if (user.getIdToken) { try { await user.getIdToken(true); } catch(e){} }   // renew the token BEFORE any read
+        await applyScope(activeScope || { type: 'user', id: user.uid });
+        if (typeof showToast === 'function') showToast('Data refreshed');
+      } catch(e){
+        if (typeof showToast === 'function') showToast('Could not refresh — check your connection');
+      }
+      b.disabled = false; b.textContent = old;
     });
 
     var mode = 'signin';
