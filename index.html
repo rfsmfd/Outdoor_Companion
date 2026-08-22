@@ -1928,7 +1928,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 390</div>
+    <div id="buildBadge">BUILD 391</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4245,6 +4245,22 @@
     if (p.ai && !p.ai.hasAnimal) return 'empty';
     return 'untagged';
   }
+  // EVERY species in a frame (primary + allSpecies), so a deer+turkey photo counts as BOTH a deer
+  // visit and a turkey visit (founder's call 2026-08-22). Empty/untagged stay single-bucketed.
+  function visitSpeciesListOf(p){
+    if (!p.ai) return ['untagged'];
+    if (!p.ai.hasAnimal) return ['empty'];
+    var out = [];
+    if (p.ai.primarySpecies) out.push(p.ai.primarySpecies);
+    if (Array.isArray(p.ai.allSpecies)){ p.ai.allSpecies.forEach(function(sp){ if (sp && out.indexOf(sp) === -1) out.push(sp); }); }
+    if (!out.length) out.push('animal');
+    return out;
+  }
+  function aiHasSpecies(ai, sp){
+    if (!ai || !sp) return false;
+    if (ai.primarySpecies === sp) return true;
+    return Array.isArray(ai.allSpecies) && ai.allSpecies.indexOf(sp) !== -1;
+  }
   // Best frame to represent a visit: a buck beats any animal beats empty/untagged,
   // and higher AI confidence wins ties — so the visit's cover promotes the keeper
   // shot rather than burying it behind an early blurry trigger frame.
@@ -4267,15 +4283,23 @@
       // Location grain is the SITE (a spot can hold more than one camera, and it's
       // one visit to the spot); fall back to the camera, then a catch-all bucket.
       var loc = p.matchedSiteId || (p.cameraId ? 'cam:' + p.cameraId : 'unknown');
-      // A buck rides in his OWN visit, never merged into a doe group — so a tagged buck is
-      // always counted as his own instance. The quiet-period grouping below still runs INSIDE
-      // that buck group, so 10 frames of one buck over a few minutes = 1 visit, not 10.
-      var k = loc + '|' + visitSpeciesOf(p) + ((p.ai && p.ai.isBuck) ? '|buck' : '');
-      (groups[k] = groups[k] || []).push(p);
+      var primary = (p.ai && p.ai.primarySpecies) || null;
+      var isBuck = !!(p.ai && p.ai.isBuck);
+      // A frame counts as a visit for EVERY species it contains (deer+turkey = a deer visit AND a
+      // turkey visit). A buck rides in his OWN visit (the '|buck' key) — and the buck flag only ever
+      // rides the DEER (primary) group, so a turkey sharing the frame is never miscounted as a buck.
+      // The quiet-period grouping below still runs INSIDE each group (10 buck frames = 1 visit).
+      visitSpeciesListOf(p).forEach(function(sp){
+        var buckTag = (isBuck && sp === primary) ? '|buck' : '';
+        var k = loc + '|' + sp + buckTag;
+        if (!groups[k]) groups[k] = { species: sp, isBuckGroup: !!buckTag, photos: [] };
+        groups[k].photos.push(p);
+      });
     });
     var visits = [];
     Object.keys(groups).forEach(function(k){
-      var arr = groups[k].sort(function(a,b){ return a.timestamp - b.timestamp; });
+      var g = groups[k];
+      var arr = g.photos.sort(function(a,b){ return a.timestamp - b.timestamp; });
       var cur = null;
       arr.forEach(function(p){
         if (cur && (p.timestamp - cur.lastTs) <= gapMs){
@@ -4283,7 +4307,7 @@
         } else {
           cur = { photos:[p], firstTs:p.timestamp, lastTs:p.timestamp,
                   siteId:p.matchedSiteId||null, siteName:p.matchedSiteName||null,
-                  species:visitSpeciesOf(p) };
+                  species:g.species, _buckGroup:g.isBuckGroup };
           visits.push(cur);
         }
       });
@@ -4294,7 +4318,9 @@
       // Abundance = the PEAK headcount in any single frame, never the sum across
       // frames (the same two deer in 10 photos are 2 animals, not 20).
       v.peakCount = v.photos.reduce(function(m,p){ return Math.max(m, (p.ai && p.ai.count) || 0); }, 0);
-      v.isBuck = v.photos.some(function(p){ return p.ai && p.ai.isBuck; });
+      // isBuck is TRUE only on the deer/buck group — never on a co-occurring turkey/other visit
+      // that happens to share a frame with a buck (that would misclassify it as a Buck event).
+      v.isBuck = v._buckGroup;
       v.cover = pickCoverPhoto(v.photos);
     });
     return visits;
@@ -16748,7 +16774,11 @@
 
       // Species (from whatever the AI has tagged)
       var speciesSet = {};
-      importedPhotos.forEach(function(p){ if (aiIsWildlife(p.ai) && p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true; });
+      importedPhotos.forEach(function(p){
+        if (!aiIsWildlife(p.ai)) return;
+        if (p.ai.primarySpecies) speciesSet[p.ai.primarySpecies] = true;
+        if (Array.isArray(p.ai.allSpecies)) p.ai.allSpecies.forEach(function(sp){ if (sp) speciesSet[sp] = true; }); // secondary species drill-downs too
+      });
       var speciesNames = Object.keys(speciesSet).sort();
       if (speciesNames.length){
         var spSelect = document.createElement('select');
@@ -16971,7 +17001,7 @@
       var photosInView = importedPhotos.filter(function(pp){
         if (!passesAnalyticsDateFilter(pp.timestamp)) return false;
         if (analyticsPropertyId && analyticsSitePropertyId(pp.matchedSiteId) !== analyticsPropertyId) return false;
-        if (analyticsSpecies && !(pp.ai && pp.ai.primarySpecies === analyticsSpecies)) return false;
+        if (analyticsSpecies && !aiHasSpecies(pp.ai, analyticsSpecies)) return false;
         if (analyticsBuckClass === 'Buck' && !(pp.ai && pp.ai.isBuck)) return false;
         if (analyticsBuckClass === 'Antlerless / Other' && !(aiIsWildlife(pp.ai) && !pp.ai.isBuck)) return false;
         if (analyticsBuckProfileId && pp.buckProfileId !== analyticsBuckProfileId) return false;
