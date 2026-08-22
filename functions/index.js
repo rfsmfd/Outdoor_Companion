@@ -23,9 +23,15 @@ const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
 // The photo's project storage bucket (public identifier, not a secret).
 const STORAGE_BUCKET = "outdoor-companion-ee5b3.firebasestorage.app";
 
-// Cost-effective vision model. Swap to "claude-opus-5" for max accuracy, or
-// "claude-haiku-4-5" for the cheapest pass — same code, one string.
-const MODEL = "claude-sonnet-5";
+// Bulk-tagging COST CASCADE (non-deep path): every frame is first read by the cheap model
+// (MODEL_CHEAP). If that read is confident AND it's not a buck, we keep it — that's the easy
+// majority (empties, does, turkeys, coons) done for a fraction of a cent. Only frames the cheap
+// model is unsure about OR flags as a buck escalate to the mid model (MODEL) for a better read
+// (antler points stay on the stronger model). The deep single-photo "Re-tag" still uses Opus/high.
+// Tune cost vs accuracy by swapping these strings — one line each.
+const MODEL = "claude-sonnet-5";        // mid tier — escalation target (bucks + uncertain frames)
+const MODEL_CHEAP = "claude-haiku-4-5"; // first-pass bulk model (cheapest)
+const MODEL_DEEP = "claude-opus-5";     // deep single-photo re-tag + buck matching
 
 // Strict JSON schema — guarantees the model returns exactly these fields.
 const OUTPUT_SCHEMA = {
@@ -146,11 +152,8 @@ exports.tagPhoto = onCall(
       throw new HttpsError("invalid-argument", "A photoId is required.");
     }
     // Deep mode (single-photo "Re-tag") looks HARDER with a stronger model + high effort — much
-    // better at fine antler tine-counting on a buck. Bulk "Tag all" stays on the cheap/fast model
-    // (species/empty detection doesn't need it), so we only pay the premium where it matters.
+    // better at fine antler tine-counting on a buck. Bulk "Tag all" runs the cost cascade below.
     const deep = !!(request.data && request.data.deep);
-    const modelUsed = deep ? "claude-opus-5" : MODEL;
-    const effortUsed = deep ? "high" : "low";
 
     // Owner-scoped path — the function can only ever read the caller's own photos.
     const storagePath = "users/" + uid + "/trailcam/" + photoId + ".jpg";
@@ -171,13 +174,13 @@ exports.tagPhoto = onCall(
 
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
 
-    let response;
-    try {
-      response = await client.messages.create({
-        model: modelUsed,
+    // One vision analysis with a given model + effort. Returns {parsed, usage}; throws on
+    // API/parse errors (err.refusal set when the model declined) so callers can fall back.
+    async function analyze(model, effort) {
+      const response = await client.messages.create({
+        model: model,
         max_tokens: 1024,
-        // Effort scales with mode: low for the cheap bulk pass, high for a deep single re-tag.
-        output_config: { effort: effortUsed, format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
+        output_config: { effort: effort, format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
         system: SYSTEM_PROMPT,
         messages: [
           {
@@ -189,37 +192,64 @@ exports.tagPhoto = onCall(
           },
         ],
       });
+      if (response.stop_reason === "refusal") { const e = new Error("refusal"); e.refusal = true; throw e; }
+      const tb = (response.content || []).find((b) => b.type === "text");
+      if (!tb) throw new Error("no text block returned");
+      return { parsed: JSON.parse(tb.text), usage: response.usage || {} };
+    }
+
+    let parsed = null, finalModel = null, escalated = false;
+    let inTok = 0, outTok = 0;
+    try {
+      if (deep) {
+        // Deep single-photo re-tag: one strong pass, no cascade.
+        const r = await analyze(MODEL_DEEP, "high");
+        parsed = r.parsed; finalModel = MODEL_DEEP;
+        inTok = r.usage.input_tokens || 0; outTok = r.usage.output_tokens || 0;
+      } else {
+        // Cascade: cheap first…
+        let r1 = null;
+        try { r1 = await analyze(MODEL_CHEAP, "low"); }
+        catch (e1) { if (e1 && e1.refusal) throw e1; /* else Haiku unavailable → fall to mid below */ }
+        if (r1) {
+          parsed = r1.parsed; finalModel = MODEL_CHEAP;
+          inTok = r1.usage.input_tokens || 0; outTok = r1.usage.output_tokens || 0;
+          // …escalate to the mid model ONLY when the cheap read is unsure OR it's a buck (where
+          // antler detail matters). Does / turkeys / empties with high confidence stay cheap.
+          const unsure = parsed.confidence !== "high";
+          const isBuck = parsed.isBuck === true;
+          if (unsure || isBuck) {
+            try {
+              const r2 = await analyze(MODEL, "medium");
+              parsed = r2.parsed; finalModel = MODEL; escalated = true;
+              inTok += r2.usage.input_tokens || 0; outTok += r2.usage.output_tokens || 0;
+            } catch (e2) { /* keep the cheap result if the escalation call fails */ }
+          }
+        } else {
+          // Cheap model unavailable — go straight to the mid model so tagging still works.
+          const r2 = await analyze(MODEL, "low");
+          parsed = r2.parsed; finalModel = MODEL; escalated = true;
+          inTok = r2.usage.input_tokens || 0; outTok = r2.usage.output_tokens || 0;
+        }
+      }
     } catch (e) {
+      if (e && e.refusal) throw new HttpsError("internal", "The model declined to analyze this image.");
       console.error("Anthropic request failed:", e && e.message);
       throw new HttpsError("internal", "The AI request failed. Check the API key / billing and try again.");
     }
+    if (!parsed) throw new HttpsError("internal", "The model returned no result.");
 
-    if (response.stop_reason === "refusal") {
-      throw new HttpsError("internal", "The model declined to analyze this image.");
-    }
-
-    const textBlock = (response.content || []).find((b) => b.type === "text");
-    if (!textBlock) {
-      throw new HttpsError("internal", "The model returned no result.");
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(textBlock.text);
-    } catch (e) {
-      throw new HttpsError("internal", "The model returned unreadable output.");
-    }
-
-    const usage = response.usage || {};
     console.log(
       "tagPhoto ok:",
       photoId,
       parsed.primarySpecies,
-      "in=" + (usage.input_tokens || 0),
-      "out=" + (usage.output_tokens || 0)
+      finalModel,
+      escalated ? "(escalated)" : "",
+      "in=" + inTok,
+      "out=" + outTok
     );
 
-    return Object.assign({}, parsed, { model: modelUsed, taggedAt: Date.now() });
+    return Object.assign({}, parsed, { model: finalModel, escalated: escalated, taggedAt: Date.now() });
   }
 );
 

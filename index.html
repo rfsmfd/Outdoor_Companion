@@ -1928,7 +1928,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 389</div>
+    <div id="buildBadge">BUILD 390</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6797,7 +6797,7 @@
     var btn = this;
     var list = galleryUntaggedInView();
     if (!list.length) return;
-    if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nThis calls Claude once per photo (about half a cent each) to read species, count, and antlers. You can keep using the app while it runs.\n\nMatching bucks to your named bucks is a SEPARATE step you run yourself (the amber “Step 3 · Match” button) — it won\'t happen here, so nothing extra gets spent.')) return;
+    if (!confirm('Analyze ' + list.length + ' photo' + (list.length===1?'':'s') + ' with AI?\n\nEach photo is read by a fast, cheap model first (a fraction of a cent) to get species + empty/animal; only frames it\'s unsure about — or that look like a BUCK — cost a bit more for a sharper antler read. So does, turkeys and empties stay cheap. Tip: run “🔍 Find blank frames” first (free) to delete the junk so there\'s less to tag.\n\nMatching bucks to your named bucks is a SEPARATE step you run yourself (the amber “Step 3 · Match” button) — it won\'t happen here, so nothing extra gets spent.')) return;
     btn.disabled = true;
     var done = 0, failed = 0;
     // Tag several photos AT ONCE — each is still a full, independent AI analysis of that one image
