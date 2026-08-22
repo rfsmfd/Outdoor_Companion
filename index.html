@@ -1901,7 +1901,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 370</div>
+    <div id="buildBadge">BUILD 371</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2126,6 +2126,10 @@
 
         <label>Photos (ZIP export from Reveal/WiseEye, or select image files directly)</label>
         <input type="file" id="importFileInput" accept=".zip,image/*" multiple />
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:12px;color:var(--text-dim);margin:10px 0 0;line-height:1.45;cursor:pointer;">
+          <input type="checkbox" id="importSdUpgrade" style="margin-top:2px;">
+          <span>🔺 <strong>SD card — upgrade to full-res.</strong> Replaces matching cellular photos (same camera + time) with these higher-res versions, <strong>keeping their tags &amp; site</strong>. New shots come in as new; photos you deleted stay deleted. Pick the matching camera above.</span>
+        </label>
         <button class="btn-primary" id="importProcessBtn" style="width:100%;margin-top:12px;">Process Photos</button>
       </div>
 
@@ -4704,7 +4708,14 @@
       btn.disabled = false; btn.textContent = doc.ai ? '🧠 Re-tag' : '🧠 Tag with AI';
     }
   });
+  // Tombstones: remember a deleted photo by camera + capture-second, so a later SD-card upgrade
+  // import doesn't resurrect a photo you deliberately deleted. Per-device (localStorage) for now.
+  function tombstoneKey(cameraId, ts){ return (cameraId || '') + '|' + Math.round((ts || 0) / 1000); }
+  function getPhotoTombstones(){ try { return JSON.parse(localStorage.getItem('oc_photo_tombstones') || '{}'); } catch(e){ return {}; } }
+  function addPhotoTombstone(cameraId, ts){ if (!cameraId || !ts) return; try { var t = getPhotoTombstones(); t[tombstoneKey(cameraId, ts)] = 1; localStorage.setItem('oc_photo_tombstones', JSON.stringify(t)); } catch(e){} }
+  function isPhotoTombstoned(cameraId, ts){ if (!cameraId || !ts) return false; return !!getPhotoTombstones()[tombstoneKey(cameraId, ts)]; }
   async function deletePhotoStorage(doc){
+    if (doc && doc.cameraId && doc.timestamp && !doc.usedFallbackDate) addPhotoTombstone(doc.cameraId, doc.timestamp);
     if (hasChatStorage){ try{ await window.storage.delete('photo:' + doc.id, false); }catch(e){} }
     if (doc.storagePath && typeof firebase !== 'undefined' && firebase.storage){
       try{ await firebase.storage().ref(doc.storagePath).delete(); }catch(e){ /* file may already be gone */ }
@@ -17557,6 +17568,33 @@
     }
   }
 
+  // SD-card upgrade: replace an EXISTING photo's image with a higher-res version, re-uploaded to the
+  // SAME storagePath, while KEEPING all its metadata (tags/antler, matchedSite, conditions, buck
+  // links, weather/moon/solunar). `doc` is the live importedPhotos object, so mutating it updates
+  // memory; we also persist it. Returns true on success.
+  async function upgradePhotoImageFromBlob(doc, blob){
+    if (!cloudPhotosAvailable() || !doc || !blob) return false;
+    try{
+      var uid = firebase.auth().currentUser.uid;
+      var storagePath = doc.storagePath || ('users/' + uid + '/trailcam/' + doc.id + '.jpg');
+      var analysisBlob = await compressImageToBlob(blob, 2048, 0.85);
+      var ref = firebase.storage().ref(storagePath);
+      await ref.put(analysisBlob, { contentType: 'image/jpeg' });
+      var downloadURL = await ref.getDownloadURL();
+      var thumb = await compressImageToBase64(blob, 400, 0.7);
+      var newHash = await sha256Hex(blob);
+      doc.storagePath = storagePath;
+      doc.downloadURL = downloadURL;
+      doc.thumb = thumb;
+      doc.contentHash = newHash;
+      doc.fullRes = true;
+      doc.resolutionSource = 'sd';
+      doc.upgradedAt = Date.now();
+      await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false);
+      return true;
+    }catch(e){ console.warn('Outdoor Companion: SD upgrade failed for ' + (doc && doc.id), e); return false; }
+  }
+
   async function loadImportedPhotos(){
     if (!hasChatStorage){ importedPhotos = []; return; }
     try{
@@ -17719,6 +17757,7 @@
     document.getElementById('importProgress').style.display = 'none';
     document.getElementById('importPickerArea').style.display = 'block';
     document.getElementById('importFileInput').value = '';
+    var _sd = document.getElementById('importSdUpgrade'); if (_sd) _sd.checked = false; // never leave SD-upgrade on by accident
     if (cameras.length === 0){
       sel.innerHTML = '<option value="">No cameras registered yet</option>';
     }
@@ -18219,7 +18258,25 @@
       // a genuinely new photo (data loss). Fallback-dated photos are covered by contentHash instead.
       if (!p.usedFallbackDate) seenMeta[(p.cameraId||'') + '|' + (p.timestamp||'') + '|' + (p.filename||'')] = true;
     });
-    var results = [], skipped = 0;
+    // SD-card upgrade mode: match each incoming (full-res) photo to an existing cellular photo on
+    // this camera by capture time, and replace its image in place (keeping tags/site). Index the
+    // existing photos on this camera by capture-second for fast matching.
+    var sdMode = !!(document.getElementById('importSdUpgrade') && document.getElementById('importSdUpgrade').checked);
+    var existingBySecond = {};
+    if (sdMode){
+      importedPhotos.forEach(function(p){
+        if (p.cameraId === cameraId && p.timestamp && !p.usedFallbackDate) existingBySecond[tombstoneKey(p.cameraId, p.timestamp)] = p;
+      });
+    }
+    var findExistingForUpgrade = function(ts){
+      var base = Math.round(ts / 1000);
+      for (var d = 0; d <= 2; d++){                     // exact second first, then ±1, ±2
+        var a = existingBySecond[cameraId + '|' + (base + d)]; if (a) return a;
+        if (d){ var b = existingBySecond[cameraId + '|' + (base - d)]; if (b) return b; }
+      }
+      return null;
+    };
+    var results = [], skipped = 0, upgraded = 0, tombSkipped = 0;
     for (var k=0; k<imageJobs.length; k++){
       progress.textContent = 'Processing ' + (k+1) + ' of ' + imageJobs.length + '…';
       var job = imageJobs[k];
@@ -18242,6 +18299,17 @@
       var contentHash = await sha256Hex(job.blob);
       var metaKey = (timestampSource === 'filename' || timestampSource === 'exif') ? (cameraId + '|' + timestamp + '|' + job.name) : null;
       if ((contentHash && seenHash[contentHash]) || (metaKey && seenMeta[metaKey])){ skipped++; continue; }
+      // --- SD-card upgrade: replace a matching existing photo in place instead of adding a copy ---
+      if (sdMode && (timestampSource === 'exif' || timestampSource === 'filename')){
+        if (isPhotoTombstoned(cameraId, timestamp)){ tombSkipped++; continue; }   // deleted before — don't resurrect
+        var existDoc = findExistingForUpgrade(timestamp);
+        if (existDoc){
+          progress.textContent = 'Upgrading ' + (k+1) + ' of ' + imageJobs.length + '…';
+          var okUp = await upgradePhotoImageFromBlob(existDoc, job.blob);
+          if (okUp){ upgraded++; if (contentHash) seenHash[contentHash] = true; existingBySecond[tombstoneKey(cameraId, existDoc.timestamp)] = existDoc; continue; }
+          // upgrade failed → fall through and add it as a new photo so nothing is lost
+        }
+      }
       if (contentHash) seenHash[contentHash] = true;
       if (metaKey) seenMeta[metaKey] = true;
       var matchedSite = manualSite || findSiteForCameraAtTime(cameraId, timestamp);
@@ -18271,9 +18339,13 @@
       await ensureCoastingDeployment(cameraId, manualSite, earliestMatched);
     }
     if (createdNewSite) renderAll(); // show the new camera-location pin on the map
+    if (upgraded){ try { renderGallery(); populateGalleryFilters(); } catch(e){} } // refresh so upgraded thumbs show
 
-    var dupNote = skipped ? (' · skipped ' + skipped + ' duplicate' + (skipped===1?'':'s') + ' already imported') : '';
-    progress.textContent = 'Done — ' + results.length + ' photo' + (results.length===1?'':'s') + ' processed' + dupNote + '.';
+    var parts = [results.length + ' new photo' + (results.length===1?'':'s')];
+    if (upgraded) parts.push(upgraded + ' upgraded to full-res');
+    if (skipped) parts.push('skipped ' + skipped + ' duplicate' + (skipped===1?'':'s'));
+    if (tombSkipped) parts.push(tombSkipped + ' skipped (deleted before)');
+    progress.textContent = 'Done — ' + parts.join(' · ') + '.';
     results.sort(function(a,b){ return a.timestamp - b.timestamp; });
     var grid = document.getElementById('importResultsGrid');
     grid.innerHTML = '';
