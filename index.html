@@ -1365,7 +1365,9 @@
   #galleryAiRow > #galleryTagAllStatus{ grid-column:1 / -1; margin:2px 0 0 !important; }
   #galleryAiRow > div{ display:contents; }
   .photo-gallery-filters{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
-  .photo-gallery-filters select{ flex:1 1 30%; min-width:110px; }
+  /* Narrower, all on one line: small flex-basis (was 30% -> forced 3-per-line wrap) with a max
+     so they stay compact on the now-wide modal instead of stretching across the whole screen. */
+  .photo-gallery-filters select{ flex:1 1 150px; min-width:120px; max-width:230px; font-size:12.5px; padding:6px 8px; }
   #galleryGrid{
     display:grid;
     grid-template-columns:repeat(auto-fill, minmax(232px, 1fr));
@@ -1420,6 +1422,9 @@
   .cleanup-card .cleanup-cb{ position:absolute; top:6px; left:6px; width:20px; height:20px; z-index:2; cursor:pointer; accent-color:#D94A2E; }
   .cleanup-card .keep-badge{ position:absolute; top:6px; right:6px; z-index:2; font-size:9px; font-weight:700; background:rgba(0,0,0,0.6); color:#7CCB7C; padding:1px 5px; border-radius:8px; display:none; }
   .cleanup-card:not(:has(.cleanup-cb:checked)) .keep-badge{ display:block; }
+  /* Enlarge button — inspect the background full-size without toggling the delete checkbox. */
+  .cleanup-card .cleanup-zoom{ position:absolute; bottom:34px; right:6px; z-index:3; width:30px; height:30px; padding:0; border:none; border-radius:50%; background:rgba(0,0,0,0.62); color:#fff; font-size:14px; line-height:30px; text-align:center; cursor:zoom-in; opacity:0.85; }
+  .cleanup-card .cleanup-zoom:hover{ opacity:1; background:rgba(0,0,0,0.82); }
   /* Visit cards — a burst of photos of one species at one site collapsed into
      a single "visit" with a duration. Nothing is deleted; this is a count view. */
   .visit-card{ position:relative; }
@@ -1923,7 +1928,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 386</div>
+    <div id="buildBadge">BUILD 387</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6632,6 +6637,7 @@
         return '<label class="cleanup-card import-photo-card">' +
           '<input type="checkbox" class="cleanup-cb" data-photo-id="' + p.id + '" checked>' +
           '<span class="keep-badge">✓ keep</span>' +
+          '<button type="button" class="cleanup-zoom" data-photo-id="' + p.id + '" title="Enlarge to check the background">🔍</button>' +
           '<img src="' + src + '" alt="" loading="lazy">' +
           '<div class="meta"><div class="dt">' + escapeHtml(dateStr) + '</div>' +
           '<div class="cond">' + escapeHtml(reason) + (conf ? ' · ' + conf : '') + '</div></div>' +
@@ -6639,6 +6645,17 @@
       }).join('');
       Array.prototype.forEach.call(grid.querySelectorAll('.cleanup-cb'), function(cb){
         cb.addEventListener('change', updateCleanupDeleteBtn);
+      });
+      // Enlarge button: open the full lightbox to inspect the background before deciding. Must NOT
+      // toggle the delete checkbox (the card is a <label>), so swallow the click and reuse the
+      // gallery lightbox with the flagged list as the nav set (← / → walks the flagged frames).
+      Array.prototype.forEach.call(grid.querySelectorAll('.cleanup-zoom'), function(btn){
+        btn.addEventListener('click', function(e){
+          e.preventDefault(); e.stopPropagation();
+          var id = btn.getAttribute('data-photo-id');
+          var doc = null; for (var k=0;k<list.length;k++){ if (list[k].id === id){ doc = list[k]; break; } }
+          if (doc) showGalleryPhoto(doc, list);
+        });
       });
     }
     updateCleanupDeleteBtn();
@@ -7081,15 +7098,18 @@
     if (!existing){
       existing = document.createElement('button');
       existing.id = 'galleryAccumNudge'; existing.type = 'button';
-      existing.style.cssText = 'width:100%;margin:0 0 10px 0;padding:10px 12px;border-radius:8px;border:1px solid #C9832E;background:#2a2114;color:#E7B45A;font-weight:600;font-size:12.5px;cursor:pointer;text-align:left;line-height:1.4;';
+      // Compact chip that rides at the RIGHT end of the group-checkbox row (margin-left:auto) instead
+      // of a full-width banner on its own line — saves a whole line of vertical space for thumbnails.
+      existing.style.cssText = 'margin-left:auto;padding:5px 10px;border-radius:7px;border:1px solid #C9832E;background:#2a2114;color:#E7B45A;font-weight:600;font-size:12px;cursor:pointer;text-align:left;line-height:1.3;white-space:nowrap;';
       existing.addEventListener('click', function(){ showBuckClusterReview(); });
-      anchor.parentNode.insertBefore(existing, anchor);
+      var groupRow = document.getElementById('galleryGroupRow');
+      (groupRow || anchor.parentNode).appendChild(existing);
     }
     existing.style.display = 'block';
     var top = clusters[0].members.length;
     existing.innerHTML = (clusters.length === 1)
-      ? '🦌 An unnamed buck is stacking up — <b>' + top + ' photos</b> of what looks like one deer. Tap to sort &amp; name him.'
-      : '🦌 <b>' + clusters.length + ' unnamed bucks</b> are stacking up (' + top + '+ photos each). Tap to sort &amp; name them.';
+      ? '🦌 <b>1 buck</b> stacking (' + top + ') — tap to name'
+      : '🦌 <b>' + clusters.length + ' bucks</b> stacking (' + top + '+ ea) — tap to name';
   }
   // Owner's review inbox: approve applies the teammate's match to your photo; reject discards it.
   function showSuggestionInbox(){
