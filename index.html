@@ -1355,20 +1355,20 @@
     overflow-y:auto;
     margin-top:10px;
   }
-  #photoGalleryModal{ width:min(1200px, 96vw); max-width:96vw; }
-  /* Workflow "step" buttons flow in a compact wrap-row (1-2 lines) instead of one full-width
-     button per line — reclaims vertical space for more rows of (bigger) thumbnails. The status
-     line and the read-only tools group each break to their own line via flex-basis:100%. */
+  #photoGalleryModal{ width:min(1650px, 97vw); max-width:97vw; }
+  /* ALL workflow buttons flow together in ONE compact wrap-row (1-2 lines) instead of one
+     full-width button per line — reclaims vertical space for more rows of (bigger) thumbnails.
+     The read-only tools sub-div uses display:contents so its buttons join the same flow (no
+     separate line); only the thin status text breaks to its own line. */
   #galleryAiRow{ display:flex; flex-wrap:wrap; gap:6px; align-items:stretch; }
-  #galleryAiRow > button{ width:auto !important; margin:0 !important; flex:1 1 auto; min-width:150px; }
+  #galleryAiRow button{ width:auto !important; margin:0 !important; flex:1 1 auto; min-width:138px; }
   #galleryAiRow > #galleryTagAllStatus{ flex:1 1 100%; margin:2px 0 0 !important; }
-  #galleryAiRow > div{ flex:1 1 100%; display:flex; flex-wrap:wrap; gap:6px; border-top:1px solid var(--border,#33443a); margin-top:6px; padding-top:8px; }
-  #galleryAiRow > div > button{ width:auto !important; margin:0 !important; flex:1 1 auto; min-width:150px; }
+  #galleryAiRow > div{ display:contents; }
   .photo-gallery-filters{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
   .photo-gallery-filters select{ flex:1 1 30%; min-width:110px; }
   #galleryGrid{
     display:grid;
-    grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));
+    grid-template-columns:repeat(auto-fill, minmax(232px, 1fr));
     gap:12px;
     max-height:76vh;
     overflow-y:auto;
@@ -1377,13 +1377,13 @@
   #galleryGrid .import-photo-card:hover{ border-color:var(--accent); }
   /* Gallery thumbnails run larger than the compact import/cleanup grids so the animal is
      actually readable at a glance (tapping still opens the full lightbox). */
-  #galleryGrid .import-photo-card img{ height:185px; }
+  #galleryGrid .import-photo-card img{ height:205px; }
   #galleryGrid .import-photo-card .loc{ font-size:12.5px; font-weight:700; }
   #galleryGrid .import-photo-card .loc.unmatched{ color:#D94A2E; }
   #galleryGrid .import-photo-card .cam{ font-size:10px; color:var(--text-dim); margin-top:1px; }
   /* Group-by-location: each section spans the full grid width, with its own thumbnail row. */
   #galleryGrid .gallery-loc-group{ grid-column:1 / -1; }
-  #galleryGrid .gallery-loc-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(210px, 1fr)); gap:12px; }
+  #galleryGrid .gallery-loc-row{ display:grid; grid-template-columns:repeat(auto-fill, minmax(232px, 1fr)); gap:12px; }
   .gallery-loc-hdr{ display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; padding:7px 10px; margin:4px 0 9px; background:var(--panel-alt); border:1px solid var(--line); border-left:3px solid var(--accent); border-radius:8px; }
   .gallery-loc-hdr .pin{ font-size:13px; }
   .gallery-loc-hdr .sname{ font-size:13.5px; font-weight:700; }
@@ -1923,7 +1923,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 382</div>
+    <div id="buildBadge">BUILD 383</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
