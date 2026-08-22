@@ -1355,14 +1355,15 @@
     overflow-y:auto;
     margin-top:10px;
   }
-  #photoGalleryModal{ width:min(1650px, 97vw); max-width:97vw; }
-  /* ALL workflow buttons flow together in ONE compact wrap-row (1-2 lines) instead of one
+  #photoGalleryModal{ width:min(2200px, 98vw); max-width:98vw; }
+  /* ALL workflow buttons share ONE row (they wrap to a 2nd only if truly needed) instead of one
      full-width button per line — reclaims vertical space for more rows of (bigger) thumbnails.
-     The read-only tools sub-div uses display:contents so its buttons join the same flow (no
-     separate line); only the thin status text breaks to its own line. */
+     Must beat .btn-ghost's own `flex:1 1 100%` (which otherwise makes each button claim a whole
+     row) with !important. The read-only tools sub-div uses display:contents so its buttons join
+     the same flow; the thin status text is pushed to its own line at the end via order. */
   #galleryAiRow{ display:flex; flex-wrap:wrap; gap:6px; align-items:stretch; }
-  #galleryAiRow button{ width:auto !important; margin:0 !important; flex:1 1 auto; min-width:138px; }
-  #galleryAiRow > #galleryTagAllStatus{ flex:1 1 100%; margin:2px 0 0 !important; }
+  #galleryAiRow button{ width:auto !important; margin:0 !important; flex:1 1 auto !important; min-width:130px; }
+  #galleryAiRow > #galleryTagAllStatus{ order:99; flex:1 1 100%; margin:2px 0 0 !important; }
   #galleryAiRow > div{ display:contents; }
   .photo-gallery-filters{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
   .photo-gallery-filters select{ flex:1 1 30%; min-width:110px; }
@@ -1406,7 +1407,7 @@
   /* Bulk cleanup review grid — reuses the gallery card look, adds a select box.
      Wide + big thumbnails so you can actually SEE whether a flagged frame is truly
      empty before deleting it (uses the full modal width — see #photoCleanupModal). */
-  #photoCleanupModal{ width:min(1200px, 96vw); max-width:96vw; }
+  #photoCleanupModal{ width:min(2200px, 98vw); max-width:98vw; }
   #cleanupGrid{
     display:grid;
     grid-template-columns:repeat(auto-fill, minmax(210px, 1fr));
@@ -1923,7 +1924,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 383</div>
+    <div id="buildBadge">BUILD 384</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
