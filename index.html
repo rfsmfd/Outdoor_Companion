@@ -1940,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 398</div>
+    <div id="buildBadge">BUILD 399</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17226,6 +17226,12 @@
           photoDetections + ' photo detection' + (photoDetections===1?'':'s') + ' — from ' + photosInView.length + ' photo' + (photosInView.length===1?'':'s') +
           ', bursts grouped into visits' + (emptyCount ? (', ' + emptyCount + ' non-animal frame' + (emptyCount===1?'':'s') + ' excluded') : '') + '</div>';
       }
+    }
+    // Unlocated footnote (consistency with the count-map): these events count in the charts (moon,
+    // wind, hour, etc. don't need coordinates) but can't be placed on any map view. Flag how many.
+    var unlocatedCount = relevantObs.filter(function(o){ return typeof o.lat !== 'number' || typeof o.lng !== 'number'; }).length;
+    if (unlocatedCount > 0){
+      header.innerHTML += '<div style="font-size:11px;color:#E8B04B;margin-top:3px;">📍 ' + unlocatedCount + ' of these ' + eventNoun + ' have no location — counted in the charts below, but they can\'t appear on the map. Fix with “📍 Assign a location to unlocated” in the Photo Gallery.</div>';
     }
     if (total < 15){
       header.innerHTML += '<div class="analytics-sparse-note">📊 Charts get more meaningful with more data — right now there\'s only ' + total + ' logged, so patterns below may just be noise. Keep logging and check back.</div>';
