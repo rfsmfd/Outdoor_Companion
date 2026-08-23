@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 403</div>
+    <div id="buildBadge">BUILD 404</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16281,13 +16281,27 @@
   // Human-readable one-line description of the CURRENT query — used for saved-query names and report
   // entry titles (e.g. "Is a buck is yes AND Hour of day between 5–9 · by Pressure Trend").
   function qbOpLabel(op){ return ({eq:'=',ne:'≠',lt:'<',le:'≤',gt:'>',ge:'≥',between:'between',is:'is',isnot:'is not'})[op] || op; }
+  // The SUBJECT filters (buck, species, property, date range) live above the Custom Query, not as
+  // attribute conditions — but they scope the query, so the report/saved-query title must carry them
+  // (else "Moose → by Wind" loses the "Moose"). Returns e.g. ["Moose","past month"].
+  function describeSubjectFilters(){
+    var bits = [];
+    if (typeof analyticsBuckProfileId !== 'undefined' && analyticsBuckProfileId){ var bp = buckProfiles.filter(function(b){ return b.id === analyticsBuckProfileId; })[0]; bits.push(bp ? bp.name : 'buck'); }
+    if (typeof analyticsSpecies !== 'undefined' && analyticsSpecies) bits.push(analyticsSpecies);
+    if (typeof analyticsBuckClass !== 'undefined' && analyticsBuckClass) bits.push(analyticsBuckClass);
+    if (typeof analyticsPropertyId !== 'undefined' && analyticsPropertyId){ var pr = properties.filter(function(p){ return p.id === analyticsPropertyId; })[0]; bits.push(pr ? pr.name : 'property'); }
+    if (typeof analyticsDateRange !== 'undefined' && analyticsDateRange && analyticsDateRange !== 'all'){ bits.push(analyticsDateRange === 'year' ? 'past year' : analyticsDateRange === 'month' ? 'past month' : 'custom dates'); }
+    return bits;
+  }
   function describeQuery(){
-    var parts = [];
+    var condParts = [];
     queryConditions.filter(qbConditionReady).forEach(function(c){
       var f = qbFieldByKey(c.field), val = (c.op === 'between') ? (c.val + '–' + c.val2) : c.val;
-      parts.push((f ? f.label : c.field) + ' ' + qbOpLabel(c.op) + ' ' + val);
+      condParts.push((f ? f.label : c.field) + ' ' + qbOpLabel(c.op) + ' ' + val);
     });
-    var cond = parts.length ? parts.join(' ' + queryCombiner + ' ') : 'All records';
+    var subj = describeSubjectFilters().join(' · ');
+    var condStr = condParts.join(' ' + queryCombiner + ' ');
+    var cond = [subj, condStr].filter(Boolean).join(' · ') || 'All records';
     var gb = '';
     if (queryVizType === 'bar' || queryVizType === 'pie'){ var opt = queryGroupByOptionsForModule().filter(function(p){ return p[0] === queryGroupBy; })[0]; gb = ' · by ' + (opt ? opt[1] : queryGroupBy); }
     else if (queryVizType === 'count') gb = ' · total count';
@@ -16304,6 +16318,14 @@
     queryGroupBy = q.groupBy || 'moon';
     queryVizType = q.vizType || 'bar';
     if (q.source) analyticsSource = q.source;
+    // Restore the SUBJECT filters too (guarded — a query saved before this existed has no .subject).
+    if (q.subject){
+      analyticsBuckProfileId = q.subject.buckProfileId || null;
+      analyticsSpecies = q.subject.species || null;
+      analyticsBuckClass = q.subject.buckClass || null;
+      analyticsPropertyId = q.subject.propertyId || null;
+      analyticsDateRange = q.subject.dateRange || 'all';
+    }
     queryBuilderOpen = true;
     renderAnalytics();               // rebuilds the whole panel from the restored state…
     setTimeout(function(){ try { runCustomQuery(); } catch(e){} }, 0); // …then runs it against current data
@@ -16320,6 +16342,15 @@
       id: uid(), name: name,
       conditions: queryConditions.filter(qbConditionReady).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; }),
       combiner: queryCombiner, groupBy: queryGroupBy, vizType: queryVizType, source: analyticsSource,
+      // Also snapshot the SUBJECT filters (buck/species/class/property/date) so recalling "Moose
+      // first-light" restores the Moose filter, not just the attribute conditions.
+      subject: {
+        buckProfileId: (typeof analyticsBuckProfileId !== 'undefined' ? analyticsBuckProfileId : null),
+        species: (typeof analyticsSpecies !== 'undefined' ? analyticsSpecies : null),
+        buckClass: (typeof analyticsBuckClass !== 'undefined' ? analyticsBuckClass : null),
+        propertyId: (typeof analyticsPropertyId !== 'undefined' ? analyticsPropertyId : null),
+        dateRange: (typeof analyticsDateRange !== 'undefined' ? analyticsDateRange : 'all')
+      },
       createdAt: Date.now()
     };
     savedQueries.push(q);
