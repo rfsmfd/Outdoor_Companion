@@ -1944,7 +1944,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 409</div>
+    <div id="buildBadge">BUILD 410</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16347,24 +16347,54 @@
     else if (queryVizType === 'homerange') gb = ' · home range';
     return cond + gb;
   }
-  // Load a saved query's definition back into the live builder state, then re-render + run it.
+  // Load a saved query's definition back into the live builder state, then re-render + run it. If the
+  // query is a TEMPLATE (subject.promptBuck), first ask WHICH buck to run it on — so one saved
+  // "Tagged Buck → Pressure Trend" tool serves Moose, Big 8, Split Brow, etc.
   function applySavedQuery(q){
-    queryConditions = (q.conditions || []).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; });
-    queryCombiner = q.combiner || 'AND';
-    queryGroupBy = q.groupBy || 'moon';
-    queryVizType = q.vizType || 'bar';
-    if (q.source) analyticsSource = q.source;
-    // Restore the SUBJECT filters too (guarded — a query saved before this existed has no .subject).
-    if (q.subject){
-      analyticsBuckProfileId = q.subject.buckProfileId || null;
-      analyticsSpecies = q.subject.species || null;
-      analyticsBuckClass = q.subject.buckClass || null;
-      analyticsPropertyId = q.subject.propertyId || null;
-      analyticsDateRange = q.subject.dateRange || 'all';
+    var finish = function(buckOverride){
+      queryConditions = (q.conditions || []).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; });
+      queryCombiner = q.combiner || 'AND';
+      queryGroupBy = q.groupBy || 'moon';
+      queryVizType = q.vizType || 'bar';
+      if (q.source) analyticsSource = q.source;
+      if (q.subject){
+        analyticsBuckProfileId = (buckOverride !== undefined) ? buckOverride : (q.subject.buckProfileId || null);
+        analyticsSpecies = q.subject.species || null;
+        analyticsBuckClass = q.subject.buckClass || null;
+        analyticsPropertyId = q.subject.propertyId || null;
+        analyticsDateRange = q.subject.dateRange || 'all';
+      }
+      queryBuilderOpen = true;
+      renderAnalytics();               // rebuilds the whole panel from the restored state…
+      setTimeout(function(){ try { runCustomQuery(); } catch(e){} }, 0); // …then runs it against current data
+    };
+    if (q.subject && q.subject.promptBuck && buckProfiles.length){
+      chooseBuckForTemplate(q.name, function(buckId){ finish(buckId); }); // buckId: an id, or '' for all bucks; picker aborts silently on cancel
+    } else {
+      finish();
     }
-    queryBuilderOpen = true;
-    renderAnalytics();               // rebuilds the whole panel from the restored state…
-    setTimeout(function(){ try { runCustomQuery(); } catch(e){} }, 0); // …then runs it against current data
+  }
+  // Buck picker for a template query — a button per named buck plus "All bucks". cb(id | '').
+  function chooseBuckForTemplate(queryName, cb){
+    var list = buckProfiles.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100062;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:440px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+        '<div style="font-weight:800;font-size:16px;">🦌 Run on which buck?</div>' +
+        '<button class="cb-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:12px;">Template: <strong>' + escapeHtml(queryName) + '</strong></div>' +
+      '<div style="display:flex;flex-direction:column;gap:7px;">' +
+        list.map(function(b){ return '<button class="cb-buck btn-ghost" data-id="'+b.id+'" style="text-align:left;padding:9px 11px;">🦌 '+escapeHtml(b.name)+'</button>'; }).join('') +
+        '<button class="cb-all btn-ghost" style="text-align:left;padding:9px 11px;color:#9db0a3;">— All bucks (no single tag) —</button>' +
+      '</div>';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.cb-x').addEventListener('click', close);
+    Array.prototype.forEach.call(card.querySelectorAll('.cb-buck'), function(btn){ btn.addEventListener('click', function(){ var id = btn.getAttribute('data-id'); close(); cb(id); }); });
+    card.querySelector('.cb-all').addEventListener('click', function(){ close(); cb(''); });
   }
   async function saveCurrentQuery(){
     if (!queryConditions.filter(qbConditionReady).length && queryVizType === 'bar'){
@@ -16378,10 +16408,11 @@
     // or save it as a TEMPLATE you can run on ANY buck — because a pattern like "first-light on falling
     // pressure" is usually something you'd want to check against different bucks, not just this one.
     var lockedBuck = (typeof analyticsBuckProfileId !== 'undefined') ? analyticsBuckProfileId : null;
+    var promptBuck = false;
     if (lockedBuck){
       var bp = buckProfiles.filter(function(b){ return b.id === lockedBuck; })[0];
-      var keep = confirm('Lock this query to “' + (bp ? bp.name : 'this tag') + '”?\n\nOK = save it for ' + (bp ? bp.name : 'this tag') + ' only.\nCancel = save it generic — run it on ANY buck (you pick which when you load it).');
-      if (!keep) lockedBuck = null;   // generic template
+      var keep = confirm('Lock this query to “' + (bp ? bp.name : 'this tag') + '”?\n\nOK = save it for ' + (bp ? bp.name : 'this tag') + ' only.\nCancel = save it as a TEMPLATE — it will ask which buck to run on each time you load it.');
+      if (!keep){ lockedBuck = null; promptBuck = true; }   // reusable template — pick the buck at load time
     }
     var q = {
       id: uid(), name: name,
@@ -16391,6 +16422,7 @@
       // the user chose to save it as an any-buck template above (then buckProfileId is null).
       subject: {
         buckProfileId: lockedBuck,
+        promptBuck: promptBuck,   // template: ask which buck to run on at load time
         species: (typeof analyticsSpecies !== 'undefined' ? analyticsSpecies : null),
         buckClass: (typeof analyticsBuckClass !== 'undefined' ? analyticsBuckClass : null),
         propertyId: (typeof analyticsPropertyId !== 'undefined' ? analyticsPropertyId : null),
@@ -16408,7 +16440,7 @@
     if (!sel) return;
     var list = savedQueries.slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
     sel.innerHTML = '<option value="">' + (list.length ? '— Load a saved query (' + list.length + ') —' : '— No saved queries yet —') + '</option>' +
-      list.map(function(q){ return '<option value="'+q.id+'" title="'+escapeHtml(describeSavedQuery(q))+'">'+escapeHtml(q.name)+'</option>'; }).join('');
+      list.map(function(q){ var tpl = (q.subject && q.subject.promptBuck) ? ' 🦌(pick buck)' : ''; return '<option value="'+q.id+'" title="'+escapeHtml(describeSavedQuery(q))+'">'+escapeHtml(q.name)+tpl+'</option>'; }).join('');
     sel.disabled = !list.length;
     sel.onchange = function(){ var q = savedQueries.filter(function(x){ return x.id === sel.value; })[0]; if (q) applySavedQuery(q); };
     var mng = document.getElementById('qb_saved_manage');
