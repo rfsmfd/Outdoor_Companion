@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 405</div>
+    <div id="buildBadge">BUILD 406</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16212,6 +16212,16 @@
     var res = active.map(function(c){ return qbEval(o, c); });
     return queryCombiner === 'AND' ? res.every(Boolean) : res.some(Boolean);
   }
+  // Clear a shown query result the moment the query definition changes, so a stale "4 of 25" can't
+  // linger after you edit/remove a condition. Also drops any map layers the last result painted.
+  function invalidateQueryResult(){
+    if (queryResultChart){ try{ queryResultChart.destroy(); }catch(e){} queryResultChart = null; }
+    if (typeof queryHeatLayer !== 'undefined' && queryHeatLayer){ try{ map.removeLayer(queryHeatLayer); }catch(e){} queryHeatLayer = null; }
+    if (typeof clearQueryCountMarkers === 'function'){ try{ clearQueryCountMarkers(); }catch(e){} }
+    lastQueryReport = null;
+    var r = document.getElementById('qb_results');
+    if (r) r.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:8px 0;">↻ Query changed — tap <strong>▶ Run Query</strong> to update the result.</div>';
+  }
   // Render the stackable condition rows into #qb_conditions (rebuilt on every change so the value
   // control always matches the chosen field/operator). Pure attribute logic — no AI.
   function renderQbConditions(){
@@ -16257,21 +16267,22 @@
         var nf = qbFieldByKey(c.field);
         c.op = (nf && nf.type === 'num') ? 'eq' : 'is';   // reset operator to a valid default for the new type
         c.val = ''; c.val2 = '';
+        invalidateQueryResult();
         renderQbConditions();
       });
     });
     Array.prototype.forEach.call(host.querySelectorAll('.qb-op'), function(sel){
-      sel.addEventListener('change', function(){ var i = +sel.getAttribute('data-i'); queryConditions[i].op = sel.value; renderQbConditions(); });
+      sel.addEventListener('change', function(){ var i = +sel.getAttribute('data-i'); queryConditions[i].op = sel.value; invalidateQueryResult(); renderQbConditions(); });
     });
     Array.prototype.forEach.call(host.querySelectorAll('.qb-val'), function(el){
-      el.addEventListener('input', function(){ queryConditions[+el.getAttribute('data-i')].val = el.value; });
-      el.addEventListener('change', function(){ queryConditions[+el.getAttribute('data-i')].val = el.value; });
+      el.addEventListener('input', function(){ queryConditions[+el.getAttribute('data-i')].val = el.value; invalidateQueryResult(); });
+      el.addEventListener('change', function(){ queryConditions[+el.getAttribute('data-i')].val = el.value; invalidateQueryResult(); });
     });
     Array.prototype.forEach.call(host.querySelectorAll('.qb-val2'), function(el){
-      el.addEventListener('input', function(){ queryConditions[+el.getAttribute('data-i')].val2 = el.value; });
+      el.addEventListener('input', function(){ queryConditions[+el.getAttribute('data-i')].val2 = el.value; invalidateQueryResult(); });
     });
     Array.prototype.forEach.call(host.querySelectorAll('.qb-del'), function(btn){
-      btn.addEventListener('click', function(){ queryConditions.splice(+btn.getAttribute('data-i'), 1); renderQbConditions(); });
+      btn.addEventListener('click', function(){ queryConditions.splice(+btn.getAttribute('data-i'), 1); invalidateQueryResult(); renderQbConditions(); });
     });
     // AND/OR combiner toggle only matters with 2+ conditions.
     var comb = document.getElementById('qb_combiner_wrap');
@@ -16551,9 +16562,10 @@
       section.querySelector('#qb_body').style.display = queryBuilderOpen ? 'block' : 'none';
       section.querySelector('#qb_caret').textContent = queryBuilderOpen ? '▾' : '▸';
     });
-    section.querySelector('#qb_groupby').addEventListener('change', function(){ queryGroupBy = this.value; });
+    section.querySelector('#qb_groupby').addEventListener('change', function(){ queryGroupBy = this.value; invalidateQueryResult(); });
     section.querySelector('#qb_viztype').addEventListener('change', function(){
       queryVizType = this.value;
+      invalidateQueryResult();
       // Break Down By is meaningless for Count (a single total), Heat Map, and Home Range
       // (purely spatial) — hide it for those rather than leave a control that does nothing.
       section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'ratebysite' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
@@ -16568,6 +16580,7 @@
     section.querySelector('#qb_add_cond').addEventListener('click', function(){
       var first = qbFields()[0];
       queryConditions.push({ field: first.key, op: (first.type === 'num' ? 'eq' : 'is'), val: '', val2: '' });
+      invalidateQueryResult();
       renderQbConditions();
     });
     function setCombiner(v){
@@ -16575,6 +16588,7 @@
       var a = document.getElementById('qb_comb_and'), o = document.getElementById('qb_comb_or');
       if (a) a.classList.toggle('active', v === 'AND');
       if (o) o.classList.toggle('active', v === 'OR');
+      invalidateQueryResult();
     }
     section.querySelector('#qb_comb_and').addEventListener('click', function(){ setCombiner('AND'); });
     section.querySelector('#qb_comb_or').addEventListener('click', function(){ setCombiner('OR'); });
