@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 404</div>
+    <div id="buildBadge">BUILD 405</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16293,6 +16293,28 @@
     if (typeof analyticsDateRange !== 'undefined' && analyticsDateRange && analyticsDateRange !== 'all'){ bits.push(analyticsDateRange === 'year' ? 'past year' : analyticsDateRange === 'month' ? 'past month' : 'custom dates'); }
     return bits;
   }
+  // EXPLICIT, always-complete filter line for a report entry (spells out "all" where nothing is set)
+  // so an entry still makes full sense later even if the live app filters have since changed.
+  function describeFullFilters(){
+    var parts = [];
+    if (typeof analyticsBuckProfileId !== 'undefined' && analyticsBuckProfileId){ var bp = buckProfiles.filter(function(b){ return b.id === analyticsBuckProfileId; })[0]; parts.push('Buck: ' + (bp ? bp.name : '?')); }
+    else if (typeof analyticsSpecies !== 'undefined' && analyticsSpecies){ parts.push('Species: ' + analyticsSpecies); }
+    else { parts.push('Subject: all'); }
+    if (typeof analyticsBuckClass !== 'undefined' && analyticsBuckClass) parts.push('Class: ' + analyticsBuckClass);
+    if (typeof analyticsPropertyId !== 'undefined' && analyticsPropertyId){ var pr = properties.filter(function(p){ return p.id === analyticsPropertyId; })[0]; parts.push('Property: ' + (pr ? pr.name : '?')); } else { parts.push('Property: all'); }
+    var dr = 'all time';
+    if (analyticsDateRange === 'year') dr = 'past year';
+    else if (analyticsDateRange === 'month') dr = 'past month';
+    else if (analyticsDateRange === 'custom'){
+      var f = analyticsCustomFrom ? new Date(analyticsCustomFrom).toLocaleDateString() : '…';
+      var t = analyticsCustomTo ? new Date(analyticsCustomTo).toLocaleDateString() : '…';
+      dr = f + ' → ' + t;
+    }
+    parts.push('Dates: ' + dr);
+    parts.push('Source: ' + (analyticsSource === 'both' ? 'photos + sightings' : analyticsSource));
+    if (queryDrawnLayer) parts.push('Area: drawn on map');
+    return parts.join(' · ');
+  }
   function describeQuery(){
     var condParts = [];
     queryConditions.filter(qbConditionReady).forEach(function(c){
@@ -16391,7 +16413,7 @@
   // ---------- Report clipboard ----------
   function addCurrentToReport(){
     if (!lastQueryReport){ showToast('Run a query first, then add it to the report.'); return; }
-    reportEntries.push({ title: lastQueryReport.title, summary: lastQueryReport.summary, body: (lastQueryReport.body||[]).slice() });
+    reportEntries.push({ title: lastQueryReport.title, filters: lastQueryReport.filters, summary: lastQueryReport.summary, body: (lastQueryReport.body||[]).slice() });
     updateReportButton();
     showToast('Added to report (' + reportEntries.length + ')');
   }
@@ -16404,11 +16426,32 @@
     var lines = ['OUTDOOR COMPANION — QUERY REPORT', now.toLocaleString(), ''];
     reportEntries.forEach(function(e, i){
       lines.push((i+1) + '. ' + e.title);
+      if (e.filters) lines.push('   Filters: ' + e.filters);
       if (e.summary) lines.push('   ' + e.summary);
       (e.body||[]).forEach(function(l){ lines.push('   • ' + l); });
       lines.push('');
     });
     return lines.join('\n');
+  }
+  // Markdown export — headings + a real table for count breakdowns (rate/other lines stay bullets).
+  function buildReportMarkdown(){
+    var now = new Date();
+    var out = ['# Outdoor Companion — Query Report', '', '_' + now.toLocaleString() + '_', ''];
+    reportEntries.forEach(function(e, i){
+      out.push('## ' + (i+1) + '. ' + e.title);
+      if (e.filters) out.push('**Filters:** ' + e.filters + '  ');
+      if (e.summary) out.push('**' + e.summary + '**');
+      out.push('');
+      var rows = [], bullets = [];
+      (e.body||[]).forEach(function(l){
+        var m = l.match(/^(.*): (\d+) \((\d+)%\)$/);   // "Label: 9 (69%)" → table row
+        if (m) rows.push('| ' + m[1] + ' | ' + m[2] + ' | ' + m[3] + '% |');
+        else bullets.push('- ' + l);
+      });
+      if (rows.length){ out.push('| Category | Count | % |', '| --- | ---: | ---: |'); out = out.concat(rows); out.push(''); }
+      if (bullets.length){ out = out.concat(bullets); out.push(''); }
+    });
+    return out.join('\n');
   }
   function openReportModal(){
     var text = reportEntries.length ? buildReportText() : 'No entries yet. Run a query and tap “📋 Add to report”.';
@@ -16420,20 +16463,24 @@
         '<div style="font-weight:800;font-size:16px;">📋 Query Report <span style="font-size:12px;color:#9db0a3;font-weight:600;">· ' + reportEntries.length + ' entr' + (reportEntries.length===1?'y':'ies') + '</span></div>' +
         '<button class="rpt-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
       '<textarea class="rpt-text" readonly style="width:100%;height:300px;box-sizing:border-box;background:#16211b;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:10px;font-family:monospace;font-size:12px;line-height:1.5;resize:vertical;">' + escapeHtml(text) + '</textarea>' +
-      '<div style="display:flex;gap:8px;margin-top:10px;">' +
-        '<button class="rpt-copy btn-primary" style="flex:2;">📋 Copy to clipboard</button>' +
-        '<button class="rpt-clear btn-ghost" style="flex:1;color:#D94A2E;">Clear report</button>' +
-      '</div>';
+      '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">' +
+        '<button class="rpt-copy btn-primary" style="flex:2 1 150px;">📋 Copy (plain text)</button>' +
+        '<button class="rpt-copymd btn-ghost" style="flex:1 1 140px;">⌘ Copy as Markdown</button>' +
+        '<button class="rpt-clear btn-ghost" style="flex:1 1 80px;color:#D94A2E;">Clear</button>' +
+      '</div>' +
+      '<div style="font-size:10.5px;color:#9db0a3;margin-top:6px;">Plain text pastes anywhere (email, notes, back to Claude). Markdown is for a polished doc — headings + tables.</div>';
     back.appendChild(card); document.body.appendChild(back);
     function close(){ if (back.parentNode) document.body.removeChild(back); }
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('.rpt-x').addEventListener('click', close);
-    card.querySelector('.rpt-copy').addEventListener('click', function(){
-      var ta = card.querySelector('.rpt-text');
-      var done = function(){ showToast('Report copied to clipboard'); };
-      if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(ta.value).then(done, function(){ ta.select(); try{ document.execCommand('copy'); done(); }catch(e){} }); }
-      else { ta.select(); try{ document.execCommand('copy'); done(); }catch(e){} }
-    });
+    function copyStr(str, label){
+      var ok = function(){ showToast(label + ' copied to clipboard'); };
+      if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(str).then(ok, function(){ fallbackCopy(str, ok); }); }
+      else { fallbackCopy(str, ok); }
+    }
+    function fallbackCopy(str, ok){ var ta = card.querySelector('.rpt-text'); var prev = ta.value; ta.value = str; ta.select(); try{ document.execCommand('copy'); ok(); }catch(e){} ta.value = prev; }
+    card.querySelector('.rpt-copy').addEventListener('click', function(){ copyStr(reportEntries.length ? buildReportText() : '', 'Report (plain)'); });
+    card.querySelector('.rpt-copymd').addEventListener('click', function(){ copyStr(reportEntries.length ? buildReportMarkdown() : '', 'Report (Markdown)'); });
     card.querySelector('.rpt-clear').addEventListener('click', function(){
       if (!confirm('Clear all ' + reportEntries.length + ' report entr' + (reportEntries.length===1?'y':'ies') + '?')) return;
       reportEntries = []; updateReportButton(); close();
@@ -17075,7 +17122,7 @@
     // Baseline report snapshot for THIS run; the viz branches enrich .body with the breakdown lines.
     // (The Add-to-report button is wired via delegation on #qb_results in renderQueryBuilder, because
     // the viz branches rebuild resultsEl.innerHTML and would drop a directly-attached listener.)
-    lastQueryReport = { title: describeQuery(), summary: 'Using ' + source.length + ' of ' + queryPageTotal + ' records', body: [] };
+    lastQueryReport = { title: describeQuery(), filters: describeFullFilters(), summary: 'Using ' + source.length + ' of ' + queryPageTotal + ' records', body: [] };
 
     if (source.length === 0){
       resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">No records match this query.</div>';
