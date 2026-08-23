@@ -1940,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 399</div>
+    <div id="buildBadge">BUILD 400</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16788,6 +16788,18 @@
     if (source.length === 0){
       resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">No records match this query.</div>';
       return;
+    }
+
+    // Small-sample caution — warns you not to over-read a "pattern" built on a handful of records,
+    // but still runs the query (founder's call: caution, don't block). Tiered: <8 is basically
+    // anecdote, <20 is a hint not proof. Hunting-scale data is often thin, so this is a real guardrail.
+    if (source.length < 20){
+      var _tiny = source.length < 8;
+      resultsEl.innerHTML += '<div style="font-size:11.5px;color:#E8B04B;background:rgba(232,176,75,0.08);border:1px solid rgba(232,176,75,0.35);border-radius:7px;padding:8px 11px;margin-bottom:10px;line-height:1.45;">⚠ <strong>Small sample — ' + source.length + ' record' + (source.length===1?'':'s') + '.</strong> ' +
+        (_tiny
+          ? 'That\'s barely any data; the breakdown below is more anecdote than pattern — a single photo can swing it. '
+          : 'Read the breakdown below as a hint, not proof — with this few records a trend can appear by pure chance. ') +
+        'Widen the date range or loosen a condition for a firmer read. (Showing it anyway.)</div>';
     }
 
     if (queryVizType === 'homerange'){
