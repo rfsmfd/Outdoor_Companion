@@ -1940,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 396</div>
+    <div id="buildBadge">BUILD 397</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16111,7 +16111,11 @@
       }
       return true;
     }
-    var sv = (v == null) ? '' : String(v);
+    // Null/missing values match neither "is X" nor "is not X" (SQL/ArcGIS null semantics) — so a
+    // photo with no wind reading is excluded from BOTH "wind is S" and "wind is not S", rather than
+    // silently sneaking into every "is not" query.
+    if (v == null || v === '') return false;
+    var sv = String(v);
     return (c.op === 'isnot') ? (sv !== c.val) : (sv === c.val);
   }
   // A condition is "complete" enough to apply once it has a value (blank rows are ignored, so a
@@ -16133,7 +16137,17 @@
     var host = document.getElementById('qb_conditions');
     if (!host) return;
     var fields = qbFields();
-    var fieldOpts = fields.map(function(f){ return '<option value="'+f.key+'">'+escapeHtml(f.label)+'</option>'; }).join('');
+    // Build the event set at most ONCE per render (only if a category field actually needs its
+    // distinct values), then memoize distinct-value lists per field — the old code rebuilt every
+    // photo→visit from scratch for each category row, which lagged on big libraries.
+    var _evs = null, _distinctCache = {};
+    function distinctFor(f){
+      if (f.vals) return f.vals.slice();
+      if (_distinctCache[f.key]) return _distinctCache[f.key];
+      if (!_evs) _evs = buildAnalyticsEvents();
+      var seen = {}; _evs.forEach(function(o){ var v = f.get(o); if (v != null && v !== '') seen[v] = true; });
+      return (_distinctCache[f.key] = Object.keys(seen).sort());
+    }
     host.innerHTML = queryConditions.map(function(c, i){
       var f = qbFieldByKey(c.field) || fields[0];
       var ops = (f.type === 'num') ? QB_OPS_NUM : QB_OPS_CAT;
@@ -16143,7 +16157,7 @@
         valCtrl = '<input type="number" class="qb-val" data-i="'+i+'" value="'+(c.val==null?'':escapeHtml(String(c.val)))+'" placeholder="value" style="width:80px;">';
         if (c.op === 'between') valCtrl += ' <span style="color:var(--text-dim);">and</span> <input type="number" class="qb-val2" data-i="'+i+'" value="'+(c.val2==null?'':escapeHtml(String(c.val2)))+'" placeholder="value" style="width:80px;">';
       } else {
-        var vals = qbDistinctValues(f);
+        var vals = distinctFor(f);
         valCtrl = '<select class="qb-val" data-i="'+i+'"><option value="">— value —</option>' +
           vals.map(function(v){ return '<option value="'+escapeHtml(v)+'"'+(String(c.val)===String(v)?' selected':'')+'>'+escapeHtml(v)+'</option>'; }).join('') + '</select>';
       }
