@@ -1940,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 401</div>
+    <div id="buildBadge">BUILD 402</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -15934,13 +15934,21 @@
     return document.getElementById(id);
   }
 
-  function buildBarChart(canvas, labels, data, label){
+  function buildBarChart(canvas, labels, data, label, showPct){
+    // Hover shows count AND its share of the total (e.g. "103 (80%)"). Suppressed via showPct:false
+    // for value charts where a "% of total" is meaningless (e.g. per-site detection RATE — rates
+    // don't sum to a meaningful whole).
+    var withPct = (showPct !== false);
+    var total = data.reduce(function(s,v){ return s + (typeof v === 'number' ? v : 0); }, 0);
     var chart = new Chart(canvas, {
       type: 'bar',
       data: { labels: labels, datasets: [{ label: label, data: data, backgroundColor: '#FF6A13' }] },
       options: {
         responsive: true,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: { display: false },
+          tooltip: withPct ? { callbacks: { label: function(ctx){ var v = ctx.parsed.y; var pct = total > 0 ? Math.round(v / total * 100) : 0; return v + ' (' + pct + '%)'; } } } : {}
+        },
         scales: {
           y: { beginAtZero: true, ticks: { color: '#B8AF9C', precision: 0 }, grid: { color: 'rgba(255,255,255,0.08)' } },
           x: { ticks: { color: '#B8AF9C' }, grid: { display: false } }
@@ -15952,12 +15960,16 @@
   }
 
   function buildPieChart(canvas, labels, data){
+    var total = data.reduce(function(s,v){ return s + (typeof v === 'number' ? v : 0); }, 0);
     var chart = new Chart(canvas, {
       type: 'pie',
       data: { labels: labels, datasets: [{ data: data, backgroundColor: ANALYTICS_COLORS }] },
       options: {
         responsive: true,
-        plugins: { legend: { position: 'bottom', labels: { color: '#B8AF9C', boxWidth: 12 } } }
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#B8AF9C', boxWidth: 12 } },
+          tooltip: { callbacks: { label: function(ctx){ var v = ctx.parsed; var pct = total > 0 ? Math.round(v / total * 100) : 0; return ctx.label + ': ' + v + ' (' + pct + '%)'; } } }
+        }
       }
     });
     analyticsChartInstances.push(chart);
@@ -16503,7 +16515,7 @@
     queryResultChart = buildBarChart(document.getElementById('qb_result_canvas'),
       good.map(function(r){ return r.name; }),
       good.map(function(r){ return +r.perWeek.toFixed(2); }),
-      'Detections / camera-week');
+      'Detections / camera-week', false);
     var detail = good.map(function(r){ return escapeHtml(r.name) + ': ' + r.det + ' det ÷ ' + r.td.toFixed(0) + ' cam-day' + (Math.round(r.td)===1?'':'s') + ' = ' + r.perWeek.toFixed(2) + '/wk'; }).join(' · ');
     resultsEl.innerHTML += '<div style="font-size:11px;color:var(--text-dim);margin-top:8px;line-height:1.5;">📷 Effort-adjusted: detections normalized by trap-nights (camera-days out). ' + detail + '</div>' +
       ((noEffort.length || unlocated) ? '<div style="font-size:11px;color:#E8B04B;margin-top:6px;">⚠ ' + (noEffort.length ? noEffort.length + ' site(s) skipped (no deployment/trap-night data)' : '') + (noEffort.length && unlocated ? ' · ' : '') + (unlocated ? unlocated + ' detection(s) had no site' : '') + '.</div>' : '');
