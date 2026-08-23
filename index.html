@@ -1940,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 395</div>
+    <div id="buildBadge">BUILD 396</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16220,9 +16220,13 @@
             '<option value="markers"'+(queryVizType==='markers'?' selected':'')+'>Count Markers (map)</option>' +
             '<option value="heatmap"'+(queryVizType==='heatmap'?' selected':'')+'>Heat Map</option>' +
             '<option value="homerange"'+(queryVizType==='homerange'?' selected':'')+'>Home Range Rings</option></select></div>' +
-          '<div class="query-builder-group"><label>Area</label>' +
-            '<button class="btn-ghost" id="qb_draw_btn" type="button">🔷 Draw Area</button>' +
-            '<button class="btn-ghost" id="qb_clear_area_btn" type="button" style="display:'+(queryDrawnLayer?'inline-block':'none')+';color:#D94A2E;">✕ Clear Area</button>' +
+          '<div class="query-builder-group"><label>Area (limits the whole page)</label>' +
+            '<div style="display:flex;gap:5px;flex-wrap:wrap;">' +
+              '<button class="btn-ghost" id="qb_draw_rect" type="button" title="Rectangle">▭ Box</button>' +
+              '<button class="btn-ghost" id="qb_draw_circle" type="button" title="Circle / radius">◯ Circle</button>' +
+              '<button class="btn-ghost" id="qb_draw_poly" type="button" title="Freeform polygon">⬟ Shape</button>' +
+              '<button class="btn-ghost" id="qb_clear_area_btn" type="button" style="display:'+(queryDrawnLayer?'inline-block':'none')+';color:#D94A2E;">✕ Clear</button>' +
+            '</div>' +
           '</div>' +
         '</div>' +
         '<button class="btn-primary" id="qb_run_btn" style="margin-top:10px;">▶ Run Query</button>' +
@@ -16245,12 +16249,10 @@
       section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
     });
     section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
-    section.querySelector('#qb_draw_btn').addEventListener('click', function(){ startQueryAreaDraw(); });
-    section.querySelector('#qb_clear_area_btn').addEventListener('click', function(){
-      if (queryDrawnLayer && queryDrawnItems){ queryDrawnItems.removeLayer(queryDrawnLayer); }
-      queryDrawnLayer = null;
-      renderAnalytics();
-    });
+    section.querySelector('#qb_draw_rect').addEventListener('click', function(){ startQueryAreaDraw('rectangle'); });
+    section.querySelector('#qb_draw_circle').addEventListener('click', function(){ startQueryAreaDraw('circle'); });
+    section.querySelector('#qb_draw_poly').addEventListener('click', function(){ startQueryAreaDraw('polygon'); });
+    section.querySelector('#qb_clear_area_btn').addEventListener('click', clearQueryArea);
     section.querySelector('#qb_run_btn').addEventListener('click', function(){ runCustomQuery(); });
     // Attribute conditions: add a row, and flip the AND/OR combiner.
     section.querySelector('#qb_add_cond').addEventListener('click', function(){
@@ -16269,16 +16271,17 @@
     renderQbConditions();
   }
 
-  function startQueryAreaDraw(){
+  function startQueryAreaDraw(shape){
     if (!queryDrawnItems){
       queryDrawnItems = new L.FeatureGroup();
       map.addLayer(queryDrawnItems);
     }
-    showToast('Draw a rectangle, circle, or polygon on the map, then tap Run Query');
-    var drawer = new L.Draw.Rectangle(map, {shapeOptions: {color: '#D4B24C'}});
-    // Offer a simple prompt-free flow: default to rectangle, but Circle/Polygon are
-    // available the same way if the founder wants a different shape — kept minimal here
-    // since the founder specifically named "circle or square" as the real use case.
+    var opts = { shapeOptions: { color: '#D4B24C', weight: 2 } };
+    var drawer, msg;
+    if (shape === 'circle'){ drawer = new L.Draw.Circle(map, opts); msg = 'Click and drag to draw a circle, then tap Run Query'; }
+    else if (shape === 'polygon'){ drawer = new L.Draw.Polygon(map, opts); msg = 'Click points to trace a shape; click the first point to close it, then tap Run Query'; }
+    else { drawer = new L.Draw.Rectangle(map, opts); msg = 'Click and drag to draw a box, then tap Run Query'; }
+    showToast(msg);
     drawer.enable();
     map.once('draw:created', function(e){
       if (queryDrawnLayer && queryDrawnItems) queryDrawnItems.removeLayer(queryDrawnLayer);
@@ -16286,6 +16289,13 @@
       queryDrawnItems.addLayer(queryDrawnLayer);
       renderAnalytics();
     });
+  }
+  // Clear the drawn area from EVERYWHERE (header button + Custom Query button both call this), then
+  // re-render so all charts + totals return to the full dataset.
+  function clearQueryArea(){
+    if (queryDrawnLayer && queryDrawnItems){ try { queryDrawnItems.removeLayer(queryDrawnLayer); } catch(e){} }
+    queryDrawnLayer = null;
+    renderAnalytics();
   }
 
   // Home Range Rings — density-threshold bands, deliberately NOT labeled as a rigorous
@@ -17171,7 +17181,7 @@
     var header = document.createElement('div');
     header.className = 'analytics-header';
     header.innerHTML = '<div class="analytics-total">' + total + ' ' + eventNoun + '</div>' +
-      (queryDrawnLayer ? '<div style="font-size:11px;color:#E8823F;font-weight:600;margin-top:2px;">🔷 Limited to your drawn area — the whole page (every chart + total) counts only what\'s inside the box. Clear it in Custom Query → ✕ Clear Area.</div>' : '');
+      (queryDrawnLayer ? '<div style="font-size:11px;color:#E8823F;font-weight:600;margin-top:2px;">🔷 Limited to your drawn area — every chart + total counts only what\'s inside the box. <button type="button" id="analyticsClearAreaBtn" style="margin-left:6px;background:#B3382F;color:#fff;border:none;border-radius:5px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;">✕ Clear Area</button></div>' : '');
     // Transparency: when photos are in the mix, show how the raw photo count becomes
     // independent detections — bursts grouped into visits, AI-flagged empties excluded —
     // so this number never looks mysterious next to the gallery's raw photo count.
@@ -17201,9 +17211,21 @@
       header.innerHTML += '<div class="analytics-sparse-note">📊 Charts get more meaningful with more data — right now there\'s only ' + total + ' logged, so patterns below may just be noise. Keep logging and check back.</div>';
     }
     mainWrap.appendChild(header);
+    // Wire the header's Clear Area button — it MUST live here (not only in the Custom Query panel),
+    // because when a drawn area yields 0 results the whole query panel is skipped by the early return
+    // below, which would otherwise leave no way to clear the box. appendChild (not innerHTML +=) keeps
+    // this listener alive through the empty-state branch.
+    var _clrBtn = document.getElementById('analyticsClearAreaBtn');
+    if (_clrBtn) _clrBtn.addEventListener('click', clearQueryArea);
 
     if (total === 0){
-      mainWrap.innerHTML += '<div class="empty" style="padding:20px 0;">Nothing logged yet matching these filters — try widening the date range or picking a different property/buck.</div>';
+      var _empty = document.createElement('div');
+      _empty.className = 'empty';
+      _empty.style.padding = '20px 0';
+      _empty.innerHTML = queryDrawnLayer
+        ? 'No records inside your drawn area. Use <strong>✕ Clear Area</strong> above to see everything again, or widen your filters.'
+        : 'Nothing logged yet matching these filters — try widening the date range or picking a different property/buck.';
+      mainWrap.appendChild(_empty);   // appendChild, so the header's Clear Area listener survives
       return;
     }
 
