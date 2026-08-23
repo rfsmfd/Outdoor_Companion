@@ -1226,6 +1226,13 @@
   .qb-joiner.qb-where{ color:var(--text-dim); }
   .qb-del{ background:transparent; border:none; color:#D94A2E; cursor:pointer; font-size:14px; padding:2px 5px; line-height:1; }
   .qb-del:hover{ color:#ff6a4a; }
+  .qb-saved-row{ display:flex; align-items:flex-start; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .qb-saved-lbl{ font-size:10px; color:var(--text-dim); letter-spacing:0.5px; padding-top:4px; }
+  .qb-saved-list{ display:flex; gap:6px; flex-wrap:wrap; flex:1; }
+  .qb-saved-chip{ display:inline-flex; align-items:center; gap:4px; font-size:11.5px; background:#1e2b23; border:1px solid #3c5a45; color:#bfe6cc; padding:3px 5px 3px 9px; border-radius:12px; cursor:pointer; }
+  .qb-saved-chip:hover{ border-color:var(--accent); }
+  .qb-saved-del{ background:transparent; border:none; color:#7f948a; font-size:12px; cursor:pointer; padding:0 2px; line-height:1; }
+  .qb-saved-del:hover{ color:#D94A2E; }
   .query-count-result{
     font-family:'Oswald',sans-serif;
     font-size:32px;
@@ -1940,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 402</div>
+    <div id="buildBadge">BUILD 403</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7326,6 +7333,35 @@
       var all = trailLocalLoadAll().filter(function(t){ return t.id !== id; });
       trailLocalSaveAll(all);
     }
+  }
+
+  // ---------- Saved Queries (named Custom Query definitions) + Report clipboard ----------
+  var SAVEDQ_LS_KEY = 'outdoor_companion_saved_queries';
+  var savedQueries = [];       // [{id, name, conditions, combiner, groupBy, vizType, source, createdAt}]
+  var reportEntries = [];      // report clipboard: [{title, summary, body:[lines]}]
+  var lastQueryReport = null;  // set by runCustomQuery so "Add to report" can capture the last run
+  function savedQLocalLoadAll(){ try{ var raw = window.localStorage.getItem(SAVEDQ_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; } }
+  function savedQLocalSaveAll(list){ try{ window.localStorage.setItem(SAVEDQ_LS_KEY, JSON.stringify(list)); }catch(e){} }
+  async function loadSavedQueries(){
+    if (hasChatStorage){
+      try{
+        var res = await window.storage.list('query:', false);
+        var keys = (res && res.keys) ? res.keys : [];
+        var loaded = [];
+        for (var i=0;i<keys.length;i++){ try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){} }
+        savedQueries = dedupeById(loaded);
+      }catch(e){ savedQueries = []; }
+    } else {
+      savedQueries = dedupeById(savedQLocalLoadAll());
+    }
+  }
+  async function saveSavedQuery(q){
+    if (hasChatStorage){ await window.storage.set('query:'+q.id, JSON.stringify(q), false); }
+    else { var all = savedQLocalLoadAll(); var idx = all.findIndex(function(x){ return x.id === q.id; }); if (idx>=0) all[idx]=q; else all.push(q); savedQLocalSaveAll(all); }
+  }
+  async function deleteSavedQueryStorage(id){
+    if (hasChatStorage){ try{ await window.storage.delete('query:'+id, false); }catch(e){} }
+    else { savedQLocalSaveAll(savedQLocalLoadAll().filter(function(x){ return x.id !== id; })); }
   }
 
   function huntLocalLoadAll(){
@@ -14864,6 +14900,7 @@
     await migratePropertyModules();   // stamp a module on any legacy property missing one (sites → name → default)
     await loadHuntEvents();
     await loadTrails();
+    try { await loadSavedQueries(); } catch (e) {}
     await loadBuckProfiles();
     await loadImportedPhotos();
     try { await loadSuggestions(); await loadSuggestionAcks(); } catch (e) {}
@@ -14900,7 +14937,8 @@
     site:'sites', obs:'observations', buck:'bucks', trail:'trails',
     hunt:'hunts', cam:'cameras', dep:'deployments', prop:'properties',
     photo:'photos',
-    sug:'suggestions', sugack:'suggestionAcks'   // Phase 2a: member suggestions + owner approvals
+    sug:'suggestions', sugack:'suggestionAcks',   // Phase 2a: member suggestions + owner approvals
+    query:'savedQueries'                          // named Custom Query definitions
   };
   function cloudCollName(prefix){
     var p = String(prefix).replace(/:$/, '');
@@ -16240,6 +16278,137 @@
     if (comb) comb.style.display = queryConditions.length > 1 ? 'inline-flex' : 'none';
   }
 
+  // Human-readable one-line description of the CURRENT query — used for saved-query names and report
+  // entry titles (e.g. "Is a buck is yes AND Hour of day between 5–9 · by Pressure Trend").
+  function qbOpLabel(op){ return ({eq:'=',ne:'≠',lt:'<',le:'≤',gt:'>',ge:'≥',between:'between',is:'is',isnot:'is not'})[op] || op; }
+  function describeQuery(){
+    var parts = [];
+    queryConditions.filter(qbConditionReady).forEach(function(c){
+      var f = qbFieldByKey(c.field), val = (c.op === 'between') ? (c.val + '–' + c.val2) : c.val;
+      parts.push((f ? f.label : c.field) + ' ' + qbOpLabel(c.op) + ' ' + val);
+    });
+    var cond = parts.length ? parts.join(' ' + queryCombiner + ' ') : 'All records';
+    var gb = '';
+    if (queryVizType === 'bar' || queryVizType === 'pie'){ var opt = queryGroupByOptionsForModule().filter(function(p){ return p[0] === queryGroupBy; })[0]; gb = ' · by ' + (opt ? opt[1] : queryGroupBy); }
+    else if (queryVizType === 'count') gb = ' · total count';
+    else if (queryVizType === 'ratebysite') gb = ' · detection rate/site';
+    else if (queryVizType === 'markers') gb = ' · map';
+    else if (queryVizType === 'heatmap') gb = ' · heat map';
+    else if (queryVizType === 'homerange') gb = ' · home range';
+    return cond + gb;
+  }
+  // Load a saved query's definition back into the live builder state, then re-render + run it.
+  function applySavedQuery(q){
+    queryConditions = (q.conditions || []).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; });
+    queryCombiner = q.combiner || 'AND';
+    queryGroupBy = q.groupBy || 'moon';
+    queryVizType = q.vizType || 'bar';
+    if (q.source) analyticsSource = q.source;
+    queryBuilderOpen = true;
+    renderAnalytics();               // rebuilds the whole panel from the restored state…
+    setTimeout(function(){ try { runCustomQuery(); } catch(e){} }, 0); // …then runs it against current data
+  }
+  async function saveCurrentQuery(){
+    if (!queryConditions.filter(qbConditionReady).length && queryVizType === 'bar'){
+      // allow saving a pure break-down (no conditions) too — only block a totally empty setup is fine
+    }
+    var suggested = describeQuery().slice(0, 60);
+    var name = await showPrompt('Name this query', suggested);
+    if (name == null) return;
+    name = String(name).trim(); if (!name) return;
+    var q = {
+      id: uid(), name: name,
+      conditions: queryConditions.filter(qbConditionReady).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; }),
+      combiner: queryCombiner, groupBy: queryGroupBy, vizType: queryVizType, source: analyticsSource,
+      createdAt: Date.now()
+    };
+    savedQueries.push(q);
+    try { await saveSavedQuery(q); } catch(e){ console.error('saveSavedQuery', e); }
+    renderSavedQueryList();
+    showToast('Saved query “' + name + '”');
+  }
+  function renderSavedQueryList(){
+    var host = document.getElementById('qb_saved_list');
+    if (!host) return;
+    if (!savedQueries.length){ host.innerHTML = '<span style="font-size:11px;color:var(--text-dim);">No saved queries yet — build one and tap 💾 Save.</span>'; return; }
+    host.innerHTML = savedQueries.slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); }).map(function(q){
+      return '<span class="qb-saved-chip" data-id="'+q.id+'" title="'+escapeHtml(describeSavedQuery(q))+'">▶ '+escapeHtml(q.name)+'<button class="qb-saved-del" data-id="'+q.id+'" title="Delete">✕</button></span>';
+    }).join('');
+    Array.prototype.forEach.call(host.querySelectorAll('.qb-saved-chip'), function(chip){
+      chip.addEventListener('click', function(e){
+        if (e.target && e.target.classList.contains('qb-saved-del')) return; // delete handled below
+        var q = savedQueries.filter(function(x){ return x.id === chip.getAttribute('data-id'); })[0];
+        if (q) applySavedQuery(q);
+      });
+    });
+    Array.prototype.forEach.call(host.querySelectorAll('.qb-saved-del'), function(btn){
+      btn.addEventListener('click', async function(e){
+        e.stopPropagation();
+        var id = btn.getAttribute('data-id');
+        var q = savedQueries.filter(function(x){ return x.id === id; })[0];
+        if (!q || !confirm('Delete saved query “' + q.name + '”?')) return;
+        savedQueries = savedQueries.filter(function(x){ return x.id !== id; });
+        try { await deleteSavedQueryStorage(id); } catch(err){}
+        renderSavedQueryList();
+      });
+    });
+  }
+  function describeSavedQuery(q){
+    var parts = (q.conditions||[]).map(function(c){ var f=qbFieldByKey(c.field); var val=(c.op==='between')?(c.val+'–'+c.val2):c.val; return (f?f.label:c.field)+' '+qbOpLabel(c.op)+' '+val; });
+    return (parts.length ? parts.join(' '+(q.combiner||'AND')+' ') : 'All records');
+  }
+  // ---------- Report clipboard ----------
+  function addCurrentToReport(){
+    if (!lastQueryReport){ showToast('Run a query first, then add it to the report.'); return; }
+    reportEntries.push({ title: lastQueryReport.title, summary: lastQueryReport.summary, body: (lastQueryReport.body||[]).slice() });
+    updateReportButton();
+    showToast('Added to report (' + reportEntries.length + ')');
+  }
+  function updateReportButton(){
+    var b = document.getElementById('qb_report_btn');
+    if (b) b.textContent = '📋 Report (' + reportEntries.length + ')';
+  }
+  function buildReportText(){
+    var now = new Date();
+    var lines = ['OUTDOOR COMPANION — QUERY REPORT', now.toLocaleString(), ''];
+    reportEntries.forEach(function(e, i){
+      lines.push((i+1) + '. ' + e.title);
+      if (e.summary) lines.push('   ' + e.summary);
+      (e.body||[]).forEach(function(l){ lines.push('   • ' + l); });
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+  function openReportModal(){
+    var text = reportEntries.length ? buildReportText() : 'No entries yet. Run a query and tap “📋 Add to report”.';
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100060;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:620px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+        '<div style="font-weight:800;font-size:16px;">📋 Query Report <span style="font-size:12px;color:#9db0a3;font-weight:600;">· ' + reportEntries.length + ' entr' + (reportEntries.length===1?'y':'ies') + '</span></div>' +
+        '<button class="rpt-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<textarea class="rpt-text" readonly style="width:100%;height:300px;box-sizing:border-box;background:#16211b;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:10px;font-family:monospace;font-size:12px;line-height:1.5;resize:vertical;">' + escapeHtml(text) + '</textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;">' +
+        '<button class="rpt-copy btn-primary" style="flex:2;">📋 Copy to clipboard</button>' +
+        '<button class="rpt-clear btn-ghost" style="flex:1;color:#D94A2E;">Clear report</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.rpt-x').addEventListener('click', close);
+    card.querySelector('.rpt-copy').addEventListener('click', function(){
+      var ta = card.querySelector('.rpt-text');
+      var done = function(){ showToast('Report copied to clipboard'); };
+      if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(ta.value).then(done, function(){ ta.select(); try{ document.execCommand('copy'); done(); }catch(e){} }); }
+      else { ta.select(); try{ document.execCommand('copy'); done(); }catch(e){} }
+    });
+    card.querySelector('.rpt-clear').addEventListener('click', function(){
+      if (!confirm('Clear all ' + reportEntries.length + ' report entr' + (reportEntries.length===1?'y':'ies') + '?')) return;
+      reportEntries = []; updateReportButton(); close();
+    });
+  }
+
   function renderQueryBuilder(container){
     var section = document.createElement('div');
     section.className = 'query-builder';
@@ -16256,6 +16425,7 @@
       '<button type="button" class="query-builder-toggle" id="qb_toggle">🔧 Custom Query <span id="qb_caret">'+(queryBuilderOpen?'▾':'▸')+'</span></button>' +
       '<div id="qb_body" style="display:'+(queryBuilderOpen?'block':'none')+';margin-top:12px;">' +
         '<p class="query-builder-desc">Add attribute conditions (like ArcGIS “Select By Attributes”), then choose how to break it down and see it. Runs on whatever the filters above have narrowed to.</p>' +
+        '<div class="qb-saved-row"><span class="qb-saved-lbl">SAVED</span><div id="qb_saved_list" class="qb-saved-list"></div></div>' +
         '<div class="qb-conditions-section">' +
           '<div class="qb-cond-head">' +
             '<label style="margin:0;">Conditions</label>' +
@@ -16287,7 +16457,11 @@
             '</div>' +
           '</div>' +
         '</div>' +
-        '<button class="btn-primary" id="qb_run_btn" style="margin-top:10px;">▶ Run Query</button>' +
+        '<div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">' +
+          '<button class="btn-primary" id="qb_run_btn" style="flex:2 1 160px;">▶ Run Query</button>' +
+          '<button class="btn-ghost" id="qb_save_btn" style="flex:1 1 90px;">💾 Save</button>' +
+          '<button class="btn-ghost" id="qb_report_btn" style="flex:1 1 110px;">📋 Report (' + reportEntries.length + ')</button>' +
+        '</div>' +
         '<div id="qb_area_note" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;">' + (queryDrawnLayer ? '📍 Area drawn on map — results limited to inside it' : '') + '</div>' +
         '<div id="qb_results" style="margin-top:14px;"></div>' +
       '</div>';
@@ -16326,7 +16500,13 @@
     }
     section.querySelector('#qb_comb_and').addEventListener('click', function(){ setCombiner('AND'); });
     section.querySelector('#qb_comb_or').addEventListener('click', function(){ setCombiner('OR'); });
+    section.querySelector('#qb_save_btn').addEventListener('click', function(){ saveCurrentQuery(); });
+    section.querySelector('#qb_report_btn').addEventListener('click', openReportModal);
+    // Delegate the Add-to-report click on the stable #qb_results container (survives innerHTML rebuilds).
+    var _res = section.querySelector('#qb_results');
+    if (_res) _res.addEventListener('click', function(e){ if (e.target && e.target.id === 'qb_add_report_btn') addCurrentToReport(); });
     renderQbConditions();
+    renderSavedQueryList();
   }
 
   function startQueryAreaDraw(shape){
@@ -16516,6 +16696,7 @@
       good.map(function(r){ return r.name; }),
       good.map(function(r){ return +r.perWeek.toFixed(2); }),
       'Detections / camera-week', false);
+    if (lastQueryReport) lastQueryReport.body = good.map(function(r){ return r.name + ': ' + r.perWeek.toFixed(2) + '/cam-week (' + r.det + ' det ÷ ' + r.td.toFixed(0) + ' cam-days)'; });
     var detail = good.map(function(r){ return escapeHtml(r.name) + ': ' + r.det + ' det ÷ ' + r.td.toFixed(0) + ' cam-day' + (Math.round(r.td)===1?'':'s') + ' = ' + r.perWeek.toFixed(2) + '/wk'; }).join(' · ');
     resultsEl.innerHTML += '<div style="font-size:11px;color:var(--text-dim);margin-top:8px;line-height:1.5;">📷 Effort-adjusted: detections normalized by trap-nights (camera-days out). ' + detail + '</div>' +
       ((noEffort.length || unlocated) ? '<div style="font-size:11px;color:#E8B04B;margin-top:6px;">⚠ ' + (noEffort.length ? noEffort.length + ' site(s) skipped (no deployment/trap-night data)' : '') + (noEffort.length && unlocated ? ' · ' : '') + (unlocated ? unlocated + ' detection(s) had no site' : '') + '.</div>' : '');
@@ -16856,7 +17037,14 @@
     // and this query's own result are two genuinely separate numbers, easy to conflate
     // when they sit close together on the same page. Always shown first, regardless of
     // which visualization is selected below it.
-    resultsEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Using ' + source.length + ' of ' + queryPageTotal + ' total ' + (queryPageTotal === 1 ? 'record' : 'records') + '</div>';
+    resultsEl.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">' +
+      '<span style="font-size:11px;color:var(--text-dim);">Using ' + source.length + ' of ' + queryPageTotal + ' total ' + (queryPageTotal === 1 ? 'record' : 'records') + '</span>' +
+      (source.length ? '<button type="button" id="qb_add_report_btn" class="btn-ghost" style="font-size:11px;padding:4px 9px;white-space:nowrap;">📋 Add to report</button>' : '') +
+    '</div>';
+    // Baseline report snapshot for THIS run; the viz branches enrich .body with the breakdown lines.
+    // (The Add-to-report button is wired via delegation on #qb_results in renderQueryBuilder, because
+    // the viz branches rebuild resultsEl.innerHTML and would drop a directly-attached listener.)
+    lastQueryReport = { title: describeQuery(), summary: 'Using ' + source.length + ' of ' + queryPageTotal + ' records', body: [] };
 
     if (source.length === 0){
       resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">No records match this query.</div>';
@@ -16969,6 +17157,9 @@
     } else {
       queryResultChart = buildBarChart(canvas, labels, labels.map(function(l){ return counts[l]; }), 'Count');
     }
+    // Report body: the breakdown as text (label: count (pct%)).
+    var _bt = labels.reduce(function(s,l){ return s + (counts[l]||0); }, 0);
+    if (lastQueryReport) lastQueryReport.body = labels.map(function(l){ var c = counts[l]||0; return l + ': ' + c + ' (' + (_bt>0?Math.round(c/_bt*100):0) + '%)'; });
   }
 
 
