@@ -1940,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 397</div>
+    <div id="buildBadge">BUILD 398</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16485,7 +16485,13 @@
     hideCamerasForCountMarkers(); // camera pins default OFF under the count-map for a clean read
     var bounds = L.latLngBounds(groups.map(function(g){ return [g.lat, g.lng]; }));
     map.fitBounds(bounds, { padding:[55,55] });
-    resultsEl.innerHTML += '<div class="query-count-result" style="font-size:16px;">📍 ' + groups.length + ' spot' + (groups.length===1?'':'s') + ' mapped — bigger, hotter circle = more detections</div>' +
+    // Transparency: the map can only plot detections that have a location. Report how many of the
+    // query's records actually landed on the map and how many were dropped for having no site — so
+    // "19 on the map" vs "25 in the query" is never a silent mystery.
+    var mapped = groups.reduce(function(s,g){ return s + g.count; }, 0);
+    var unlocated = source.length - mapped;
+    resultsEl.innerHTML += '<div class="query-count-result" style="font-size:16px;">📍 ' + mapped + ' of ' + source.length + ' detection' + (source.length===1?'':'s') + ' mapped across ' + groups.length + ' spot' + (groups.length===1?'':'s') + ' — bigger, hotter circle = more</div>' +
+      (unlocated > 0 ? '<div style="font-size:12px;color:#E8B04B;margin-top:4px;">⚠ ' + unlocated + ' detection' + (unlocated===1?'':'s') + ' not shown — no location assigned. Fix with “📍 Assign a location to unlocated” in the Photo Gallery.</div>' : '') +
       '<button class="btn-ghost" id="qb_clear_markers_btn" type="button" style="width:100%;margin-top:8px;">✕ Clear Map Markers</button>';
     var clr = document.getElementById('qb_clear_markers_btn');
     if (clr) clr.addEventListener('click', function(){ clearQueryCountMarkers(); resultsEl.innerHTML = ''; });
