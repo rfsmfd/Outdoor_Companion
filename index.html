@@ -1226,13 +1226,10 @@
   .qb-joiner.qb-where{ color:var(--text-dim); }
   .qb-del{ background:transparent; border:none; color:#D94A2E; cursor:pointer; font-size:14px; padding:2px 5px; line-height:1; }
   .qb-del:hover{ color:#ff6a4a; }
-  .qb-saved-row{ display:flex; align-items:flex-start; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
-  .qb-saved-lbl{ font-size:10px; color:var(--text-dim); letter-spacing:0.5px; padding-top:4px; }
-  .qb-saved-list{ display:flex; gap:6px; flex-wrap:wrap; flex:1; }
-  .qb-saved-chip{ display:inline-flex; align-items:center; gap:4px; font-size:11.5px; background:#1e2b23; border:1px solid #3c5a45; color:#bfe6cc; padding:3px 5px 3px 9px; border-radius:12px; cursor:pointer; }
-  .qb-saved-chip:hover{ border-color:var(--accent); }
-  .qb-saved-del{ background:transparent; border:none; color:#7f948a; font-size:12px; cursor:pointer; padding:0 2px; line-height:1; }
-  .qb-saved-del:hover{ color:#D94A2E; }
+  .qb-saved-row{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
+  .qb-saved-lbl{ font-size:10px; color:var(--text-dim); letter-spacing:0.5px; }
+  .qb-saved-select{ flex:1; min-width:0; padding:6px 8px; font-size:12.5px; border-radius:6px; }
+  .qb-saved-manage{ flex:0 0 auto; padding:5px 9px; font-size:13px; }
   .query-count-result{
     font-family:'Oswald',sans-serif;
     font-size:32px;
@@ -1947,7 +1944,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 406</div>
+    <div id="buildBadge">BUILD 407</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16392,30 +16389,47 @@
     showToast('Saved query “' + name + '”');
   }
   function renderSavedQueryList(){
-    var host = document.getElementById('qb_saved_list');
-    if (!host) return;
-    if (!savedQueries.length){ host.innerHTML = '<span style="font-size:11px;color:var(--text-dim);">No saved queries yet — build one and tap 💾 Save.</span>'; return; }
-    host.innerHTML = savedQueries.slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); }).map(function(q){
-      return '<span class="qb-saved-chip" data-id="'+q.id+'" title="'+escapeHtml(describeSavedQuery(q))+'">▶ '+escapeHtml(q.name)+'<button class="qb-saved-del" data-id="'+q.id+'" title="Delete">✕</button></span>';
-    }).join('');
-    Array.prototype.forEach.call(host.querySelectorAll('.qb-saved-chip'), function(chip){
-      chip.addEventListener('click', function(e){
-        if (e.target && e.target.classList.contains('qb-saved-del')) return; // delete handled below
-        var q = savedQueries.filter(function(x){ return x.id === chip.getAttribute('data-id'); })[0];
-        if (q) applySavedQuery(q);
-      });
-    });
-    Array.prototype.forEach.call(host.querySelectorAll('.qb-saved-del'), function(btn){
-      btn.addEventListener('click', async function(e){
-        e.stopPropagation();
-        var id = btn.getAttribute('data-id');
-        var q = savedQueries.filter(function(x){ return x.id === id; })[0];
-        if (!q || !confirm('Delete saved query “' + q.name + '”?')) return;
-        savedQueries = savedQueries.filter(function(x){ return x.id !== id; });
-        try { await deleteSavedQueryStorage(id); } catch(err){}
-        renderSavedQueryList();
-      });
-    });
+    var sel = document.getElementById('qb_saved_select');
+    if (!sel) return;
+    var list = savedQueries.slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+    sel.innerHTML = '<option value="">' + (list.length ? '— Load a saved query (' + list.length + ') —' : '— No saved queries yet —') + '</option>' +
+      list.map(function(q){ return '<option value="'+q.id+'" title="'+escapeHtml(describeSavedQuery(q))+'">'+escapeHtml(q.name)+'</option>'; }).join('');
+    sel.disabled = !list.length;
+    sel.onchange = function(){ var q = savedQueries.filter(function(x){ return x.id === sel.value; })[0]; if (q) applySavedQuery(q); };
+    var mng = document.getElementById('qb_saved_manage');
+    if (mng){ mng.style.display = list.length ? '' : 'none'; mng.onclick = openSavedQueriesModal; }
+  }
+  // Manage saved queries — rename / delete / load — in a modal, so the builder stays a tidy one-liner
+  // no matter how many you save.
+  function openSavedQueriesModal(){
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100060;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:560px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    function render(){
+      var list = savedQueries.slice().sort(function(a,b){ return (b.createdAt||0)-(a.createdAt||0); });
+      card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+          '<div style="font-weight:800;font-size:16px;">💾 Saved Queries <span style="font-size:12px;color:#9db0a3;font-weight:600;">· ' + list.length + '</span></div>' +
+          '<button class="sq-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+        (list.length ? list.map(function(q){
+          return '<div class="sq-row" data-id="'+q.id+'" style="border:1px solid #35443A;border-radius:9px;padding:9px 11px;margin-bottom:8px;">' +
+            '<div style="font-weight:700;font-size:13.5px;">'+escapeHtml(q.name)+'</div>' +
+            '<div style="font-size:11px;color:#9db0a3;margin:2px 0 7px;line-height:1.4;">'+escapeHtml(describeSavedQuery(q))+'</div>' +
+            '<div style="display:flex;gap:6px;">' +
+              '<button class="sq-load btn-primary" data-id="'+q.id+'" style="flex:2;font-size:12px;padding:6px 8px;">▶ Load &amp; run</button>' +
+              '<button class="sq-rename btn-ghost" data-id="'+q.id+'" style="flex:1;font-size:12px;padding:6px 8px;">✏ Rename</button>' +
+              '<button class="sq-del btn-ghost" data-id="'+q.id+'" style="flex:1;font-size:12px;padding:6px 8px;color:#D94A2E;">✕ Delete</button>' +
+            '</div></div>';
+        }).join('') : '<div style="color:#9db0a3;font-size:13px;padding:8px 0 14px;">No saved queries yet. Build one and tap 💾 Save.</div>');
+      card.querySelector('.sq-x').addEventListener('click', close);
+      Array.prototype.forEach.call(card.querySelectorAll('.sq-load'), function(b){ b.addEventListener('click', function(){ var q = savedQueries.filter(function(x){ return x.id===b.getAttribute('data-id'); })[0]; if (q){ close(); applySavedQuery(q); } }); });
+      Array.prototype.forEach.call(card.querySelectorAll('.sq-rename'), function(b){ b.addEventListener('click', async function(){ var id=b.getAttribute('data-id'); var q = savedQueries.filter(function(x){ return x.id===id; })[0]; if (!q) return; var nm = await showPrompt('Rename query', q.name); if (nm==null) return; nm=String(nm).trim(); if (!nm) return; q.name=nm; try{ await saveSavedQuery(q); }catch(e){} render(); renderSavedQueryList(); }); });
+      Array.prototype.forEach.call(card.querySelectorAll('.sq-del'), function(b){ b.addEventListener('click', async function(){ var id=b.getAttribute('data-id'); var q = savedQueries.filter(function(x){ return x.id===id; })[0]; if (!q || !confirm('Delete saved query “'+q.name+'”?')) return; savedQueries = savedQueries.filter(function(x){ return x.id!==id; }); try{ await deleteSavedQueryStorage(id); }catch(e){} render(); renderSavedQueryList(); }); });
+    }
+    render();
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
   }
   function describeSavedQuery(q){
     var parts = (q.conditions||[]).map(function(c){ var f=qbFieldByKey(c.field); var val=(c.op==='between')?(c.val+'–'+c.val2):c.val; return (f?f.label:c.field)+' '+qbOpLabel(c.op)+' '+val; });
@@ -16514,7 +16528,10 @@
       '<button type="button" class="query-builder-toggle" id="qb_toggle">🔧 Custom Query <span id="qb_caret">'+(queryBuilderOpen?'▾':'▸')+'</span></button>' +
       '<div id="qb_body" style="display:'+(queryBuilderOpen?'block':'none')+';margin-top:12px;">' +
         '<p class="query-builder-desc">Add attribute conditions (like ArcGIS “Select By Attributes”), then choose how to break it down and see it. Runs on whatever the filters above have narrowed to.</p>' +
-        '<div class="qb-saved-row"><span class="qb-saved-lbl">SAVED</span><div id="qb_saved_list" class="qb-saved-list"></div></div>' +
+        '<div class="qb-saved-row"><span class="qb-saved-lbl">SAVED</span>' +
+          '<select id="qb_saved_select" class="qb-saved-select"><option value="">— Load a saved query —</option></select>' +
+          '<button type="button" id="qb_saved_manage" class="btn-ghost qb-saved-manage" title="Rename or delete saved queries">⚙</button>' +
+        '</div>' +
         '<div class="qb-conditions-section">' +
           '<div class="qb-cond-head">' +
             '<label style="margin:0;">Conditions</label>' +
