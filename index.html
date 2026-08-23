@@ -1944,7 +1944,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 407</div>
+    <div id="buildBadge">BUILD 408</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16305,7 +16305,7 @@
   // so an entry still makes full sense later even if the live app filters have since changed.
   function describeFullFilters(){
     var parts = [];
-    if (typeof analyticsBuckProfileId !== 'undefined' && analyticsBuckProfileId){ var bp = buckProfiles.filter(function(b){ return b.id === analyticsBuckProfileId; })[0]; parts.push('Buck: ' + (bp ? bp.name : '?')); }
+    if (typeof analyticsBuckProfileId !== 'undefined' && analyticsBuckProfileId){ var bp = buckProfiles.filter(function(b){ return b.id === analyticsBuckProfileId; })[0]; parts.push('Tag Name: ' + (bp ? bp.name : '?')); }
     else if (typeof analyticsSpecies !== 'undefined' && analyticsSpecies){ parts.push('Species: ' + analyticsSpecies); }
     else { parts.push('Subject: all'); }
     if (typeof analyticsBuckClass !== 'undefined' && analyticsBuckClass) parts.push('Class: ' + analyticsBuckClass);
@@ -16368,14 +16368,23 @@
     var name = await showPrompt('Name this query', suggested);
     if (name == null) return;
     name = String(name).trim(); if (!name) return;
+    // If a specific tagged individual (buck profile) is selected, ask whether to lock the query to it
+    // or save it as a TEMPLATE you can run on ANY buck — because a pattern like "first-light on falling
+    // pressure" is usually something you'd want to check against different bucks, not just this one.
+    var lockedBuck = (typeof analyticsBuckProfileId !== 'undefined') ? analyticsBuckProfileId : null;
+    if (lockedBuck){
+      var bp = buckProfiles.filter(function(b){ return b.id === lockedBuck; })[0];
+      var keep = confirm('Lock this query to “' + (bp ? bp.name : 'this tag') + '”?\n\nOK = save it for ' + (bp ? bp.name : 'this tag') + ' only.\nCancel = save it generic — run it on ANY buck (you pick which when you load it).');
+      if (!keep) lockedBuck = null;   // generic template
+    }
     var q = {
       id: uid(), name: name,
       conditions: queryConditions.filter(qbConditionReady).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; }),
       combiner: queryCombiner, groupBy: queryGroupBy, vizType: queryVizType, source: analyticsSource,
-      // Also snapshot the SUBJECT filters (buck/species/class/property/date) so recalling "Moose
-      // first-light" restores the Moose filter, not just the attribute conditions.
+      // Snapshot the SUBJECT filters so recalling "Moose first-light" restores the Moose filter — UNLESS
+      // the user chose to save it as an any-buck template above (then buckProfileId is null).
       subject: {
-        buckProfileId: (typeof analyticsBuckProfileId !== 'undefined' ? analyticsBuckProfileId : null),
+        buckProfileId: lockedBuck,
         species: (typeof analyticsSpecies !== 'undefined' ? analyticsSpecies : null),
         buckClass: (typeof analyticsBuckClass !== 'undefined' ? analyticsBuckClass : null),
         propertyId: (typeof analyticsPropertyId !== 'undefined' ? analyticsPropertyId : null),
