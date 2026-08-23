@@ -1940,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 400</div>
+    <div id="buildBadge">BUILD 401</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -15976,6 +15976,37 @@
     }
     return true;
   }
+  // The [start,end] ms window the current date filter covers — used to clip trap-night effort to the
+  // SAME window the detections are counted over (so detection RATE is apples-to-apples). null start on
+  // 'all time' = no lower clip (use each deployment's real span).
+  function analyticsRangeBounds(){
+    var now = Date.now();
+    if (analyticsDateRange === 'year') return { start: now - 365*86400000, end: now };
+    if (analyticsDateRange === 'month') return { start: now - 30*86400000, end: now };
+    if (analyticsDateRange === 'custom') return { start: (analyticsCustomFrom != null ? analyticsCustomFrom : null), end: (analyticsCustomTo != null ? analyticsCustomTo : now) };
+    return { start: null, end: now };
+  }
+  // Camera-days of EFFORT at a site (trap-nights). A deployment runs from its deployedAt until the
+  // camera's NEXT deployment (moved elsewhere) or now; we sum each such window that falls at `siteId`,
+  // clipped to [start,end]. Multiple cameras overlapping at one site correctly add their days.
+  function siteTrapNightDays(siteId, start, end){
+    var now = Date.now();
+    var byCam = {};
+    deployments.forEach(function(d){ if (d && d.cameraId != null && d.deployedAt != null) (byCam[d.cameraId] = byCam[d.cameraId] || []).push(d); });
+    var ms = 0;
+    Object.keys(byCam).forEach(function(cam){
+      var arr = byCam[cam].slice().sort(function(a,b){ return a.deployedAt - b.deployedAt; });
+      for (var i=0;i<arr.length;i++){
+        if (arr[i].siteId !== siteId) continue;
+        var ws = arr[i].deployedAt;
+        var we = (i+1 < arr.length) ? arr[i+1].deployedAt : now;
+        if (start != null) ws = Math.max(ws, start);
+        if (end != null) we = Math.min(we, end);
+        if (we > ws) ms += (we - ws);
+      }
+    });
+    return ms / 86400000;
+  }
 
   // ---------- Custom Query Builder ----------
   // Data source -> filters (including an optional drawn map area) -> visualization type
@@ -16231,6 +16262,7 @@
             '<option value="bar"'+(queryVizType==='bar'?' selected':'')+'>Bar Chart</option>' +
             '<option value="pie"'+(queryVizType==='pie'?' selected':'')+'>Pie Chart</option>' +
             '<option value="count"'+(queryVizType==='count'?' selected':'')+'>Total Count</option>' +
+            '<option value="ratebysite"'+(queryVizType==='ratebysite'?' selected':'')+'>Detection Rate / Site (effort-adjusted)</option>' +
             '<option value="markers"'+(queryVizType==='markers'?' selected':'')+'>Count Markers (map)</option>' +
             '<option value="heatmap"'+(queryVizType==='heatmap'?' selected':'')+'>Heat Map</option>' +
             '<option value="homerange"'+(queryVizType==='homerange'?' selected':'')+'>Home Range Rings</option></select></div>' +
@@ -16260,9 +16292,9 @@
       queryVizType = this.value;
       // Break Down By is meaningless for Count (a single total), Heat Map, and Home Range
       // (purely spatial) — hide it for those rather than leave a control that does nothing.
-      section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
+      section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'ratebysite' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
     });
-    section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
+    section.querySelector('#qb_groupby_group').style.display = (queryVizType === 'count' || queryVizType === 'ratebysite' || queryVizType === 'markers' || queryVizType === 'heatmap' || queryVizType === 'homerange') ? 'none' : '';
     section.querySelector('#qb_draw_rect').addEventListener('click', function(){ startQueryAreaDraw('rectangle'); });
     section.querySelector('#qb_draw_circle').addEventListener('click', function(){ startQueryAreaDraw('circle'); });
     section.querySelector('#qb_draw_poly').addEventListener('click', function(){ startQueryAreaDraw('polygon'); });
@@ -16446,6 +16478,35 @@
     queryCountMarkers.forEach(function(l){ try{ map.removeLayer(l); }catch(e){} });
     queryCountMarkers = [];
     restoreCamerasAfterCountMarkers();
+  }
+  // Effort-adjusted DETECTION RATE per site: detections ÷ trap-nights (camera-days the camera was
+  // actually out there), shown per camera-WEEK so a stand with a camera out 3× longer doesn't look
+  // "hotter" just from more opportunity. This is the fair "which spot is actually most active" view.
+  function renderDetectionRateBySite(source, resultsEl){
+    var b = analyticsRangeBounds();
+    var bySite = {};
+    source.forEach(function(o){ if (o.siteId) bySite[o.siteId] = (bySite[o.siteId] || 0) + 1; });
+    var rows = Object.keys(bySite).map(function(id){
+      var det = bySite[id];
+      var td = siteTrapNightDays(id, b.start, b.end);
+      var site = sites.filter(function(s){ return s.id === id; })[0];
+      return { name: site ? (site.name || 'Unnamed') : 'Unknown', det: det, td: td, perWeek: (td >= 0.5 ? (det / td) * 7 : null) };
+    });
+    var good = rows.filter(function(r){ return r.perWeek != null; }).sort(function(a,b){ return b.perWeek - a.perWeek; });
+    var noEffort = rows.filter(function(r){ return r.perWeek == null; });
+    var unlocated = source.length - source.filter(function(o){ return o.siteId; }).length;
+    if (!good.length){
+      resultsEl.innerHTML += '<div class="empty" style="padding:16px 0;">Can\'t compute a rate — no camera-deployment history (trap-nights) for these sites. Detection rate needs to know how long a camera was out at each spot (set up cameras/deployments first).</div>';
+      return;
+    }
+    resultsEl.innerHTML += '<div class="analytics-chart-wrap"><canvas id="qb_result_canvas"></canvas></div>';
+    queryResultChart = buildBarChart(document.getElementById('qb_result_canvas'),
+      good.map(function(r){ return r.name; }),
+      good.map(function(r){ return +r.perWeek.toFixed(2); }),
+      'Detections / camera-week');
+    var detail = good.map(function(r){ return escapeHtml(r.name) + ': ' + r.det + ' det ÷ ' + r.td.toFixed(0) + ' cam-day' + (Math.round(r.td)===1?'':'s') + ' = ' + r.perWeek.toFixed(2) + '/wk'; }).join(' · ');
+    resultsEl.innerHTML += '<div style="font-size:11px;color:var(--text-dim);margin-top:8px;line-height:1.5;">📷 Effort-adjusted: detections normalized by trap-nights (camera-days out). ' + detail + '</div>' +
+      ((noEffort.length || unlocated) ? '<div style="font-size:11px;color:#E8B04B;margin-top:6px;">⚠ ' + (noEffort.length ? noEffort.length + ' site(s) skipped (no deployment/trap-night data)' : '') + (noEffort.length && unlocated ? ' · ' : '') + (unlocated ? unlocated + ' detection(s) had no site' : '') + '.</div>' : '');
   }
   function renderCountMarkers(source, resultsEl){
     clearQueryCountMarkers();
@@ -16814,6 +16875,11 @@
 
     if (queryVizType === 'count'){
       resultsEl.innerHTML += '<div class="query-count-result">' + source.length + ' matching ' + (source.length === 1 ? 'record' : 'records') + '</div>';
+      return;
+    }
+
+    if (queryVizType === 'ratebysite'){
+      renderDetectionRateBySite(source, resultsEl);
       return;
     }
 
