@@ -1940,7 +1940,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 394</div>
+    <div id="buildBadge">BUILD 395</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16996,6 +16996,10 @@
     if (analyticsSpecies && o.species !== analyticsSpecies) return false;
     if (analyticsBuckClass && eventBuckClass(o) !== analyticsBuckClass) return false;
     if (analyticsBuckProfileId && o.buckProfileId !== analyticsBuckProfileId) return false;
+    // A drawn Area is a PAGE-LEVEL spatial filter — every chart, the header total, and the Custom
+    // Query all honor it (previously only the Custom Query did, so the charts wrongly showed data
+    // from outside the box). Events with no coordinates can't be inside a box, so they drop out.
+    if (queryDrawnLayer && !pointInShape(o.lat, o.lng, queryDrawnLayer)) return false;
     return true;
   }
 
@@ -17166,7 +17170,8 @@
       : (analyticsSource === 'sightings' ? ('sighting' + (total===1?'':'s')) : ('detection' + (total===1?'':'s')));
     var header = document.createElement('div');
     header.className = 'analytics-header';
-    header.innerHTML = '<div class="analytics-total">' + total + ' ' + eventNoun + '</div>';
+    header.innerHTML = '<div class="analytics-total">' + total + ' ' + eventNoun + '</div>' +
+      (queryDrawnLayer ? '<div style="font-size:11px;color:#E8823F;font-weight:600;margin-top:2px;">🔷 Limited to your drawn area — the whole page (every chart + total) counts only what\'s inside the box. Clear it in Custom Query → ✕ Clear Area.</div>' : '');
     // Transparency: when photos are in the mix, show how the raw photo count becomes
     // independent detections — bursts grouped into visits, AI-flagged empties excluded —
     // so this number never looks mysterious next to the gallery's raw photo count.
@@ -17178,6 +17183,10 @@
         if (analyticsBuckClass === 'Buck' && !(pp.ai && pp.ai.isBuck)) return false;
         if (analyticsBuckClass === 'Antlerless / Other' && !(aiIsWildlife(pp.ai) && !pp.ai.isBuck)) return false;
         if (analyticsBuckProfileId && pp.buckProfileId !== analyticsBuckProfileId) return false;
+        if (queryDrawnLayer){ // respect the drawn Area here too, via the photo's site coordinates
+          var _s = pp.matchedSiteId ? sites.filter(function(x){ return x.id === pp.matchedSiteId; })[0] : null;
+          if (!_s || !pointInShape(_s.lat, _s.lng, queryDrawnLayer)) return false;
+        }
         return true;
       });
       var emptyCount = photosInView.filter(function(pp){ return pp.ai && !aiIsWildlife(pp.ai); }).length;
