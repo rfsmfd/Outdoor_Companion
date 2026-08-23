@@ -1944,7 +1944,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 408</div>
+    <div id="buildBadge">BUILD 409</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7334,9 +7334,15 @@
 
   // ---------- Saved Queries (named Custom Query definitions) + Report clipboard ----------
   var SAVEDQ_LS_KEY = 'outdoor_companion_saved_queries';
+  var REPORT_LS_KEY = 'outdoor_companion_report_entries';
   var savedQueries = [];       // [{id, name, conditions, combiner, groupBy, vizType, source, createdAt}]
-  var reportEntries = [];      // report clipboard: [{title, summary, body:[lines]}]
+  var reportEntries = [];      // report clipboard: [{title, filters, summary, body:[lines]}]
   var lastQueryReport = null;  // set by runCustomQuery so "Add to report" can capture the last run
+  // The report clipboard is a WORKING document you build across a session — persist it to localStorage
+  // so a page reload (incl. refreshing to a new build) never wipes an in-progress report.
+  function persistReport(){ try{ window.localStorage.setItem(REPORT_LS_KEY, JSON.stringify(reportEntries)); }catch(e){} }
+  function loadReportEntries(){ try{ var raw = window.localStorage.getItem(REPORT_LS_KEY); reportEntries = raw ? (JSON.parse(raw) || []) : []; }catch(e){ reportEntries = []; } }
+  loadReportEntries();   // restore any in-progress report immediately on load
   function savedQLocalLoadAll(){ try{ var raw = window.localStorage.getItem(SAVEDQ_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; } }
   function savedQLocalSaveAll(list){ try{ window.localStorage.setItem(SAVEDQ_LS_KEY, JSON.stringify(list)); }catch(e){} }
   async function loadSavedQueries(){
@@ -16448,6 +16454,7 @@
   function addCurrentToReport(){
     if (!lastQueryReport){ showToast('Run a query first, then add it to the report.'); return; }
     reportEntries.push({ title: lastQueryReport.title, filters: lastQueryReport.filters, summary: lastQueryReport.summary, body: (lastQueryReport.body||[]).slice() });
+    persistReport();
     updateReportButton();
     showToast('Added to report (' + reportEntries.length + ')');
   }
@@ -16517,7 +16524,7 @@
     card.querySelector('.rpt-copymd').addEventListener('click', function(){ copyStr(reportEntries.length ? buildReportMarkdown() : '', 'Report (Markdown)'); });
     card.querySelector('.rpt-clear').addEventListener('click', function(){
       if (!confirm('Clear all ' + reportEntries.length + ' report entr' + (reportEntries.length===1?'y':'ies') + '?')) return;
-      reportEntries = []; updateReportButton(); close();
+      reportEntries = []; persistReport(); updateReportButton(); close();
     });
   }
 
