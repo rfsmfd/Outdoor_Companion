@@ -1823,6 +1823,7 @@
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
       <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:600;">👁 Scout a Spot — flag map potential</button>
+      <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
       <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
       <button class="btn-ghost" id="toolsToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
@@ -1948,7 +1949,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 451</div>
+    <div id="buildBadge">BUILD 452</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9846,6 +9847,84 @@
     if (s.installedYear != null) bits.push('since ' + s.installedYear);
     return bits.length ? bits.join(' · ') : '';
   }
+  // ---------- 🔍 Scouting Report — the composite readout of a property's ground ----------
+  // Inventories the sign/structure you've mapped, the cover mix, and WHERE the sign concentrates, so an
+  // off-season pattern jumps back out. Honesty: it points at things to check, it does not predict.
+  var SCOUT_SIGN = { buck:{label:'buck sign',icon:'🦌'}, rub:{label:'rubs',icon:'🪵'}, scrape:{label:'scrapes',icon:'🍆'}, bedding:{label:'bedding',icon:'💤'}, trail:{label:'trails/travel',icon:'🐾'}, track:{label:'tracks',icon:'👣'}, food:{label:'food',icon:'🌾'}, water:{label:'water',icon:'💧'}, doe:{label:'doe sign',icon:'🦌'} };
+  function _scoutInScope(prop, lat, lng, propertyId){
+    if (!prop) return true;
+    if (propertyId === prop.id) return true;
+    return (typeof pointInProperty === 'function' && typeof lat === 'number') ? pointInProperty(lat, lng, prop) : false;
+  }
+  function _scoutingItems(prop){
+    var items = [], siteKinds = { scrape:'scrape', rub:'rub', trail:'trail', bedding:'bedding', feeding:'food', water:'water' }, obsKinds = { buck:'buck', doe:'doe', scrape:'scrape', rub:'rub', track:'track', trail:'trail', bedding:'bedding', feeding:'food' };
+    (typeof sites !== 'undefined' ? sites : []).forEach(function(s){ var k = siteKinds[s.type]; if (k && typeof s.lat === 'number' && _scoutInScope(prop, s.lat, s.lng, s.propertyId)) items.push({ lat:s.lat, lng:s.lng, kind:k }); });
+    (typeof observations !== 'undefined' ? observations : []).forEach(function(o){ var k = obsKinds[o.type]; if (k && typeof o.lat === 'number' && _scoutInScope(prop, o.lat, o.lng, o.propertyId)) items.push({ lat:o.lat, lng:o.lng, kind:k }); });
+    (typeof trails !== 'undefined' ? trails : []).forEach(function(tr){ if (!tr || !tr.points || !tr.points.length) return; var mid = tr.points[Math.floor(tr.points.length/2)]; if (mid && typeof mid.lat === 'number' && _scoutInScope(prop, mid.lat, mid.lng, tr.propertyId)) items.push({ lat:mid.lat, lng:mid.lng, kind:'trail' }); });
+    return items;
+  }
+  function _scoutCoverMix(prop){
+    var lc = prop && prop.landcover; if (!lc || !lc.grid) return null;
+    var types = ensureTypes(lc), c = { open:0, woods:0, wet:0 }, total = 0;
+    for (var i = 0; i < types.length; i++){ var cl = _coverClass(types.charAt(i)); if (cl){ c[cl] = (c[cl] || 0) + 1; total++; } }
+    if (!total) return null;
+    return { woods: Math.round(c.woods / total * 100), open: Math.round(c.open / total * 100), wet: Math.round(c.wet / total * 100) };
+  }
+  function _scoutHotCluster(items){
+    if (items.length < 4) return null;
+    var lats = items.map(function(i){ return i.lat; }), lngs = items.map(function(i){ return i.lng; });
+    var n = Math.max.apply(null, lats), s = Math.min.apply(null, lats), e = Math.max.apply(null, lngs), w = Math.min.apply(null, lngs);
+    if (n === s || e === w) return null;
+    var G = 5, cells = {};
+    items.forEach(function(it){ var gy = Math.min(G-1, Math.floor((n - it.lat) / (n - s) * G)), gx = Math.min(G-1, Math.floor((it.lng - w) / (e - w) * G)); var key = gy + '_' + gx; (cells[key] = cells[key] || []).push(it); });
+    var best = null; Object.keys(cells).forEach(function(k){ if (!best || cells[k].length > cells[best].length) best = k; });
+    var arr = cells[best]; if (!arr || arr.length < 3) return null;
+    var cLat = arr.reduce(function(a, i){ return a + i.lat; }, 0) / arr.length, cLng = arr.reduce(function(a, i){ return a + i.lng; }, 0) / arr.length;
+    var pcLat = (n + s) / 2, pcLng = (e + w) / 2, dir = (cLat > pcLat ? 'N' : 'S') + (cLng > pcLng ? 'E' : 'W');
+    var kc = {}; arr.forEach(function(i){ kc[i.kind] = (kc[i.kind] || 0) + 1; });
+    var kinds = Object.keys(kc).sort(function(a, b){ return kc[b] - kc[a]; });
+    return { count: arr.length, dir: dir, kinds: kinds, lat: cLat, lng: cLng };
+  }
+  function openScoutingReport(){
+    var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
+    var items = _scoutingItems(prop), counts = {}; items.forEach(function(i){ counts[i.kind] = (counts[i.kind] || 0) + 1; });
+    var cover = prop ? _scoutCoverMix(prop) : null, hot = prop ? _scoutHotCluster(items) : null;
+    var line = function(icon, txt){ return '<div style="margin:3px 0;">' + icon + ' ' + txt + '</div>'; };
+    var h = '<div style="font-size:13.5px;color:#dfeee4;line-height:1.55;">';
+    if (!prop) h += '<div style="color:#E8B04B;margin-bottom:6px;">Showing <b>all properties</b> — pick a farm in the top dropdown for cover mix &amp; the hot-zone read.</div>';
+    if (prop){
+      if (cover) h += line('🌲', 'Cover: <b>' + cover.woods + '%</b> woods · <b>' + cover.open + '%</b> field' + (cover.wet ? (' · ' + cover.wet + '% water/wet') : ''));
+      else h += line('🌲', '<span style="opacity:.7;">Cover not scanned — run Field vs woods in Property Setup.</span>');
+    }
+    var order = ['buck', 'rub', 'scrape', 'bedding', 'trail', 'track', 'food', 'water', 'doe'];
+    var inv = order.filter(function(k){ return counts[k]; }).map(function(k){ var m = SCOUT_SIGN[k]; return m.icon + ' <b>' + counts[k] + '</b> ' + m.label; });
+    h += '<div style="margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">SIGN &amp; STRUCTURE</div>';
+    h += inv.length ? line('📋', inv.join(' · ')) : line('📋', '<span style="opacity:.7;">No sign or structure logged here yet.</span>');
+    if (prop){
+      h += '<div style="margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">WHERE IT STACKS UP</div>';
+      if (hot){
+        var kd = hot.kinds.slice(0, 3).map(function(k){ return (SCOUT_SIGN[k] ? SCOUT_SIGN[k].label : k); }).join(', ');
+        h += line('📍', 'Sign concentrates toward the <b>' + hot.dir + '</b> — ' + hot.count + ' markers clustered, mostly <b>' + escapeHtml(kd) + '</b>.');
+        h += '<button class="sr-focus" style="margin-top:6px;width:100%;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;">📍 Show me (fly there + Scout Mode)</button>';
+      } else {
+        h += line('📍', '<span style="opacity:.7;">Not enough sign yet to call a hot zone — keep logging what you find.</span>');
+      }
+    }
+    h += '<div style="color:#9db0a3;font-size:12px;margin-top:8px;">Patterns to go check on the ground — not predictions. The more you log, the sharper this gets.</div></div>';
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:460px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;"><div style="font-weight:800;font-size:17px;">🔍 Scouting Report</div><button class="sr-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : 'All properties') + '</div>' + h;
+    card.querySelector('.sr-x').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    var focus = card.querySelector('.sr-focus');
+    if (focus) focus.addEventListener('click', function(){ close(); try { if (!scoutMode) setScoutMode(true); if (hot) map.flyTo([hot.lat, hot.lng], Math.max(map.getZoom(), 16)); } catch(e){} });
+    back.appendChild(card); document.body.appendChild(back);
+  }
   function popupHtml(s){
     var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
     var camInfo = '';
@@ -11255,6 +11334,7 @@
     var _wib = document.getElementById('walkInBtn'); if (_wib) _wib.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _slb = document.getElementById('sitLogBtn'); if (_slb) _slb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _ssb = document.getElementById('scoutSpotBtn'); if (_ssb) _ssb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _srb = document.getElementById('scoutReportBtn'); if (_srb) _srb.style.display = activeModule === 'hunting' ? 'block' : 'none';
   }
 
   // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
@@ -12526,6 +12606,8 @@
       showToast('Tap the map where it looks promising 👁 — jot why in Notes');
       if (window.innerWidth <= 820) closeSidebar();
     });
+    var reportBtn = document.getElementById('scoutReportBtn');
+    if (reportBtn) reportBtn.addEventListener('click', function(){ if (typeof openScoutingReport === 'function') openScoutingReport(); });
   })();
 
   map.on('click', function(e){
