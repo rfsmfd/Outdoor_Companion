@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 431</div>
+    <div id="buildBadge">BUILD 432</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9647,25 +9647,9 @@
     });
     var contextBtn2 = node.querySelector('[data-act="context"]');
     if (contextBtn2) contextBtn2.addEventListener('click', function(){ map.closePopup(); openSiteContextEditor(id); });
-    var profBtn = node.querySelector('[data-act="standprofile"]');
-    if (profBtn) profBtn.addEventListener('click', function(){
-      var box = node.querySelector('.stand-profile');
-      if (!box) return;
-      var isOpen = box.getAttribute('data-open') === '1';   // track state ourselves — don't trust the inline style read
-      if (!isOpen){
-        if (!box.getAttribute('data-loaded')){
-          // Never let a build error leave the panel stuck closed — always open, show what we can.
-          var html;
-          try { html = standProfileHtml(id); }
-          catch(err){ console.error('Outdoor Companion: stand profile build failed', err); html = '<div style="font-size:11px;color:#E8B04B;padding:6px 0;">Couldn’t build this stand’s profile — its data may still be loading. Try again in a moment.</div>'; }
-          box.innerHTML = html; box.setAttribute('data-loaded','1');
-        }
-        box.style.display = 'block'; box.setAttribute('data-open','1'); profBtn.textContent = '📊 Stand Profile — tap to hide';
-      } else {
-        box.style.display = 'none'; box.setAttribute('data-open','0'); profBtn.textContent = '📊 Stand Profile — tap to expand';
-      }
-      var pop = map._popup; if (pop && pop.update) try { pop.update(); } catch(e){}   // let Leaflet re-measure after it grows
-    });
+    // NOTE: the Stand Profile expand button is handled by a single DELEGATED document listener
+    // (installStandProfileToggle, below), NOT bound here — delegation can't be "missed" if a popup
+    // re-renders and survives Leaflet swapping the popup content node. See that function.
     var huntableBtn = node.querySelector('[data-act="huntable"]');
     if (huntableBtn) huntableBtn.addEventListener('click', async function(){
       var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s) return;
@@ -9675,6 +9659,42 @@
       showToast(s.huntable ? 'Marked as a hunt spot 🏹' : 'Set to observation only 👁');
     });
   }
+
+  // Stand Profile expand/collapse — ONE delegated listener for every popup, installed once. Per-popup
+  // binding was proving unreliable in the field (button visible but tap did nothing); a document-level
+  // delegated handler catches the click no matter how Leaflet rebuilt the popup content. The panel div
+  // is the button's next sibling. On a build error we now surface the ACTUAL message in the panel so a
+  // field failure is self-diagnosing instead of silently stuck.
+  (function installStandProfileToggle(){
+    document.addEventListener('click', function(ev){
+      var t = ev.target;
+      var btn = (t && t.closest) ? t.closest('[data-act="standprofile"]') : null;
+      if (!btn) return;
+      ev.preventDefault();
+      var box = btn.nextElementSibling;
+      if (!box || (' ' + box.className + ' ').indexOf(' stand-profile ') < 0){
+        box = btn.parentNode ? btn.parentNode.querySelector('.stand-profile') : null;
+      }
+      if (!box){ if (typeof showToast === 'function') showToast('Stand Profile panel not found — please refresh.'); return; }
+      var id = btn.getAttribute('data-id');
+      var isOpen = box.getAttribute('data-open') === '1';
+      if (!isOpen){
+        if (!box.getAttribute('data-loaded')){
+          var html;
+          try { html = standProfileHtml(id); }
+          catch(err){
+            console.error('Outdoor Companion: stand profile build failed', err);
+            html = '<div style="font-size:11px;color:#E8B04B;padding:6px 0;">Couldn’t build this stand’s profile:<br>' + escapeHtml((err && err.message) ? err.message : String(err)) + '</div>';
+          }
+          box.innerHTML = html; box.setAttribute('data-loaded','1');
+        }
+        box.style.display = 'block'; box.setAttribute('data-open','1'); btn.textContent = '📊 Stand Profile — tap to hide';
+      } else {
+        box.style.display = 'none'; box.setAttribute('data-open','0'); btn.textContent = '📊 Stand Profile — tap to expand';
+      }
+      if (typeof map !== 'undefined' && map && map._popup && map._popup.update){ try { map._popup.update(); } catch(e){} }
+    }, false);
+  })();
 
   // ---------- Waypoint import (bring stands/markers in from other apps) ----------
   // HuntStand / onX / Google Earth / ArcGIS / GPS units all EXPORT a file; we read the common ones and
