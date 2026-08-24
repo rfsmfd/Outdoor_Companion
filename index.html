@@ -1952,7 +1952,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 459</div>
+    <div id="buildBadge">BUILD 460</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10060,6 +10060,37 @@
   // ---------- 📋 Field Card — the per-property hunt-day card, generated live from your data ----------
   function _fcDist(m){ var yd = m * 1.0936; return yd < 880 ? (Math.round(yd) + ' yd') : ((m / 1609.34).toFixed(1) + ' mi'); }
   function _fcWalk(m){ return Math.max(1, Math.round(m / 1.25 / 60)); }   // ~1.25 m/s through cover
+  // Rate a stand for the CURRENT wind: compute the scent-drift bearing (wind + thermal + LiDAR slope) and
+  // check it against nearby bedding. Returns {v:'clean'|'swirly'|'blown'|'calm'|'nowind', drift, toward}.
+  function _standWindVerdict(s, wx, z4){
+    if (!wx || wx.windDirDeg == null) return { v:'nowind' };
+    var ph = (typeof thermalPhase === 'function') ? thermalPhase(s.lat, s.lng, Date.now()) : { up:false, label:'' };
+    var slopeDeg = null, aspectBearing = null;
+    if (z4 && z4.length === 4 && z4.every(isFinite)){
+      var OFF = 35, dzdx = (z4[0] - z4[1]) / (2 * OFF), dzdy = (z4[2] - z4[3]) / (2 * OFF);
+      slopeDeg = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
+      aspectBearing = (Math.atan2(-dzdx, -dzdy) * 180 / Math.PI + 360) % 360;
+    }
+    var thermMph = 0, thermBearing = 0;
+    if (slopeDeg != null){
+      var cloud = (wx.cloudCoverPct != null) ? wx.cloudCoverPct : 40;
+      var slopeF = Math.min(1, slopeDeg / 6), phaseF = ph.up === null ? 0.25 : (ph.label.indexOf('Night') >= 0 ? 0.6 : 1.0), skyF = 1 - 0.6 * (cloud / 100);
+      thermMph = slopeF * phaseF * skyF * 6;
+      thermBearing = ph.up === true ? (aspectBearing + 180) % 360 : aspectBearing;
+    }
+    var sc = combineScent(thermBearing, thermMph, wx.windDirDeg, wx.windMph || 0);
+    if (sc.calm) return { v:'calm' };
+    var drift = scentCompass16(sc.bearing), R = 275, toward = null;
+    (typeof sites !== 'undefined' ? sites : []).forEach(function(o){
+      if (o.id === s.id || o.type !== 'bedding' || typeof o.lat !== 'number') return;
+      var d = distMeters(s.lat, s.lng, o.lat, o.lng); if (d > R || d < 5) return;
+      if (_angDiff(sc.bearing, bearingBetween(s.lat, s.lng, o.lat, o.lng)) <= 50 && (!toward || d < toward.d)) toward = { d:d, name:o.name };
+    });
+    if (toward) return { v:'blown', drift:drift, toward:toward };
+    if (sc.coherence < 0.45) return { v:'swirly', drift:drift };
+    return { v:'clean', drift:drift };
+  }
+  var _windFitCache = null;   // {ts, wx, verdicts:{siteId:verdict}} per Field Card open — set by runFieldCardWindFit
   function openFieldCard(){
     var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
     function inScope(s){ if (!prop) return true; if (s.propertyId === prop.id) return true; return (typeof pointInProperty === 'function' && typeof s.lat === 'number') ? pointInProperty(s.lat, s.lng, prop) : false; }
@@ -10086,20 +10117,27 @@
     // Access
     h += '<div style="margin-top:2px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">🅿️ ACCESS</div>';
     h += parking.length ? line('🅿️', parking.map(function(p){ return escapeHtml(p.name); }).join(' · ')) : line('🅿️', '<span style="opacity:.7;">No parking/access points marked.</span>');
-    // Stands
-    h += '<div style="margin-top:8px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">🌲 STANDS — freshest (most rested) first</div>';
-    if (!rows.length){ h += line('🌲', '<span style="opacity:.7;">No hunt spots here yet.</span>'); }
-    rows.forEach(function(r){
+    // Stands — rendered into a container so tonight's wind-fit can annotate + re-sort in place.
+    var VBADGE = { clean:{t:'CLEAN',bg:'#1f3325',bd:'#3a5c3f',c:'#9ED17A'}, swirly:{t:'SWIRLY',bg:'#3a2f14',bd:'#6b5522',c:'#E8B04B'}, blown:{t:'BLOWN',bg:'#3a1c1c',bd:'#6b3a3a',c:'#E8823F'}, calm:{t:'CALM',bg:'#24312b',bd:'#3c4d42',c:'#9db0a3'} };
+    var VRANK = { clean:0, calm:1, swirly:2, blown:3, nowind:4 };
+    function standRowHtml(r){
       var s = r.s, tEntry = getActiveTypes()[s.type], stype = s.standType || (tEntry ? tEntry.label : 'Stand');
       var bits = [];
       bits.push('<span style="color:' + r.rest.tone + ';">' + escapeHtml(r.rest.txt) + '</span>');
       bits.push(r.recent ? ('📷 ' + r.recent + ' recent') : '<span style="color:#E8B04B;">⚠ no recent cam</span>');
       if (r.np) bits.push('🅿️ ' + escapeHtml(r.np.name) + ' ' + _fcDist(r.nd) + ' · ~' + _fcWalk(r.nd) + ' min');
-      h += '<div class="fc-stand" data-sid="' + escapeHtml(s.id) + '" style="cursor:pointer;border-bottom:1px dashed #24382c;padding:8px 0;">' +
-        '<div style="font-weight:600;">' + escapeHtml(s.name) + (r.buck ? ' <span style="color:#E0B23A;">🦌</span>' : '') + ' <span style="color:#9db0a3;font-weight:400;font-size:12px;">· ' + escapeHtml(stype) + '</span></div>' +
+      var badge = '';
+      if (r.wind && VBADGE[r.wind.v]){ var vb = VBADGE[r.wind.v]; badge = '<span style="font-family:Oswald,sans-serif;font-size:10.5px;letter-spacing:.5px;padding:2px 7px;border-radius:6px;background:' + vb.bg + ';border:1px solid ' + vb.bd + ';color:' + vb.c + ';margin-left:6px;white-space:nowrap;">🌬 ' + vb.t + (r.wind.drift ? ' · ' + r.wind.drift : '') + '</span>'; }
+      return '<div class="fc-stand" data-sid="' + escapeHtml(s.id) + '" style="cursor:pointer;border-bottom:1px dashed #24382c;padding:8px 0;">' +
+        '<div style="font-weight:600;">' + escapeHtml(s.name) + (r.buck ? ' <span style="color:#E0B23A;">🦌</span>' : '') + badge + ' <span style="color:#9db0a3;font-weight:400;font-size:12px;">· ' + escapeHtml(stype) + '</span></div>' +
         '<div style="font-size:12px;color:#c7d6cc;margin-top:1px;">' + bits.join(' &nbsp;·&nbsp; ') + '</div>' +
       '</div>';
-    });
+    }
+    var standsBodyHtml = function(){ return rows.length ? rows.map(standRowHtml).join('') : line('🌲', '<span style="opacity:.7;">No hunt spots here yet.</span>'); };
+    h += '<div style="margin-top:8px;display:flex;align-items:center;gap:8px;"><div id="fcStandHdr" style="flex:1;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">🌲 STANDS — freshest first</div>' +
+      (rows.length ? '<button class="fc-wind" style="font-family:Oswald,sans-serif;font-size:11px;letter-spacing:.5px;background:#14304a;border:1px solid #2c567d;color:#9fd0f5;border-radius:8px;padding:5px 9px;cursor:pointer;">🌬 RATE TONIGHT’S WIND</button>' : '') + '</div>';
+    h += '<div id="fcWindSum" style="display:none;font-size:12px;margin:4px 0;"></div>';
+    h += '<div id="fcStands">' + standsBodyHtml() + '</div>';
     // Scout marks
     if (scoutMarks.length){
       h += '<div style="margin-top:8px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">👁 SCOUT — unproven, go verify</div>';
@@ -10124,10 +10162,41 @@
       '<div style="display:flex;gap:8px;margin-top:12px;"><button class="fc-copy" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:9px;font-weight:700;cursor:pointer;">📋 Copy as text</button></div>';
     card.querySelector('.fc-x').addEventListener('click', close);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
-    Array.prototype.forEach.call(card.querySelectorAll('.fc-stand'), function(el){ el.addEventListener('click', function(){ close(); openStandProfileModal(el.getAttribute('data-sid')); }); });
+    function bindStandTaps(){ Array.prototype.forEach.call(card.querySelectorAll('.fc-stand'), function(el){ el.onclick = function(){ close(); openStandProfileModal(el.getAttribute('data-sid')); }; }); }
+    function renderStands(){ var c = card.querySelector('#fcStands'); if (c) c.innerHTML = standsBodyHtml(); bindStandTaps(); }
+    bindStandTaps();
+    // 🌬 Tonight's wind-fit: one wind read + ONE batched LiDAR call for all stands → rate each clean/swirly/
+    // blown by where its scent drifts vs bedding, re-sort best-first. Live, honest, re-checkable.
+    var windBtn = card.querySelector('.fc-wind');
+    if (windBtn) windBtn.addEventListener('click', async function(){
+      windBtn.textContent = '🌬 reading wind…'; windBtn.disabled = true;
+      var center = { lat: rows.reduce(function(a,r){ return a + r.s.lat; }, 0) / rows.length, lng: rows.reduce(function(a,r){ return a + r.s.lng; }, 0) / rows.length };
+      var wx = null; try { wx = await scentWeather(center.lat, center.lng); } catch(e){}
+      var elev = null;
+      try {
+        var OFF = 35, pts = [];
+        rows.forEach(function(r){ var s = r.s, dLat = OFF/111320, dLng = OFF/(111320*Math.cos(s.lat*Math.PI/180)); pts.push([s.lng+dLng,s.lat],[s.lng-dLng,s.lat],[s.lng,s.lat+dLat],[s.lng,s.lat-dLat]); });
+        var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points:pts, spatialReference:{wkid:4326} })) + '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+        var resp = await fetch(HILLSHADE_URL + '/getSamples', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:body });
+        var data = await resp.json();
+        if (data && data.samples) elev = data.samples.map(function(v){ return (v && v.value != null) ? parseFloat(v.value) : NaN; });
+      } catch(e){}
+      rows.forEach(function(r, i){ var z4 = elev ? [elev[i*4], elev[i*4+1], elev[i*4+2], elev[i*4+3]] : null; r.wind = _standWindVerdict(r.s, wx, z4); });
+      rows.sort(function(a, b){ var ra = VRANK[a.wind ? a.wind.v : 'nowind'], rb = VRANK[b.wind ? b.wind.v : 'nowind']; if (ra !== rb) return ra - rb; return b.restDays - a.restDays; });
+      renderStands();
+      var hdr = card.querySelector('#fcStandHdr'); if (hdr) hdr.textContent = '🌲 STANDS — best wind first';
+      var sum = card.querySelector('#fcWindSum');
+      if (sum){
+        var clean = rows.filter(function(r){ return r.wind && r.wind.v === 'clean'; }).length, blown = rows.filter(function(r){ return r.wind && r.wind.v === 'blown'; }).length;
+        var wtxt = wx ? ((wx.windDirDisplay || wx.windDir || '?') + ' ' + (wx.windMph != null ? Math.round(wx.windMph) : '?') + ' mph') : 'wind unavailable';
+        sum.style.display = 'block'; sum.style.color = '#c7d6cc';
+        sum.innerHTML = '🌬 <b>' + escapeHtml(wtxt) + '</b> · <span style="color:#9ED17A;">' + clean + ' clean</span>' + (blown ? (' · <span style="color:#E8823F;">' + blown + ' blown</span>') : '') + ' — sorted best-first. Re-check right before you climb in.';
+      }
+      windBtn.textContent = '🌬 re-check wind'; windBtn.disabled = false;
+    });
     card.querySelector('.fc-copy').addEventListener('click', function(){
       var txt = 'FIELD CARD — ' + (prop ? prop.name : 'All properties') + '\n\nACCESS: ' + (parking.map(function(p){ return p.name; }).join(', ') || 'none') + '\n\nSTANDS (freshest first):\n' +
-        rows.map(function(r){ return '• ' + r.s.name + (r.buck ? ' [buck]' : '') + ' — ' + r.rest.txt + (r.recent ? (' · ' + r.recent + ' recent pics') : ' · no recent cam') + (r.np ? (' · nearest ' + r.np.name + ' ' + _fcDist(r.nd)) : ''); }).join('\n') +
+        rows.map(function(r){ return '• ' + r.s.name + (r.buck ? ' [buck]' : '') + ' — ' + r.rest.txt + (r.wind && r.wind.v !== 'nowind' ? (' · WIND ' + r.wind.v.toUpperCase() + (r.wind.drift ? (' (scent ' + r.wind.drift + ')') : '')) : '') + (r.recent ? (' · ' + r.recent + ' recent pics') : ' · no recent cam') + (r.np ? (' · nearest ' + r.np.name + ' ' + _fcDist(r.nd)) : ''); }).join('\n') +
         (scoutMarks.length ? ('\n\nSCOUT (unproven): ' + scoutMarks.map(function(s){ return s.name; }).join(', ')) : '') +
         (blind.length ? ('\n\nBLIND (no recent cam): ' + blind.join(', ')) : '');
       try { navigator.clipboard.writeText(txt); showToast('Field card copied 📋'); } catch(e){ showToast('Copy not available'); }
