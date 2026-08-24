@@ -1944,7 +1944,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 412</div>
+    <div id="buildBadge">BUILD 413</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9336,6 +9336,36 @@
     });
   }
 
+  // ---------- Site Context (what a camera is WATCHING) — TIME-SCOPED, not a permanent stamp ----------
+  // A camera over corn today can become a bare travel-corridor cam later. So context lives as a dated
+  // history on the site ([{context, from}] where `from` = ms epoch, effective until the next entry) and
+  // every detection resolves ITS context by its own capture time — mirroring how a photo's SITE is
+  // resolved via deployment-history windows. Changing a site's context NEVER rewrites past detections.
+  var SITE_CONTEXTS = [
+    { key:'bait',      label:'🌽 Bait / Feed' },
+    { key:'plot',      label:'🌱 Food Plot' },
+    { key:'corridor',  label:'🐾 Trail / Travel Corridor' },
+    { key:'scrape',    label:'🪧 Scrape' },
+    { key:'fieldedge', label:'🌾 Field Edge' },
+    { key:'bedding',   label:'💤 Bedding Edge' },
+    { key:'water',     label:'💧 Water' },
+    { key:'other',     label:'❓ Other' }
+  ];
+  function siteContextLabel(key){ if (!key) return null; var c = SITE_CONTEXTS.filter(function(x){ return x.key === key; })[0]; return c ? c.label : key; }
+  function siteContextAt(siteId, ts){   // the context effective at capture time `ts`
+    if (!siteId || ts == null) return null;
+    var s = sites.filter(function(x){ return x.id === siteId; })[0];
+    if (!s || !s.contextHistory || !s.contextHistory.length) return null;
+    var hist = s.contextHistory.slice().sort(function(a,b){ return (a.from||0) - (b.from||0); });
+    var ctx = null;
+    for (var i=0;i<hist.length;i++){ if ((hist[i].from||0) <= ts) ctx = hist[i].context; else break; }
+    return ctx;   // null if `ts` predates the first recorded context — genuinely unknown, not assumed
+  }
+  function siteCurrentContext(s){       // latest context, for display on the pin/editor
+    if (!s || !s.contextHistory || !s.contextHistory.length) return null;
+    var hist = s.contextHistory.slice().sort(function(a,b){ return (a.from||0) - (b.from||0); });
+    return hist[hist.length-1].context;
+  }
   function popupHtml(s){
     var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
     var camInfo = '';
@@ -9376,6 +9406,11 @@
     var huntableBtn = (activeModule === 'hunting' && isMine && s.type !== 'stand')
       ? '<button class="btn-ghost" data-act="huntable" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">' + (siteIsHuntable(s) ? '🏹 Hunt spot — tap to make observation-only' : '👁 Observation only — tap: 🏹 I hunt here') + '</button>'
       : '';
+    // Site Context — what this cam is watching (time-scoped). Shows the current context; tap to set/change.
+    var _ctxKey = siteCurrentContext(s);
+    var contextBtn = (activeModule === 'hunting' && isMine)
+      ? '<button class="btn-ghost" data-act="context" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">🏷 Context: ' + (_ctxKey ? escapeHtml(siteContextLabel(_ctxKey)) : 'not set — tap to set') + '</button>'
+      : '';
     return '' +
       '<div class="pop">' +
         '<h3>'+escapeHtml(s.name)+'</h3>' +
@@ -9387,10 +9422,60 @@
         standHuntabilityHtml(s) +
         spotIntelHtml(s) +
         huntableBtn +
+        contextBtn +
         actionRow +
       '</div>';
   }
 
+  // Set/change a site's context with an EFFECTIVE-FROM date, and review/prune its history. Never
+  // overwrites — each change is a new dated entry, so past detections keep the context they had.
+  function openSiteContextEditor(siteId){
+    var s = sites.filter(function(x){ return x.id === siteId; })[0];
+    if (!s) return;
+    if (!s.contextHistory) s.contextHistory = [];
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:460px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    function ymd(ms){ var d = new Date(ms); function p(n){ return (n<10?'0':'')+n; } return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); }
+    function render(){
+      var hist = (s.contextHistory||[]).slice().sort(function(a,b){ return (a.from||0) - (b.from||0); });
+      var firstEver = hist.length === 0;
+      card.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;"><div style="font-weight:800;font-size:16px;">🏷 Site Context</div><button class="sc-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+        '<div style="font-size:12px;color:#9db0a3;margin-bottom:12px;">What is the camera at <strong>' + escapeHtml(s.name) + '</strong> watching? This is <strong>time-stamped</strong> — if it changes later (corn pulled, becomes a corridor), add a new entry with its date; <strong>past photos keep the context they had.</strong></div>' +
+        '<label style="font-size:11px;color:#9db0a3;">Context</label>' +
+        '<select id="sc_val" style="width:100%;padding:8px;margin:3px 0 10px;border-radius:6px;">' + SITE_CONTEXTS.map(function(c){ return '<option value="'+c.key+'">'+escapeHtml(c.label)+'</option>'; }).join('') + '</select>' +
+        '<label style="font-size:11px;color:#9db0a3;">In effect from</label>' +
+        '<input type="date" id="sc_from" style="width:100%;padding:8px;margin:3px 0 4px;border-radius:6px;">' +
+        '<div style="font-size:10.5px;color:#9db0a3;margin-bottom:10px;">' + (firstEver ? 'Leave blank to apply to <strong>all past photos</strong> here (it’s always been this).' : 'Applies from this date forward; earlier detections keep the previous context.') + '</div>' +
+        '<button class="sc-set btn-primary" style="width:100%;">Set context</button>' +
+        (hist.length ? '<div style="font-size:11px;color:#9db0a3;margin:14px 0 6px;letter-spacing:.4px;">HISTORY</div>' + hist.map(function(h){
+          return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #35443A;border-radius:8px;padding:6px 9px;margin-bottom:6px;font-size:12px;"><span>' + escapeHtml(siteContextLabel(h.context)) + ' <span style="color:#9db0a3;">· from ' + ((h.from||0) <= 0 ? 'the beginning' : new Date(h.from).toLocaleDateString()) + '</span></span><button class="sc-del" data-from="'+(h.from||0)+'" data-ctx="'+escapeHtml(h.context)+'" style="background:transparent;border:none;color:#D94A2E;font-size:13px;cursor:pointer;">✕</button></div>';
+        }).join('') : '');
+      card.querySelector('.sc-x').addEventListener('click', close);
+      var valSel = card.querySelector('#sc_val'); if (siteCurrentContext(s)) valSel.value = siteCurrentContext(s);
+      if (!firstEver) card.querySelector('#sc_from').value = ymd(Date.now());
+      card.querySelector('.sc-set').addEventListener('click', async function(){
+        var val = valSel.value;
+        var fromStr = card.querySelector('#sc_from').value;
+        var fromMs = fromStr ? new Date(fromStr + 'T00:00:00').getTime() : (firstEver ? 0 : Date.now());
+        s.contextHistory.push({ context: val, from: fromMs });
+        try { await saveSite(s); } catch(e){ console.error('save context', e); }
+        renderAll(); render(); showToast('Context set: ' + siteContextLabel(val));
+      });
+      Array.prototype.forEach.call(card.querySelectorAll('.sc-del'), function(b){ b.addEventListener('click', async function(){
+        var f = +b.getAttribute('data-from'), cx = b.getAttribute('data-ctx');
+        s.contextHistory = s.contextHistory.filter(function(h){ return !((h.from||0) === f && h.context === cx); });
+        try { await saveSite(s); } catch(e){}
+        renderAll(); render();
+      }); });
+    }
+    render();
+    back.appendChild(card); document.body.appendChild(back);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+  }
   // Rename a location (place). Places get their OWN names, independent of whichever camera sits
   // there — this is how a spot ("Oak Bottom") stops reading like a camera ("Camera 2"). The gallery
   // resolves names live (siteNameById), so every photo pinned to this place updates at once.
@@ -9432,6 +9517,8 @@
       var s = sites.filter(function(x){ return x.id === id; })[0];
       if (s) openSharePicker('site:' + id, s.name, s.__sharedGroups || []);
     });
+    var contextBtn2 = node.querySelector('[data-act="context"]');
+    if (contextBtn2) contextBtn2.addEventListener('click', function(){ map.closePopup(); openSiteContextEditor(id); });
     var huntableBtn = node.querySelector('[data-act="huntable"]');
     if (huntableBtn) huntableBtn.addEventListener('click', async function(){
       var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s) return;
@@ -16102,6 +16189,7 @@
     ['pressure','Pressure Trend'], ['pressureval','Barometric Pressure'], ['temp','Temperature'],
     ['condition','Weather Condition'], ['sun','Time of Day'], ['hour','Actual Clock Time'],
     ['solunar','Solunar Period'], ['season','Season'], ['site','Site'], ['property','Property'],
+    ['context','Site Context','hunting'],
     ['buck','Buck Profile','hunting'],
     ['fishspecies','Species','fishing'], ['lure','Lure','fishing'], ['lurecolor','Lure Color','fishing'],
     ['weightclass','Weight','fishing'], ['lengthclass','Length','fishing']
@@ -16131,6 +16219,7 @@
       var p = properties.filter(function(x){ return x.id === o.propertyId; })[0];
       return p ? p.name : 'Unassigned';
     }
+    if (dimension === 'context') return o.siteContext || '(not set)';
     if (dimension === 'buck'){
       if (!o.buckProfileId) return null;
       var b = buckProfiles.filter(function(x){ return x.id === o.buckProfileId; })[0];
@@ -16176,6 +16265,7 @@
       { key:'isBuck', label:'Is a buck', type:'cat', vals:['yes','no'], get:function(o){ return o.isBuck ? 'yes' : 'no'; } },
       { key:'site', label:'Site', type:'cat', get:function(o){ if (!o.siteId) return 'Unlinked'; var s = sites.filter(function(x){ return x.id === o.siteId; })[0]; return s ? s.name : 'Unlinked'; } },
       { key:'property', label:'Property', type:'cat', get:function(o){ if (!o.propertyId) return 'Unassigned'; var p = properties.filter(function(x){ return x.id === o.propertyId; })[0]; return p ? p.name : 'Unassigned'; } },
+      { key:'context', label:'Site Context (what the cam watches)', type:'cat', vals:SITE_CONTEXTS.map(function(c){ return c.label; }).concat(['(not set)']), get:function(o){ return o.siteContext || '(not set)'; } },
       { key:'hour', label:'Hour of day (0–23)', type:'num', get:function(o){ return o.createdAt ? new Date(o.createdAt).getHours() : null; } },
       { key:'month', label:'Month', type:'cat', vals:monthNames, get:function(o){ return o.createdAt ? monthNames[new Date(o.createdAt).getMonth()] : null; } },
       { key:'moon', label:'Moon phase', type:'cat', vals:['New Moon','Waxing Crescent','First Quarter','Waxing Gibbous','Full Moon','Waning Gibbous','Last Quarter','Waning Crescent'], get:function(o){ return o.moonPhase ? o.moonPhase.name : null; } },
@@ -17551,6 +17641,7 @@
       solunarPeriod: cover.solunarPeriod || null,
       siteId: v.siteId || null,
       propertyId: analyticsSitePropertyId(v.siteId),
+      siteContext: siteContextLabel(siteContextAt(v.siteId, cover.timestamp)),   // context AT capture time
       buckProfileId: buckOnThisVisit ? buckPhoto.buckProfileId : null,
       species: sp,
       isBuck: !!v.isBuck,
@@ -17589,6 +17680,7 @@
           __source:'obs', type:o.type, createdAt:o.createdAt, moonPhase:o.moonPhase||null,
           weatherStatus:o.weatherStatus, weather:o.weather||null, solunarPeriod:o.solunarPeriod||null,
           siteId:o.siteId||null, propertyId:o.propertyId||null, buckProfileId:o.buckProfileId||null,
+          siteContext: siteContextLabel(siteContextAt(o.siteId||null, o.createdAt)),
           species:null, isBuck:(o.type==='buck'), lat:(typeof o.lat==='number'?o.lat:null), lng:(typeof o.lng==='number'?o.lng:null),
           // fishing catch fields — carried through so the Query Builder can break catches down by them
           lure:o.lure||null, lureColor:o.lureColor||null,
