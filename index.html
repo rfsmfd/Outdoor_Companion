@@ -1948,7 +1948,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 445</div>
+    <div id="buildBadge">BUILD 446</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9502,8 +9502,8 @@
     all.sort(function(a, b){ return (b.checkInAt || 0) - (a.checkInAt || 0); });
     var completed = all.filter(function(h){ return h.checkOutAt; });
     var totalHrs = completed.reduce(function(sum, h){ return sum + (h.checkOutAt - h.checkInAt) / 3600000; }, 0);
-    var deer = 0, bucks = 0, adhoc = 0;
-    all.forEach(function(h){ var sg = _huntSightings(h); deer += sg.total; bucks += sg.bucks; if (!h.siteId) adhoc++; });
+    var deer = 0, bucks = 0, adhoc = 0, harvests = 0, shots = 0, missed = 0;
+    all.forEach(function(h){ var sg = _huntSightings(h); deer += sg.total; bucks += sg.bucks; if (!h.siteId) adhoc++; if (h.sitLog){ if (h.sitLog.harvest) harvests++; if (h.sitLog.shotOpp) shots++; if (h.sitLog.shotResult === 'missed') missed++; } });
     var lastSit = all[0].checkInAt || 0;
     var daysSince = lastSit ? Math.round((now - lastSit) / 86400000) : null;
     var rest = standRestStatus(daysSince, true);
@@ -9511,6 +9511,7 @@
     h += '<div style="margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">HUNT HISTORY · PRESSURE</div>';
     h += line('🪑', all.length + ' sit' + (all.length === 1 ? '' : 's') + (adhoc ? (' <span style="color:#9db0a3;">(' + adhoc + ' off-stand nearby)</span>') : '') + (totalHrs >= 1 ? (' · ' + (totalHrs >= 10 ? Math.round(totalHrs) : totalHrs.toFixed(1)) + 'h total') : ''));
     h += line('👀', deer + ' deer seen from here' + (bucks ? (' · ' + bucks + ' buck' + (bucks === 1 ? '' : 's')) : '') + (totalHrs >= 1 ? (' · <b>' + (deer / totalHrs).toFixed(1) + '</b>/hr') : ''));
+    if (shots || harvests) h += line('🎯', shots + ' shot opportunit' + (shots === 1 ? 'y' : 'ies') + (missed ? (' <span style="color:#9db0a3;">(' + missed + ' missed)</span>') : '') + (harvests ? (' · <b>' + harvests + ' harvest' + (harvests === 1 ? '' : 's') + '</b>') : ''));
     h += line('🛌', '<b style="color:' + rest.tone + ';">' + rest.txt + '</b>');
     // Morning vs evening (deer/hr), gated at >=3 completed sits per side.
     var mSits = [], eSits = [], avg = function(a){ return a.reduce(function(s2, x){ return s2 + x; }, 0) / a.length; };
@@ -9553,6 +9554,8 @@
     if (s){
       var tEntry = getActiveTypes()[s.type];
       if (tEntry) h += line('📍', escapeHtml(tEntry.label) + (siteIsHuntable(s) ? ' · 🏹 hunt spot' : ' · 👁 observation'));
+      var _si = standInfoLine(s);
+      if (_si) h += line('🪜', _si);
       var ctxKey = siteCurrentContext(s);
       if (ctxKey) h += line('🏷', 'Context: <b>' + escapeHtml(siteContextLabel(ctxKey)) + '</b>');
       var camHere = (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId === siteId; })[0];
@@ -9747,6 +9750,55 @@
     }
     return '';
   }
+  // §1 Basic stand info — the physical stand described: type, height, install year, capacity, notes.
+  var STAND_TYPES = ['Ladder', 'Climber', 'Lock-on / Hang-on', 'Ground blind', 'Box blind', 'Shooting house', 'Saddle', 'Tripod', 'Ground / natural', 'Other'];
+  function openStandDetailsEditor(siteId){
+    var s = sites.filter(function(x){ return x.id === siteId; })[0]; if (!s) return;
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:460px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    var lab = 'font-size:12px;color:#9db0a3;margin:10px 0 3px;display:block;';
+    var inp = 'width:100%;box-sizing:border-box;padding:9px;border-radius:8px;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;font-size:14px;';
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;"><div style="font-weight:800;font-size:16px;">🪜 Stand details</div><button class="sd-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin:2px 0 6px;">Describe <b>' + escapeHtml(s.name) + '</b> — shows at the top of its Stand Profile.</div>' +
+      '<label style="' + lab + '">Stand type</label>' +
+      '<select id="sd_type" style="' + inp + '"><option value="">— not set —</option>' + STAND_TYPES.map(function(v){ return '<option value="' + escapeHtml(v) + '"' + (s.standType === v ? ' selected' : '') + '>' + escapeHtml(v) + '</option>'; }).join('') + '</select>' +
+      '<label style="' + lab + '">Height (ft)</label>' +
+      '<input type="number" id="sd_height" inputmode="numeric" min="0" max="80" value="' + (s.heightFt != null ? s.heightFt : '') + '" placeholder="e.g. 18" style="' + inp + '" />' +
+      '<label style="' + lab + '">Year installed</label>' +
+      '<input type="number" id="sd_year" inputmode="numeric" min="1980" max="2100" value="' + (s.installedYear != null ? s.installedYear : '') + '" placeholder="e.g. 2026" style="' + inp + '" />' +
+      '<label style="' + lab + '">Capacity (hunters)</label>' +
+      '<input type="number" id="sd_cap" inputmode="numeric" min="1" max="6" value="' + (s.capacity != null ? s.capacity : '') + '" placeholder="e.g. 1" style="' + inp + '" />' +
+      '<label style="' + lab + '">Notes</label>' +
+      '<textarea id="sd_notes" placeholder="Access, condition, safety, best conditions…" style="' + inp + 'min-height:60px;resize:vertical;">' + escapeHtml(s.notes || '') + '</textarea>' +
+      '<div style="font-size:11px;color:#6f8377;margin-top:8px;">📷 Stand photo coming soon.</div>' +
+      '<div style="display:flex;gap:8px;margin-top:12px;"><button class="sd-save btn-primary" style="flex:1;">Save</button><button class="sd-cancel btn-ghost">Cancel</button></div>';
+    card.querySelector('.sd-x').addEventListener('click', close);
+    card.querySelector('.sd-cancel').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.sd-save').addEventListener('click', async function(){
+      s.standType = card.querySelector('#sd_type').value || null;
+      var hv = parseFloat(card.querySelector('#sd_height').value); s.heightFt = isFinite(hv) ? hv : null;
+      var yv = parseInt(card.querySelector('#sd_year').value, 10); s.installedYear = isFinite(yv) ? yv : null;
+      var cv = parseInt(card.querySelector('#sd_cap').value, 10); s.capacity = isFinite(cv) ? cv : null;
+      s.notes = (card.querySelector('#sd_notes').value || '').trim();
+      try { await saveSite(s); } catch(e){ console.error('Outdoor Companion: failed to save stand details', e); }
+      renderAll(); close(); showToast('Stand details saved 🪜');
+    });
+    back.appendChild(card); document.body.appendChild(back);
+  }
+  // A one-line stand-info summary for the profile's §1, from whatever's been filled in.
+  function standInfoLine(s){
+    var bits = [];
+    if (s.standType) bits.push(escapeHtml(s.standType));
+    if (s.heightFt != null) bits.push(s.heightFt + ' ft');
+    if (s.capacity != null) bits.push(s.capacity + '-hunter');
+    if (s.installedYear != null) bits.push('since ' + s.installedYear);
+    return bits.length ? bits.join(' · ') : '';
+  }
   function popupHtml(s){
     var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
     var camInfo = '';
@@ -9799,6 +9851,10 @@
     var profileBtn = (activeModule === 'hunting')
       ? '<button class="btn-ghost" data-act="standprofile" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">' + (isScout ? '📊 Check the terrain read' : '📊 Stand Profile — tap to open') + '</button>'
       : '';
+    // §1 Basic stand info — describe the physical stand (type/height/installed/capacity).
+    var standDetailsBtn = (activeModule === 'hunting' && isMine && s.type === 'stand')
+      ? '<button class="btn-ghost" data-act="standdetails" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">🪜 ' + (standInfoLine(s) ? 'Stand: ' + standInfoLine(s) : 'Stand details — tap to add') + '</button>'
+      : '';
     // Scout Target → promote to a real Tree Stand once it checks out in the field.
     var promoteBtn = (isScout && isMine)
       ? '<button class="btn-ghost" data-act="promotestand" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:600;">✅ Checks out — promote to Tree Stand</button>'
@@ -9813,6 +9869,7 @@
         photosBtn +
         standHuntabilityHtml(s) +
         spotIntelHtml(s) +
+        standDetailsBtn +
         huntableBtn +
         contextBtn +
         profileBtn +
@@ -9932,6 +9989,9 @@
     // Stand Profile — same proven path as Context: close the popup, open a full modal panel.
     var profBtn = node.querySelector('[data-act="standprofile"]');
     if (profBtn) profBtn.addEventListener('click', function(){ map.closePopup(); openStandProfileModal(id); });
+    // §1 Basic stand info editor.
+    var sdBtn = node.querySelector('[data-act="standdetails"]');
+    if (sdBtn) sdBtn.addEventListener('click', function(){ map.closePopup(); openStandDetailsEditor(id); });
     // Scout Target → Tree Stand promotion (the map-hunch checked out in the field).
     var promoteBtn = node.querySelector('[data-act="promotestand"]');
     if (promoteBtn) promoteBtn.addEventListener('click', async function(){
@@ -14237,7 +14297,7 @@
       });
     }
     var _prefTotal = _pref.does + _pref.unknown + Object.keys(_pref.buckIds).length;
-    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: null, does: _pref.does, unknown: _pref.unknown, bucks: {}, harvest: null };
+    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: null, does: _pref.does, unknown: _pref.unknown, bucks: {}, harvest: null, shotResult: null };
     Object.keys(_pref.buckIds).forEach(function(bid){ st.bucks[bid] = true; });
     var back = document.createElement('div'); back.id = 'sitLogPanel'; back.style.cssText = 'position:fixed;inset:0;z-index:100012;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;overflow:auto;';
     var card = document.createElement('div'); card.style.cssText = 'background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;width:440px;max-width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 14px 44px rgba(0,0,0,.6);';
@@ -14263,6 +14323,12 @@
         '<button class="sl-harv" data-h="buck" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">🎯 Buck</button>' +
         '<button class="sl-harv" data-h="doe" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">🎯 Doe</button>' +
       '</div>' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">Shot opportunity? <span style="opacity:.7;">(in range — harvest above covers a hit)</span></div>' +
+      '<div style="display:flex;gap:6px;margin-bottom:13px;">' +
+        '<button class="sl-shot" data-s="" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #63C6FF;background:#22323b;color:#e8f0ea;cursor:pointer;font-size:11.5px;">No shot</button>' +
+        '<button class="sl-shot" data-s="passed" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">🙅 Passed</button>' +
+        '<button class="sl-shot" data-s="missed" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">❌ Missed</button>' +
+      '</div>' +
       '<textarea id="slNotes" placeholder="Notes — wind reality, what spooked, time of movement, direction they came from…" style="width:100%;box-sizing:border-box;min-height:64px;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:9px;padding:9px;font-size:12.5px;font-family:inherit;resize:vertical;margin-bottom:13px;"></textarea>' +
       '<div style="display:flex;gap:9px;"><button id="slSave" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;">Save the sit</button><button id="slCancel" style="background:transparent;border:1px solid #3c4d42;color:#9db0a3;border-radius:9px;padding:11px 14px;cursor:pointer;">Cancel</button></div>';
     function close(){ back.remove(); }
@@ -14272,6 +14338,7 @@
     Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(b){ b.addEventListener('click', function(){ st.activity = b.getAttribute('data-k'); Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(x){ var on = x.getAttribute('data-k') === st.activity; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-buck'), function(b){ b.addEventListener('click', function(){ var id = b.getAttribute('data-bid'); st.bucks[id] = !st.bucks[id]; var on = st.bucks[id]; b.style.border = '1px solid ' + (on ? '#E8B04B' : '#3c4d42'); b.style.background = on ? '#3a3320' : '#1E2B23'; }); });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(b){ b.addEventListener('click', function(){ st.harvest = b.getAttribute('data-h') || null; Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(x){ var on = (x.getAttribute('data-h') || null) === st.harvest; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-shot'), function(b){ b.addEventListener('click', function(){ st.shotResult = b.getAttribute('data-s') || null; Array.prototype.forEach.call(card.querySelectorAll('.sl-shot'), function(x){ var on = (x.getAttribute('data-s') || null) === st.shotResult; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
     function bump(t, d){ st[t] = Math.max(0, (st[t] || 0) + d); var el = card.querySelector('#sl-' + t); if (el) el.textContent = st[t]; }
     Array.prototype.forEach.call(card.querySelectorAll('.sl-inc'), function(b){ b.addEventListener('click', function(){ bump(b.getAttribute('data-t'), 1); }); });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-dec'), function(b){ b.addEventListener('click', function(){ bump(b.getAttribute('data-t'), -1); }); });
@@ -14302,7 +14369,7 @@
       if (st.harvest === 'doe'){ var _dh = created.filter(function(o){ return o.type === 'doe'; })[0]; if (_dh) _dh.harvest = true; else created.push(mk('doe', null, 1, true)); }
       if (!created.length && !st.activity && !notes && _prefTotal === 0){ showToast('Nothing logged yet — set the movement, deer seen, or a note.'); return; }
       created.forEach(function(o){ observations.push(o); saveObservation(o).catch(function(e){ console.error('Outdoor Companion: sit-log obs save failed', e); }); });
-      if (st.hunt){ st.hunt.observationIds = (st.hunt.observationIds || []).concat(created.map(function(o){ return o.id; })); st.hunt.sitLog = { activity: st.activity, does: st.does, buckIds: namedSeen, unknownBucks: st.unknown, harvest: st.harvest, notes: notes, loggedAt: Date.now() }; saveHuntEvent(st.hunt).catch(function(e){ console.error('Outdoor Companion: sit-log hunt save failed', e); }); }
+      if (st.hunt){ st.hunt.observationIds = (st.hunt.observationIds || []).concat(created.map(function(o){ return o.id; })); st.hunt.sitLog = { activity: st.activity, does: st.does, buckIds: namedSeen, unknownBucks: st.unknown, harvest: st.harvest, shotResult: st.shotResult, shotOpp: !!(st.shotResult || st.harvest), notes: notes, loggedAt: Date.now() }; saveHuntEvent(st.hunt).catch(function(e){ console.error('Outdoor Companion: sit-log hunt save failed', e); }); }
       try { renderObsMarkers(); } catch (e) {}
       if (typeof activeTab !== 'undefined' && activeTab === 'log' && typeof renderLogList === 'function') renderLogList();
       var seen = st.does + st.unknown + namedSeen.length;
