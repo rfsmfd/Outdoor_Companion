@@ -1226,6 +1226,9 @@
   .qb-joiner.qb-where{ color:var(--text-dim); }
   .qb-del{ background:transparent; border:none; color:#D94A2E; cursor:pointer; font-size:14px; padding:2px 5px; line-height:1; }
   .qb-del:hover{ color:#ff6a4a; }
+  .qb-vchips{ display:inline-flex; flex-wrap:wrap; gap:4px; }
+  .qb-vchip{ font-size:11px; padding:3px 8px; border-radius:11px; border:1px solid var(--line); background:transparent; color:var(--text-dim); cursor:pointer; }
+  .qb-vchip.on{ background:var(--accent); border-color:var(--accent); color:#14201a; font-weight:700; }
   .qb-saved-row{ display:flex; align-items:center; gap:8px; margin-bottom:10px; }
   .qb-saved-lbl{ font-size:10px; color:var(--text-dim); letter-spacing:0.5px; }
   .qb-saved-select{ flex:1; min-width:0; padding:6px 8px; font-size:12.5px; border-radius:6px; }
@@ -1944,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 415</div>
+    <div id="buildBadge">BUILD 416</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7386,7 +7389,7 @@
       var d = defs[i];
       if (have[d.name]) continue;
       var q = { id: uid(), name: d.name,
-        conditions: d.conds.map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; }),
+        conditions: d.conds.map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2, vals:(c.vals?c.vals.slice():undefined) }; }),
         combiner:'AND', groupBy:d.groupBy, vizType:'bar', source:'photos',
         subject:{ buckProfileId:null, promptBuck:true, species:null, buckClass:null, propertyId:null, dateRange:'all' },
         createdAt: Date.now() + i };
@@ -16320,7 +16323,7 @@
     return Object.keys(seen).sort();
   }
   var QB_OPS_NUM = [['eq','='],['ne','≠'],['lt','<'],['le','≤'],['gt','>'],['ge','≥'],['between','between']];
-  var QB_OPS_CAT = [['is','is'],['isnot','is not']];
+  var QB_OPS_CAT = [['is','is'],['isnot','is not'],['isany','is any of'],['isnone','is none of']];
   function qbEval(o, c){
     var f = qbFieldByKey(c.field); if (!f) return true;
     var v = f.get(o);
@@ -16344,6 +16347,9 @@
     // silently sneaking into every "is not" query.
     if (v == null || v === '') return false;
     var sv = String(v);
+    // Multi-value "is any of / is none of" — same-field OR without groups. c.vals is the checked set.
+    if (c.op === 'isany')  return (c.vals || []).indexOf(sv) !== -1;
+    if (c.op === 'isnone') return (c.vals || []).indexOf(sv) === -1;
     return (c.op === 'isnot') ? (sv !== c.val) : (sv === c.val);
   }
   // A condition is "complete" enough to apply once it has a value (blank rows are ignored, so a
@@ -16351,6 +16357,7 @@
   function qbConditionReady(c){
     if (!c.field || !c.op) return false;
     if (c.op === 'between') return c.val !== '' && c.val != null && c.val2 !== '' && c.val2 != null;
+    if (c.op === 'isany' || c.op === 'isnone') return !!(c.vals && c.vals.length);
     return c.val !== '' && c.val != null;
   }
   function qbMatches(o){
@@ -16394,6 +16401,10 @@
       if (f.type === 'num'){
         valCtrl = '<input type="number" class="qb-val" data-i="'+i+'" value="'+(c.val==null?'':escapeHtml(String(c.val)))+'" placeholder="value" style="width:80px;">';
         if (c.op === 'between') valCtrl += ' <span style="color:var(--text-dim);">and</span> <input type="number" class="qb-val2" data-i="'+i+'" value="'+(c.val2==null?'':escapeHtml(String(c.val2)))+'" placeholder="value" style="width:80px;">';
+      } else if (c.op === 'isany' || c.op === 'isnone'){
+        // Multi-value: tappable chips (same-field OR without groups). Selected ones highlight.
+        var mv = distinctFor(f);
+        valCtrl = '<span class="qb-vchips">' + mv.map(function(v){ var on = (c.vals||[]).indexOf(v) !== -1; return '<button type="button" class="qb-vchip'+(on?' on':'')+'" data-i="'+i+'" data-v="'+escapeHtml(v)+'">'+escapeHtml(v)+'</button>'; }).join('') + '</span>';
       } else {
         var vals = distinctFor(f);
         valCtrl = '<select class="qb-val" data-i="'+i+'"><option value="">— value —</option>' +
@@ -16428,6 +16439,17 @@
     Array.prototype.forEach.call(host.querySelectorAll('.qb-val2'), function(el){
       el.addEventListener('input', function(){ queryConditions[+el.getAttribute('data-i')].val2 = el.value; invalidateQueryResult(); });
     });
+    // Multi-value chips ("is any of / none of") — toggle membership in c.vals, in place (no re-render).
+    Array.prototype.forEach.call(host.querySelectorAll('.qb-vchip'), function(btn){
+      btn.addEventListener('click', function(){
+        var c = queryConditions[+btn.getAttribute('data-i')], v = btn.getAttribute('data-v');
+        if (!c.vals) c.vals = [];
+        var idx = c.vals.indexOf(v);
+        if (idx === -1) c.vals.push(v); else c.vals.splice(idx, 1);
+        btn.classList.toggle('on');
+        invalidateQueryResult();
+      });
+    });
     Array.prototype.forEach.call(host.querySelectorAll('.qb-del'), function(btn){
       btn.addEventListener('click', function(){ queryConditions.splice(+btn.getAttribute('data-i'), 1); invalidateQueryResult(); renderQbConditions(); });
     });
@@ -16438,7 +16460,8 @@
 
   // Human-readable one-line description of the CURRENT query — used for saved-query names and report
   // entry titles (e.g. "Is a buck is yes AND Hour of day between 5–9 · by Pressure Trend").
-  function qbOpLabel(op){ return ({eq:'=',ne:'≠',lt:'<',le:'≤',gt:'>',ge:'≥',between:'between',is:'is',isnot:'is not'})[op] || op; }
+  function qbOpLabel(op){ return ({eq:'=',ne:'≠',lt:'<',le:'≤',gt:'>',ge:'≥',between:'between',is:'is',isnot:'is not',isany:'is any of',isnone:'is none of'})[op] || op; }
+  function qbCondValText(c){ return (c.op==='between') ? (c.val+'–'+c.val2) : (c.op==='isany'||c.op==='isnone') ? (c.vals||[]).join(', ') : c.val; }
   // The SUBJECT filters (buck, species, property, date range) live above the Custom Query, not as
   // attribute conditions — but they scope the query, so the report/saved-query title must carry them
   // (else "Moose → by Wind" loses the "Moose"). Returns e.g. ["Moose","past month"].
@@ -16476,7 +16499,7 @@
   function describeQuery(){
     var condParts = [];
     queryConditions.filter(qbConditionReady).forEach(function(c){
-      var f = qbFieldByKey(c.field), val = (c.op === 'between') ? (c.val + '–' + c.val2) : c.val;
+      var f = qbFieldByKey(c.field), val = qbCondValText(c);
       condParts.push((f ? f.label : c.field) + ' ' + qbOpLabel(c.op) + ' ' + val);
     });
     var subj = describeSubjectFilters().join(' · ');
@@ -16496,7 +16519,7 @@
   // "Tagged Buck → Pressure Trend" tool serves Moose, Big 8, Split Brow, etc.
   function applySavedQuery(q){
     var finish = function(buckOverride){
-      queryConditions = (q.conditions || []).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; });
+      queryConditions = (q.conditions || []).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2, vals:(c.vals?c.vals.slice():undefined) }; });
       queryCombiner = q.combiner || 'AND';
       queryGroupBy = q.groupBy || 'moon';
       queryVizType = q.vizType || 'bar';
@@ -16560,7 +16583,7 @@
     }
     var q = {
       id: uid(), name: name,
-      conditions: queryConditions.filter(qbConditionReady).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; }),
+      conditions: queryConditions.filter(qbConditionReady).map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2, vals:(c.vals?c.vals.slice():undefined) }; }),
       combiner: queryCombiner, groupBy: queryGroupBy, vizType: queryVizType, source: analyticsSource,
       // Snapshot the SUBJECT filters so recalling "Moose first-light" restores the Moose filter — UNLESS
       // the user chose to save it as an any-buck template above (then buckProfileId is null).
@@ -16623,7 +16646,7 @@
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
   }
   function describeSavedQuery(q){
-    var parts = (q.conditions||[]).map(function(c){ var f=qbFieldByKey(c.field); var val=(c.op==='between')?(c.val+'–'+c.val2):c.val; return (f?f.label:c.field)+' '+qbOpLabel(c.op)+' '+val; });
+    var parts = (q.conditions||[]).map(function(c){ var f=qbFieldByKey(c.field); return (f?f.label:c.field)+' '+qbOpLabel(c.op)+' '+qbCondValText(c); });
     return (parts.length ? parts.join(' '+(q.combiner||'AND')+' ') : 'All records');
   }
   // ---------- Report clipboard ----------
