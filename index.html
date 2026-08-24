@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 441</div>
+    <div id="buildBadge">BUILD 442</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9437,7 +9437,7 @@
     var n = evs.length;
     var now = Date.now();
     var line = function(icon, txt){ return '<div style="margin:2px 0;">' + icon + ' ' + txt + '</div>'; };
-    var h = '<div style="font-size:11px;color:#dfeee4;line-height:1.5;padding-top:6px;">';
+    var h = '<div style="font-size:13.5px;color:#dfeee4;line-height:1.55;padding-top:6px;">';
 
     // ---- Always-on site facts: render useful info even with ZERO detections/sits ----
     if (s){
@@ -9456,7 +9456,7 @@
       // LiDAR slope/aspect and scent-drift line are fetched async and dropped into the placeholder by
       // fillStandTerrain() when the panel opens. Honors the camera-optional principle.
       if (typeof s.lat === 'number' && typeof s.lng === 'number'){
-        h += '<div style="margin-top:5px;padding-top:5px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:10px;letter-spacing:.3px;">TERRAIN · WIND · THERMAL</div>';
+        h += '<div style="margin-top:5px;padding-top:5px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">TERRAIN · WIND · THERMAL</div>';
         var _prop = (typeof propWithCoverAt === 'function') ? propWithCoverAt(s.lat, s.lng) : null;
         var _cov = (_prop && typeof coverTypeAt === 'function') ? coverTypeAt(_prop, s.lat, s.lng) : null;
         if (_cov){
@@ -9500,7 +9500,7 @@
     if (day.length < 8){
       h += '<div style="color:#E8B04B;margin-top:4px;">⚠ Only ' + day.length + ' daylight detection' + (day.length===1?'':'s') + ' — too few for a condition pattern.</div>';
     } else {
-      h += '<div style="margin-top:5px;color:#9db0a3;font-size:10px;letter-spacing:.3px;">DAYLIGHT PATTERNS (' + day.length + ' detections)</div>';
+      h += '<div style="margin-top:5px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">DAYLIGHT PATTERNS (' + day.length + ' detections)</div>';
       if (wind && !wind.thin) h += line('💨', 'Most on <b>' + escapeHtml(wind.label) + '</b> wind (' + wind.pct + '%)');
       if (press && !press.thin) h += line('🧭', 'Most on <b>' + escapeHtml(press.label) + '</b> pressure (' + press.pct + '%)');
       if (temp && !temp.thin) h += line('🌡', 'Most in <b>' + escapeHtml(temp.label) + '</b> (' + temp.pct + '%)');
@@ -9509,7 +9509,7 @@
       if (medMorn != null) timing += ' · morning <b>' + _offMin(medMorn) + '</b> vs sunrise';
       h += line('⏱', timing);
     }
-    h += '<div style="color:#9db0a3;font-size:10.5px;margin-top:6px;">Observed history at this spot — not a forecast. Cameras sample the spot, not the deer.</div>';
+    h += '<div style="color:#9db0a3;font-size:12px;margin-top:6px;">Observed history at this spot — not a forecast. Cameras sample the spot, not the deer.</div>';
     h += '</div>';
     return h;
   }
@@ -9592,7 +9592,7 @@
     } else {
       out += L2('🧭', '<span style="opacity:.85;">Near-calm — scent hangs; hunt tight.</span>');
     }
-    out += '<div style="color:#9db0a3;font-size:10.5px;margin-top:3px;">Live wind + LiDAR slope, right now. Slip in so the drift arrow points away from where you expect deer.</div>';
+    out += '<div style="color:#9db0a3;font-size:12px;margin-top:3px;">Live wind + LiDAR slope, right now. Slip in so the drift arrow points away from where you expect deer.</div>';
     container.innerHTML = out;
   }
   function popupHtml(s){
