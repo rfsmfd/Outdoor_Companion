@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 440</div>
+    <div id="buildBadge">BUILD 441</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9509,7 +9509,7 @@
       if (medMorn != null) timing += ' · morning <b>' + _offMin(medMorn) + '</b> vs sunrise';
       h += line('⏱', timing);
     }
-    h += '<div style="color:#6f8377;font-size:9.5px;margin-top:6px;">Observed history at this spot — not a forecast. Cameras sample the spot, not the deer.</div>';
+    h += '<div style="color:#9db0a3;font-size:10.5px;margin-top:6px;">Observed history at this spot — not a forecast. Cameras sample the spot, not the deer.</div>';
     h += '</div>';
     return h;
   }
@@ -9592,7 +9592,7 @@
     } else {
       out += L2('🧭', '<span style="opacity:.85;">Near-calm — scent hangs; hunt tight.</span>');
     }
-    out += '<div style="color:#6f8377;font-size:9.5px;margin-top:3px;">Live wind + LiDAR slope, right now. Slip in so the drift arrow points away from where you expect deer.</div>';
+    out += '<div style="color:#9db0a3;font-size:10.5px;margin-top:3px;">Live wind + LiDAR slope, right now. Slip in so the drift arrow points away from where you expect deer.</div>';
     container.innerHTML = out;
   }
   function popupHtml(s){
