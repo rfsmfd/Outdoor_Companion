@@ -1944,7 +1944,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 411</div>
+    <div id="buildBadge">BUILD 412</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17534,6 +17534,12 @@
     var cover = v.cover || v.photos[0];
     var buckPhoto = null;
     for (var i=0;i<v.photos.length;i++){ if (v.photos[i].buckProfileId){ buckPhoto = v.photos[i]; break; } }
+    // A buck's identity belongs to the DEER/buck visit ONLY. With multi-species visits (B391) a
+    // buck photo that also shows a turkey/coon spawns a separate turkey/coon visit built from the
+    // same photo — that visit must NOT inherit buckProfileId, or the buck gets counted twice for one
+    // frame. Keep it only on the buck group, or the visit whose species is the buck photo's primary.
+    var buckPrimary = (buckPhoto && buckPhoto.ai && buckPhoto.ai.primarySpecies) ? buckPhoto.ai.primarySpecies : null;
+    var buckOnThisVisit = !!buckPhoto && (v.isBuck || !buckPrimary || v.species === buckPrimary);
     var s = v.siteId ? sites.filter(function(x){ return x.id === v.siteId; })[0] : null;
     var sp = (v.species && v.species !== 'untagged' && v.species !== 'empty') ? v.species : null;
     return {
@@ -17545,7 +17551,7 @@
       solunarPeriod: cover.solunarPeriod || null,
       siteId: v.siteId || null,
       propertyId: analyticsSitePropertyId(v.siteId),
-      buckProfileId: buckPhoto ? buckPhoto.buckProfileId : null,
+      buckProfileId: buckOnThisVisit ? buckPhoto.buckProfileId : null,
       species: sp,
       isBuck: !!v.isBuck,
       lat: (s && typeof s.lat === 'number') ? s.lat : null,
