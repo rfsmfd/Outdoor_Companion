@@ -1824,6 +1824,7 @@
       <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
       <button class="btn-ghost" id="scoutModeBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:700;">🔍 Scout Mode — off (tap to show the board)</button>
       <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">➕ Add a Mark — pinch, rub, possible stand…</button>
+      <button class="btn-ghost" id="scoutDrawBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">✏️ Draw a Line — rub line, corridor, route</button>
       <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
       <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
@@ -1950,7 +1951,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 457</div>
+    <div id="buildBadge">BUILD 458</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3256,9 +3257,11 @@
       delete savedTrailPolylines[trail.id];
     }
     if (trail.module !== activeModule || trail.hidden) return;
+    if (trail.scoutKind && !scoutMode) return;   // scout conjecture lines show ONLY on the markup board
     var latlngs = trail.points.map(function(p){ return [p.lat, p.lng]; });
+    var _isSL = !!trail.scoutKind;
     var poly = L.polyline(latlngs, {
-      color: trail.color, weight: 4, opacity: 0.85, dashArray: lineStyleToDashArray(trail.lineStyle)
+      color: _isSL ? '#B06FE0' : trail.color, weight: _isSL ? 3 : 4, opacity: 0.9, dashArray: _isSL ? '6,7' : lineStyleToDashArray(trail.lineStyle)
     }).addTo(map);
     poly.bindPopup(buildTrailPopup(trail));   // tap the line → name + inline color / line-style / rename / delete
     poly.on('click', function(){ selectTrail(trail.id, 'map'); });   // …and highlight it + its row in the list
@@ -3316,6 +3319,7 @@
   // Release a trail selection by clicking empty map (not while placing a pin, and not the click that just
   // selected a trail — that bubbles up here a beat later, so the timestamp guard lets a fresh pick survive).
   map.on('click', function(){ if (selectedTrailId && !placing && (Date.now() - _trailClickAt > 350)) clearTrailSelection(); });
+  map.on('click', function(e){ if (typeof scoutDrawing !== 'undefined' && scoutDrawing) scoutDrawAddPoint(e.latlng); });   // scout line pen: each tap drops a vertex
 
   document.getElementById('confirmSaveTrailBtn').addEventListener('click', async function(){
     var name = document.getElementById('trailNameInput').value.trim();
@@ -7750,6 +7754,7 @@
     renderChips();
     renderMarkers();
     if (typeof renderObsMarkers === 'function') renderObsMarkers();
+    if (typeof renderAllSavedTrails === 'function') renderAllSavedTrails();   // show/hide scout conjecture lines with the board
     renderList();
   }
   function updateScoutModeBtn(){
@@ -7760,10 +7765,72 @@
       b.style.color = scoutMode ? '#ffffff' : '#e9ddf5';
       b.style.borderColor = scoutMode ? '#7d5aa8' : '#5a3e78';
     }
-    // Add-a-Mark and Scouting Report live INSIDE Scout Mode — only show when the board is on.
+    // Add-a-Mark, Draw-a-Line and Scouting Report live INSIDE Scout Mode — only show when the board is on.
     var show = (activeModule === 'hunting' && scoutMode) ? 'block' : 'none';
     var add = document.getElementById('scoutSpotBtn'); if (add) add.style.display = show;
+    var draw = document.getElementById('scoutDrawBtn'); if (draw) draw.style.display = show;
     var rep = document.getElementById('scoutReportBtn'); if (rep) rep.style.display = show;
+  }
+  // ---------- ✏️ Scout line pen — tap-to-place rub lines / corridors / routes on the markup board ----------
+  // Dashed purple conjecture lines, saved via the trail store (so they persist + sync) but tagged scoutKind
+  // so they render distinctly and show ONLY in Scout Mode. Tap the map to drop points, Finish to name+save.
+  var SCOUT_LINE_KINDS = [ {k:'rubline', label:'🪵 Rub line'}, {k:'corridor', label:'🐾 Travel corridor'}, {k:'route', label:'🥾 Route to check'}, {k:'other', label:'✏️ Other line'} ];
+  var scoutDrawing = false, scoutDrawPts = [], scoutDrawPoly = null, scoutDrawDots = [], scoutDrawBar = null;
+  function startScoutDraw(){
+    if (!scoutMode) setScoutMode(true);
+    scoutDrawing = true; scoutDrawPts = [];
+    if (scoutDrawPoly){ map.removeLayer(scoutDrawPoly); scoutDrawPoly = null; }
+    scoutDrawDots.forEach(function(d){ map.removeLayer(d); }); scoutDrawDots = [];
+    var mapEl = document.getElementById('map'); if (mapEl) mapEl.style.cursor = 'crosshair';
+    showScoutDrawBar();
+    if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();
+    showToast('Tap the map to trace the line — Finish when done ✏️');
+  }
+  function scoutDrawAddPoint(latlng){
+    if (!scoutDrawing) return;
+    scoutDrawPts.push([latlng.lat, latlng.lng]);
+    if (!scoutDrawPoly) scoutDrawPoly = L.polyline([[latlng.lat, latlng.lng]], { color:'#B06FE0', weight:3, opacity:0.95, dashArray:'6,7' }).addTo(map);
+    else scoutDrawPoly.setLatLngs(scoutDrawPts);
+    scoutDrawDots.push(L.circleMarker([latlng.lat, latlng.lng], { radius:4, color:'#B06FE0', fillColor:'#241E2E', fillOpacity:1, weight:2 }).addTo(map));
+    var i = document.getElementById('sdInfo'); if (i) i.textContent = scoutDrawPts.length + ' point' + (scoutDrawPts.length===1?'':'s') + ' — Finish when done';
+  }
+  function endScoutDraw(save){
+    scoutDrawing = false;
+    var mapEl = document.getElementById('map'); if (mapEl) mapEl.style.cursor = '';
+    if (scoutDrawBar){ scoutDrawBar.remove(); scoutDrawBar = null; }
+    scoutDrawDots.forEach(function(d){ map.removeLayer(d); }); scoutDrawDots = [];
+    if (scoutDrawPoly){ map.removeLayer(scoutDrawPoly); scoutDrawPoly = null; }
+    if (!save || scoutDrawPts.length < 2){ if (save && scoutDrawPts.length < 2) showToast('Tap at least two points to make a line'); scoutDrawPts = []; return; }
+    chooseScoutLineKind(function(kd){
+      if (!kd){ scoutDrawPts = []; return; }
+      var pts = scoutDrawPts.map(function(p){ return { lat:p[0], lng:p[1] }; });
+      var t = { id: uid(), name: kd.label, type:'trail', module: activeModule, points: pts, color:'#B06FE0', lineStyle:'dashed', scoutKind: kd.k, createdAt: Date.now(), notes:'', hidden:false };
+      var _tf = (typeof farmForTrail === 'function') ? farmForTrail(t) : null; if (_tf) t.propertyId = _tf.id;
+      trails.push(t);
+      if (typeof saveTrail === 'function') saveTrail(t).catch(function(e){ console.error('Outdoor Companion: save scout line', e); });
+      scoutDrawPts = [];
+      renderAllSavedTrails();
+      showToast(kd.label + ' saved to the board ✏️');
+    });
+  }
+  function showScoutDrawBar(){
+    if (scoutDrawBar) scoutDrawBar.remove();
+    scoutDrawBar = document.createElement('div');
+    scoutDrawBar.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:100055;background:#241E2E;border:1px solid #5a3e78;border-radius:12px;padding:8px 10px;display:flex;gap:8px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.55);';
+    scoutDrawBar.innerHTML = '<span id="sdInfo" style="color:#e9ddf5;font-size:13px;">Tap to place points…</span><button id="sdFin" style="background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:8px;padding:7px 12px;font-weight:700;cursor:pointer;">Finish</button><button id="sdCan" style="background:transparent;border:1px solid #5a3e78;color:#c9b3e0;border-radius:8px;padding:7px 10px;cursor:pointer;">Cancel</button>';
+    document.body.appendChild(scoutDrawBar);
+    scoutDrawBar.querySelector('#sdFin').addEventListener('click', function(){ endScoutDraw(true); });
+    scoutDrawBar.querySelector('#sdCan').addEventListener('click', function(){ endScoutDraw(false); });
+  }
+  function chooseScoutLineKind(cb){
+    var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
+    var card = document.createElement('div'); card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:340px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    card.innerHTML = '<div style="font-weight:800;font-size:16px;margin-bottom:8px;">What kind of line?</div>' + SCOUT_LINE_KINDS.map(function(k){ return '<button class="slk" data-k="'+k.k+'" style="display:block;width:100%;text-align:left;margin:5px 0;background:#1E2B23;border:1px solid #3c4d42;color:#e8f0ea;border-radius:9px;padding:10px;font-size:14px;cursor:pointer;">'+k.label+'</button>'; }).join('') + '<button class="slk-cancel" style="width:100%;margin-top:6px;background:transparent;border:1px solid #3c4d42;color:#9db0a3;border-radius:9px;padding:8px;cursor:pointer;">Cancel</button>';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    Array.prototype.forEach.call(card.querySelectorAll('.slk'), function(b){ b.addEventListener('click', function(){ var kd = SCOUT_LINE_KINDS.filter(function(x){ return x.k === b.getAttribute('data-k'); })[0]; close(); cb(kd); }); });
+    card.querySelector('.slk-cancel').addEventListener('click', function(){ close(); cb(null); });
+    back.addEventListener('click', function(e){ if (e.target === back){ close(); cb(null); } });
+    back.appendChild(card); document.body.appendChild(back);
   }
   // On load, restore Scout Mode if it was left on — otherwise a just-dropped conjecture mark appears to vanish
   // on refresh (it's saved, just hidden because unverified marks show only in Scout Mode).
@@ -11435,6 +11502,7 @@
     var _slb = document.getElementById('sitLogBtn'); if (_slb) _slb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _smb = document.getElementById('scoutModeBtn'); if (_smb) _smb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _ssb = document.getElementById('scoutSpotBtn'); if (_ssb) _ssb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _sdb = document.getElementById('scoutDrawBtn'); if (_sdb) _sdb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _srb = document.getElementById('scoutReportBtn'); if (_srb) _srb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     if (typeof updateScoutModeBtn === 'function') updateScoutModeBtn();
   }
@@ -12712,6 +12780,8 @@
     if (reportBtn) reportBtn.addEventListener('click', function(){ if (typeof openScoutingReport === 'function') openScoutingReport(); });
     var modeBtn = document.getElementById('scoutModeBtn');
     if (modeBtn) modeBtn.addEventListener('click', function(){ setScoutMode(!scoutMode); showToast(scoutMode ? '🔍 Scout Mode ON — your conjecture marks & all sign are showing' : 'Scout Mode off — back to your clean hunt map'); });
+    var drawBtn = document.getElementById('scoutDrawBtn');
+    if (drawBtn) drawBtn.addEventListener('click', function(){ startScoutDraw(); });
   })();
 
   map.on('click', function(e){
