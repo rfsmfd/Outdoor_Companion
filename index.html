@@ -1822,6 +1822,7 @@
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
+      <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:600;">👁 Scout a Spot — flag map potential</button>
       <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
       <button class="btn-ghost" id="toolsToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
@@ -1947,7 +1948,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 443</div>
+    <div id="buildBadge">BUILD 444</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2668,8 +2669,13 @@
     bedding:  {label:'Bedding Area',  abbrev:'BED', color:'#4A7A6C', emoji:'💤'},
     water:    {label:'Water Source',  abbrev:'H2O', color:'#4A7AA8'},
     sighting: {label:'Wildlife Sighting', abbrev:'SGT', color:'#D94A2E', hidden:true},
+    scout:    {label:'Scout Target',   abbrev:'SCT', color:'#B06FE0', emoji:'👁'},
     custom:   {label:'Custom Point',  abbrev:'PIN', color:'#B8AF9C'}
   };
+  // Site types whose map layer is OFF by default (kept off the working map to avoid clutter; toggled on
+  // from the display tray). Scout Targets are planning marks you flip on when scouting, not everyday pins.
+  var DEFAULT_OFF_TYPES = { scout: true };
+  function defaultFilterSet(types){ return new Set(Object.keys(types).filter(function(k){ return !DEFAULT_OFF_TYPES[k]; })); }
 
   // Fishing Site types — lakes/rivers/ponds are Properties (already generic); these are
   // the points of interest ON the water, parallel to hunting's stands/cameras/scrapes.
@@ -2744,7 +2750,7 @@
 
   var sites = [];
   var markers = {};
-  var activeFilters = new Set(Object.keys(TYPES_HUNTING));
+  var activeFilters = defaultFilterSet(TYPES_HUNTING);
   var showCameraFlags = false;  // the orange camera ICONS on deployed spots — OFF by default; the place dots+names stay. Flip on when working with cameras.
   var activeObsFilters = new Set(Object.keys(OBS_TYPES_HUNTING).concat(Object.keys(OBS_TYPES_FISHING)));
   var placing = false;
@@ -7692,6 +7698,37 @@
     });
     return row;
   }
+  // ---------- Scout Mode — the composite "show me everything" scouting view ----------
+  // One toggle that brings the WHOLE picture on at once: scout targets + trails + bedding + rubs + scrapes
+  // + all sign/sightings. Seeing them together is where a forgotten pattern (a travel corridor, a staging
+  // area) jumps out. Non-destructive: it snapshots your current layer state on the way in and restores it
+  // exactly on the way out — a transient view, not a permanent change.
+  var scoutMode = false, _scoutPrev = null;
+  var SCOUT_SITE_LAYERS = ['scout', 'trail', 'scrape', 'rub', 'bedding', 'feeding', 'water', 'access', 'custom'];
+  function setScoutMode(on){
+    if (on && !scoutMode){
+      _scoutPrev = { sites: new Set(activeFilters), obs: new Set(activeObsFilters) };
+      SCOUT_SITE_LAYERS.forEach(function(k){ if (getActiveTypes()[k]) activeFilters.add(k); });
+      Object.keys(getActiveObsTypes()).forEach(function(k){ activeObsFilters.add(k); });
+      scoutMode = true;
+    } else if (!on && scoutMode){
+      if (_scoutPrev){ activeFilters = new Set(_scoutPrev.sites); activeObsFilters = new Set(_scoutPrev.obs); _scoutPrev = null; }
+      scoutMode = false;
+    }
+    renderChips();
+    renderMarkers();
+    if (typeof renderObsMarkers === 'function') renderObsMarkers();
+    renderList();
+  }
+  function trayScoutModeRow(){
+    var row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.innerHTML =
+      '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">🔍</span> Scout Mode — all sign &amp; targets</div>' +
+      '<div class="toggle-switch' + (scoutMode ? ' on' : '') + '"><div class="knob"></div></div>';
+    row.querySelector('.toggle-switch').addEventListener('click', function(){ setScoutMode(!scoutMode); });
+    return row;
+  }
   // Builds the WHOLE tray (Sites + Sightings together, grouped by kind). renderObsTypeToggles is kept as
   // an alias so the many existing callers that refresh "just the obs toggles" still repaint everything.
   function renderChips(){
@@ -7707,6 +7744,7 @@
     container.appendChild(traySection('Habitat', ['bedding','feeding','water'].map(traySiteRow)));
     container.appendChild(traySection('Sign &amp; Sightings', ['buck','doe','bear','turkey','scrape','rub','track','trail','hunt','custom'].map(trayObsRow)));
     container.appendChild(traySection('Other Markers', ['sighting','custom'].map(traySiteRow)));   // 'sighting' is retired (hidden) → only Custom Point shows
+    container.appendChild(traySection('Planning', [trayScoutModeRow(), traySiteRow('scout')].filter(Boolean)));   // Scout Mode (composite) + Scout Targets pin layer
   }
   function renderObsTypeToggles(){ renderChips(); }
 
@@ -9709,18 +9747,24 @@
       : '';
     // "I hunt here" flag — this is how a spot enters the "Where to hunt tonight" ranking. Tree Stands are
     // huntable inherently (no toggle); other sites (observation cams) start observation-only and toggle in.
-    var huntableBtn = (activeModule === 'hunting' && isMine && s.type !== 'stand')
+    var isScout = s.type === 'scout';
+    var huntableBtn = (activeModule === 'hunting' && isMine && s.type !== 'stand' && !isScout)
       ? '<button class="btn-ghost" data-act="huntable" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">' + (siteIsHuntable(s) ? '🏹 Hunt spot — tap to make observation-only' : '👁 Observation only — tap: 🏹 I hunt here') + '</button>'
       : '';
     // Site Context — what this cam is watching (time-scoped). Shows the current context; tap to set/change.
     var _ctxKey = siteCurrentContext(s);
-    var contextBtn = (activeModule === 'hunting' && isMine)
+    var contextBtn = (activeModule === 'hunting' && isMine && !isScout)
       ? '<button class="btn-ghost" data-act="context" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">🏷 Context: ' + (_ctxKey ? escapeHtml(siteContextLabel(_ctxKey)) : 'not set — tap to set') + '</button>'
       : '';
     // Stand Profile — opens a full modal panel (like Site Context). Popups are too small/fiddly for the
     // two-level profile the spec calls for, and inline-in-popup expansion proved unreliable in the field.
+    // For a Scout Target this is where you sanity-check the map hunch against real cover/slope/wind.
     var profileBtn = (activeModule === 'hunting')
-      ? '<button class="btn-ghost" data-act="standprofile" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">📊 Stand Profile — tap to open</button>'
+      ? '<button class="btn-ghost" data-act="standprofile" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">' + (isScout ? '📊 Check the terrain read' : '📊 Stand Profile — tap to open') + '</button>'
+      : '';
+    // Scout Target → promote to a real Tree Stand once it checks out in the field.
+    var promoteBtn = (isScout && isMine)
+      ? '<button class="btn-ghost" data-act="promotestand" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:600;">✅ Checks out — promote to Tree Stand</button>'
       : '';
     return '' +
       '<div class="pop">' +
@@ -9735,6 +9779,7 @@
         huntableBtn +
         contextBtn +
         profileBtn +
+        promoteBtn +
         actionRow +
       '</div>';
   }
@@ -9850,6 +9895,16 @@
     // Stand Profile — same proven path as Context: close the popup, open a full modal panel.
     var profBtn = node.querySelector('[data-act="standprofile"]');
     if (profBtn) profBtn.addEventListener('click', function(){ map.closePopup(); openStandProfileModal(id); });
+    // Scout Target → Tree Stand promotion (the map-hunch checked out in the field).
+    var promoteBtn = node.querySelector('[data-act="promotestand"]');
+    if (promoteBtn) promoteBtn.addEventListener('click', async function(){
+      var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s) return;
+      s.type = 'stand';
+      try { await saveSite(s); } catch(e){ console.error('Outdoor Companion: failed to promote scout target', e); }
+      activeFilters.add('stand');
+      map.closePopup(); renderAll();
+      showToast('Promoted to a Tree Stand 🌲 — it\'s now in your hunt spots');
+    });
     var huntableBtn = node.querySelector('[data-act="huntable"]');
     if (huntableBtn) huntableBtn.addEventListener('click', async function(){
       var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s) return;
@@ -11028,6 +11083,7 @@
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _wib = document.getElementById('walkInBtn'); if (_wib) _wib.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _slb = document.getElementById('sitLogBtn'); if (_slb) _slb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _ssb = document.getElementById('scoutSpotBtn'); if (_ssb) _ssb.style.display = activeModule === 'hunting' ? 'block' : 'none';
   }
 
   // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
@@ -12278,12 +12334,28 @@
 
   addBtn.addEventListener('click', function(){
     placing = !placing;
+    if (!placing) pendingSiteType = null;
     addBtn.classList.toggle('active', placing);
     addBtn.textContent = placing ? 'Cancel' : '+ Add Site';
     hint.classList.toggle('show', placing);
     mapEl.classList.toggle('placing', placing);
     if (placing && window.innerWidth <= 820) closeSidebar();
   });
+
+  // 👁 Scout a Spot — same placement flow, but preselects the Scout Target type so a map-study hunch
+  // drops as a planning pin (its own default-off layer). The placement form's Notes = "why it looks good".
+  (function(){
+    var scoutBtn = document.getElementById('scoutSpotBtn');
+    if (!scoutBtn) return;
+    scoutBtn.addEventListener('click', function(){
+      if (placing){ pendingSiteType = null; exitPlacing(); return; }   // toggle off
+      placing = true; pendingSiteType = 'scout';
+      addBtn.classList.add('active'); addBtn.textContent = 'Cancel';
+      hint.classList.add('show'); mapEl.classList.add('placing');
+      showToast('Tap the map where it looks promising 👁 — jot why in Notes');
+      if (window.innerWidth <= 820) closeSidebar();
+    });
+  })();
 
   map.on('click', function(e){
     if (!placing) return;
@@ -12293,7 +12365,8 @@
   var pendingSiteType = null; // when set by Property Setup, the placement form preselects this site type
   function openPlacementForm(latlng){
     if (tempMarker) map.removeLayer(tempMarker);
-    tempMarker = L.marker(latlng, {icon: markerIcon('custom')}).addTo(map);
+    var isScout = pendingSiteType === 'scout';
+    tempMarker = L.marker(latlng, {icon: markerIcon(isScout ? 'scout' : 'custom')}).addTo(map);
 
     var propertyOptions = '<option value="">Unassigned</option>' +
       propsForModule().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true}); })
@@ -12301,10 +12374,10 @@
 
     var formHtml =
       '<div class="form-pop">' +
-        '<h3 style="margin:0 0 2px 0;font-family:Oswald,sans-serif;font-size:14px;text-transform:uppercase;">New Observation Site</h3>' +
+        '<h3 style="margin:0 0 2px 0;font-family:Oswald,sans-serif;font-size:14px;text-transform:uppercase;">' + (isScout ? '👁 New Scout Target' : 'New Observation Site') + '</h3>' +
         '<div class="coords">'+fmtCoord(latlng.lat)+', '+fmtCoord(latlng.lng)+'</div>' +
         '<label>Name</label>' +
-        '<input type="text" id="f_name" placeholder="e.g. North Fence Camera" />' +
+        '<input type="text" id="f_name" placeholder="' + (isScout ? 'e.g. Bench above the creek' : 'e.g. North Fence Camera') + '" />' +
         '<label>Type</label>' +
         '<select id="f_type">' +
           typeVisibleKeys(getActiveTypes()).map(function(k){ return '<option value="'+k+'">'+getActiveTypes()[k].label+'</option>'; }).join('') +
@@ -12313,8 +12386,8 @@
           '<label>Property</label>' +
           '<select id="f_property">' + propertyOptions + '</select>'
           : '') +
-        '<label>Notes (optional)</label>' +
-        '<textarea id="f_notes" placeholder="Any details worth remembering"></textarea>' +
+        '<label>' + (isScout ? 'Why it looks good' : 'Notes (optional)') + '</label>' +
+        '<textarea id="f_notes" placeholder="' + (isScout ? 'What caught your eye — pinch point, bench, saddle, edge, funnel… (check it in the field)' : 'Any details worth remembering') + '"></textarea>' +
         '<div class="row">' +
           '<button class="btn-primary" id="f_save">Save Site</button>' +
           '<button class="btn-ghost" id="f_cancel">Cancel</button>' +
@@ -12351,6 +12424,7 @@
           propertyId: propertyIdVal
         };
         sites.push(site);
+        if (DEFAULT_OFF_TYPES[site.type]) activeFilters.add(site.type);   // just dropped a default-off pin (e.g. Scout Target) → turn its layer on so you see it
         try{
           await saveSite(site);
         }catch(err){
@@ -14635,7 +14709,7 @@
       for (var p=0;p<huntEvents.length;p++){ await saveHuntEvent(huntEvents[p]); }
       for (var q=0;q<trails.length;q++){ await saveTrail(trails[q]); }
       for (var r=0;r<buckProfiles.length;r++){ await saveBuckProfile(buckProfiles[r]); }
-      activeFilters = new Set(Object.keys(getActiveTypes()));
+      activeFilters = defaultFilterSet(getActiveTypes());
       renderChips();
       renderObsTypeToggles();
       renderPropertySelect();
@@ -14888,7 +14962,7 @@
 
     // Reset the type-filter chips to "show everything" for the newly active module —
     // an old hunting-only filter set would otherwise hide all fishing types (and vice versa).
-    activeFilters = new Set(Object.keys(getActiveTypes()));
+    activeFilters = defaultFilterSet(getActiveTypes());
     renderChips();
     renderObsTypeToggles();
     renderPropertySelect();   // refresh the left property dropdown for the new module (it was going stale — showed the old module's properties until something else re-rendered it, so it disagreed with the Query Builder's fresh list)
