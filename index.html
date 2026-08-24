@@ -1949,7 +1949,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 452</div>
+    <div id="buildBadge">BUILD 453</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2677,6 +2677,19 @@
   // from the display tray). Scout Targets are planning marks you flip on when scouting, not everyday pins.
   var DEFAULT_OFF_TYPES = { scout: true };
   function defaultFilterSet(types){ return new Set(Object.keys(types).filter(function(k){ return !DEFAULT_OFF_TYPES[k]; })); }
+  // Scout-mark kinds — the UNPROVEN conjecture marks that live only in Scout Mode. `gradeTo` is the real
+  // site type a mark BECOMES when you tick Verify (graduating it to the main hunt map); null = it stays a
+  // scout mark but, once verified, shows on the main map too (a confirmed scouting feature in its class).
+  var SCOUT_KINDS = [
+    { k:'pinch',    label:'📍 Pinch point',       icon:'📍', gradeTo:null },
+    { k:'stand',    label:'🎯 Possible stand',    icon:'🎯', gradeTo:'stand' },
+    { k:'camera',   label:'📷 Possible camera',   icon:'📷', gradeTo:'camera' },
+    { k:'bed',      label:'💤 Suspected bedding', icon:'💤', gradeTo:'bedding' },
+    { k:'mast',     label:'🌰 Mast tree',         icon:'🌰', gradeTo:null },
+    { k:'corridor', label:'🐾 Travel corridor',   icon:'🐾', gradeTo:null },
+    { k:'other',    label:'❓ Other',             icon:'👁', gradeTo:null }
+  ];
+  function scoutKindDef(k){ for (var i = 0; i < SCOUT_KINDS.length; i++){ if (SCOUT_KINDS[i].k === k) return SCOUT_KINDS[i]; } return null; }
 
   // Fishing Site types — lakes/rivers/ponds are Properties (already generic); these are
   // the points of interest ON the water, parallel to hunting's stands/cameras/scrapes.
@@ -3956,6 +3969,19 @@
     var t = getActiveTypes()[type] || getFallbackTypeEntry(false);
     // Gold "buck here" ring for any spot that's produced a buck (sighting or buck-tagged photo).
     var buckRing = (siteId && typeof _buckSites !== 'undefined' && _buckSites[siteId]) ? 'box-shadow:0 0 0 3px #E0B23A,0 0 8px 2px rgba(224,178,58,.55);' : '';
+    // Scout mark — a conjecture pin on the markup board. DASHED purple = unproven; SOLID = verified. Distinct
+    // per-kind glyph so a "possible stand" never reads like a real stand until you graduate it.
+    if (type === 'scout'){
+      var _sc = siteId ? sites.filter(function(x){ return x.id === siteId; })[0] : null;
+      var _kd = _sc ? scoutKindDef(_sc.scoutKind) : null;
+      var _ic = _kd ? _kd.icon : '👁', _ver = !!(_sc && _sc.verified), _snm = (siteName || '').trim();
+      return L.divIcon({
+        className: '',
+        html: '<div class="site-badge-pin"><div class="site-marker" style="background:#241E2E;border:2px ' + (_ver ? 'solid' : 'dashed') + ' #B06FE0;color:#e9ddf5;font-size:15px;' + (_ver ? '' : 'opacity:.92;') + '">' + _ic + '</div>' +
+              (_snm ? '<div class="site-name-label" style="color:#c9b3e0;">' + escapeHtml(_snm) + '</div>' : '') + '</div>',
+        iconSize:[150,46], iconAnchor:[75,14], popupAnchor:[0,-16]
+      });
+    }
     // A camera-type site IS a place. Show it as: an orange CAMERA icon with the deployed camera's
     // number when a camera is on it right now, or a small round DOT when it's a known spot with no
     // camera currently — plus the PLACE NAME label under either. (The number comes from the CAMERA
@@ -7747,7 +7773,7 @@
     container.appendChild(traySection('Habitat', ['bedding','feeding','water'].map(traySiteRow)));
     container.appendChild(traySection('Sign &amp; Sightings', ['buck','doe','bear','turkey','scrape','rub','track','trail','hunt','custom'].map(trayObsRow)));
     container.appendChild(traySection('Other Markers', ['sighting','custom'].map(traySiteRow)));   // 'sighting' is retired (hidden) → only Custom Point shows
-    container.appendChild(traySection('Planning', [trayScoutModeRow(), traySiteRow('scout')].filter(Boolean)));   // Scout Mode (composite) + Scout Targets pin layer
+    container.appendChild(traySection('Planning', [trayScoutModeRow()].filter(Boolean)));   // Scout Mode = the markup board (governs conjecture marks + all sign)
   }
   function renderObsTypeToggles(){ renderChips(); }
 
@@ -9418,8 +9444,14 @@
       historyViewMarker = null;
     }
     sites.forEach(function(s){
-      if (!activeFilters.has(s.type)) return;
-      if (!passesDateFilter(s.lastActivityAt || s.createdAt)) return;
+      if (s.type === 'scout'){
+        // Conjecture marks live on the markup board: UNVERIFIED ones show only when Scout Mode is on;
+        // VERIFIED ones have graduated and show on the main map too. Date filter doesn't apply to planning marks.
+        if (!s.verified && !scoutMode) return;
+      } else {
+        if (!activeFilters.has(s.type)) return;
+        if (!passesDateFilter(s.lastActivityAt || s.createdAt)) return;
+      }
       if (!passesPropertyFilter(s)) return;
       var m = L.marker([s.lat,s.lng], {icon: markerIcon(s.type, s.name, s.id)}).addTo(map);
       m.bindPopup(popupHtml(s));
@@ -9983,15 +10015,25 @@
     var standDetailsBtn = (activeModule === 'hunting' && isMine && s.type === 'stand')
       ? '<button class="btn-ghost" data-act="standdetails" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">🪜 ' + (standInfoLine(s) ? 'Stand: ' + standInfoLine(s) : 'Stand details — tap to add') + '</button>'
       : '';
-    // Scout Target → promote to a real Tree Stand once it checks out in the field.
-    var promoteBtn = (isScout && isMine)
-      ? '<button class="btn-ghost" data-act="promotestand" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:600;">✅ Checks out — promote to Tree Stand</button>'
+    // Scout mark → the Verify hinge: graduate the conjecture onto the main map (as a real Tree Stand /
+    // Camera / Bedding, or just as a confirmed scouting mark for pinch/mast/corridor/other).
+    var scoutKD = isScout ? scoutKindDef(s.scoutKind) : null;
+    var verifyLabel = 'Verify — move to main map';
+    if (scoutKD && scoutKD.gradeTo === 'stand') verifyLabel = 'Verify → Tree Stand';
+    else if (scoutKD && scoutKD.gradeTo === 'camera') verifyLabel = 'Verify → Camera site';
+    else if (scoutKD && scoutKD.gradeTo === 'bedding') verifyLabel = 'Verify → Bedding area';
+    var promoteBtn = (isScout && isMine && !s.verified)
+      ? '<button class="btn-ghost" data-act="verifyscout" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:600;">✅ '+verifyLabel+'</button>'
+      : '';
+    var scoutInfo = isScout
+      ? '<div class="notes" style="color:#c9b3e0;">' + (scoutKD ? escapeHtml(scoutKD.label) : '👁 Scout mark') + ' · ' + new Date(s.createdAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) + ' · ' + (s.verified ? '✅ verified' : '📝 unproven — Scout Mode only') + '</div>'
       : '';
     return '' +
       '<div class="pop">' +
         '<h3>'+escapeHtml(s.name)+'</h3>' +
         '<div class="ty" style="color:'+t.color+'">'+t.label+'</div>' +
         camInfo +
+        scoutInfo +
         (s.notes ? '<div class="notes">'+escapeHtml(s.notes)+'</div>' : '') +
         buckNote +
         '<div class="coords">'+fmtCoord(s.lat)+', '+fmtCoord(s.lng)+'</div>' +
@@ -10121,15 +10163,22 @@
     // §1 Basic stand info editor.
     var sdBtn = node.querySelector('[data-act="standdetails"]');
     if (sdBtn) sdBtn.addEventListener('click', function(){ map.closePopup(); openStandDetailsEditor(id); });
-    // Scout Target → Tree Stand promotion (the map-hunch checked out in the field).
-    var promoteBtn = node.querySelector('[data-act="promotestand"]');
-    if (promoteBtn) promoteBtn.addEventListener('click', async function(){
+    // Scout mark → Verify: graduate the conjecture to the main map, becoming its real class when applicable.
+    var verifyBtn = node.querySelector('[data-act="verifyscout"]');
+    if (verifyBtn) verifyBtn.addEventListener('click', async function(){
       var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s) return;
-      s.type = 'stand';
-      try { await saveSite(s); } catch(e){ console.error('Outdoor Companion: failed to promote scout target', e); }
-      activeFilters.add('stand');
+      var kd = scoutKindDef(s.scoutKind);
+      if (kd && kd.gradeTo){
+        s.type = kd.gradeTo; s.verified = true; delete s.scoutKind;   // becomes the real object on the hunt map
+        activeFilters.add(kd.gradeTo);
+        var lbl = getActiveTypes()[kd.gradeTo] ? getActiveTypes()[kd.gradeTo].label : kd.gradeTo;
+        showToast('Verified → ' + lbl + ' ✅ — now on your hunt map');
+      } else {
+        s.verified = true;   // stays a scout mark, but a confirmed one → shows on the main map too
+        showToast('Verified ✅ — now on your main map');
+      }
+      try { await saveSite(s); } catch(e){ console.error('Outdoor Companion: failed to verify scout mark', e); }
       map.closePopup(); renderAll();
-      showToast('Promoted to a Tree Stand 🌲 — it\'s now in your hunt spots');
     });
     var huntableBtn = node.querySelector('[data-act="huntable"]');
     if (huntableBtn) huntableBtn.addEventListener('click', async function(){
@@ -12631,10 +12680,10 @@
         '<div class="coords">'+fmtCoord(latlng.lat)+', '+fmtCoord(latlng.lng)+'</div>' +
         '<label>Name</label>' +
         '<input type="text" id="f_name" placeholder="' + (isScout ? 'e.g. Bench above the creek' : 'e.g. North Fence Camera') + '" />' +
-        '<label>Type</label>' +
-        '<select id="f_type">' +
-          typeVisibleKeys(getActiveTypes()).map(function(k){ return '<option value="'+k+'">'+getActiveTypes()[k].label+'</option>'; }).join('') +
-        '</select>' +
+        '<label>' + (isScout ? 'What is it?' : 'Type') + '</label>' +
+        (isScout
+          ? '<select id="f_scoutkind">' + SCOUT_KINDS.map(function(k){ return '<option value="'+k.k+'">'+k.label+'</option>'; }).join('') + '</select>'
+          : '<select id="f_type">' + typeVisibleKeys(getActiveTypes()).map(function(k){ return '<option value="'+k+'">'+getActiveTypes()[k].label+'</option>'; }).join('') + '</select>') +
         (properties.length > 0 ?
           '<label>Property</label>' +
           '<select id="f_property">' + propertyOptions + '</select>'
@@ -12660,7 +12709,8 @@
       if (pendingSiteType){ var tSel = document.getElementById('f_type'); if (tSel) tSel.value = pendingSiteType; pendingSiteType = null; }
       if (saveBtn) saveBtn.addEventListener('click', async function(){
         var name = document.getElementById('f_name').value.trim();
-        var type = document.getElementById('f_type').value;
+        var type = isScout ? 'scout' : document.getElementById('f_type').value;
+        var scoutKind = isScout ? (document.getElementById('f_scoutkind') ? document.getElementById('f_scoutkind').value : 'other') : null;
         var notes = document.getElementById('f_notes').value.trim();
         if (!name){ document.getElementById('f_name').style.borderColor = '#D94A2E'; return; }
         var propertyIdVal = document.getElementById('f_property') ? (document.getElementById('f_property').value || null) : null;
@@ -12676,8 +12726,10 @@
           lastActivityAt: Date.now(),
           propertyId: propertyIdVal
         };
+        if (scoutKind){ site.scoutKind = scoutKind; site.verified = false; }
         sites.push(site);
-        if (DEFAULT_OFF_TYPES[site.type]) activeFilters.add(site.type);   // just dropped a default-off pin (e.g. Scout Target) → turn its layer on so you see it
+        if (site.type === 'scout'){ if (!scoutMode) setScoutMode(true); }   // dropped a conjecture mark → flip the markup board on so you see it
+        else if (DEFAULT_OFF_TYPES[site.type]) activeFilters.add(site.type);
         try{
           await saveSite(site);
         }catch(err){
