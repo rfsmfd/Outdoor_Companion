@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 420</div>
+    <div id="buildBadge">BUILD 421</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4522,6 +4522,7 @@
         (hideLoc ? '' : (function(){ var ln = siteNameById(p.matchedSiteId, p.matchedSiteName); return '<div class="loc' + (ln ? '' : ' unmatched') + '">📍 ' + (ln ? escapeHtml(ln) : 'No location yet') + '</div>'; })()) +
         (cam ? '<div class="cam">📷 ' + escapeHtml(cam.name) + '</div>' : '') +
         '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
+        sunRelHtml(p) +
         '<div class="cond" title="Conditions at this photo\'s date &amp; time">' + photoConditionHtml(p) + '</div>' +
         photoAiBadgeHtml(p) +
         buckHtml +
@@ -4552,6 +4553,7 @@
       '<div class="meta">' +
         (hideLoc ? '' : (function(){ var ln = siteNameById(v.siteId, v.siteName); return '<div class="site' + (ln ? '' : ' unmatched') + '">' + (ln ? escapeHtml(ln) : 'No location yet') + '</div>'; })()) +
         '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
+        sunRelHtml(v.cover) +
         '<div class="sp' + (v.isBuck ? ' buck' : '') + '">' + escapeHtml(spText) + '</div>' +
         '<div class="dur">' + escapeHtml(durHtml) + '</div>' +
       '</div>';
@@ -4653,6 +4655,7 @@
     var dateStr = doc.timestamp ? new Date(doc.timestamp).toLocaleString(undefined, {weekday:'short', month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'}) : 'Unknown date';
     var line2 = (cam ? '📷 ' + escapeHtml(cam.name) : '') + (doc.matchedSiteName ? '  ·  📍 ' + escapeHtml(doc.matchedSiteName) : '');
     var parts = ['<strong>' + escapeHtml(dateStr) + '</strong>'];
+    var sunRel = sunRelHtml(doc); if (sunRel) parts.push(sunRel.replace(/<[^>]+>/g, '').trim());
     if (line2) parts.push(line2);
     var cond = photoConditionHtml(doc); if (cond) parts.push(cond);
     var aiLine = aiSummaryHtml(doc); if (aiLine) parts.push(aiLine);
@@ -18748,6 +18751,20 @@
   }
 
   // Compact condition readout for a photo card — always reflects the photo's own timestamp/place.
+  // Sun-relationship line for cards/caption — DERIVED (never entered): how far the capture time was
+  // from that day's sunrise/sunset, already computed & stored in the photo's weather. Gives a hunter
+  // instant context ("🌅 58min after sunrise") that a bare clock time can't.
+  function sunRelHtml(doc, cls){
+    if (!doc || doc.weatherStatus !== 'ok' || !doc.weather) return '';
+    var prox = doc.weather.sunProximity;
+    var style = 'font-size:9.5px;color:#E8B04B;margin-top:1px;';
+    if (prox){
+      return '<div class="'+(cls||'sunrel')+'" style="'+style+'">' + (prox.indexOf('sunset') !== -1 ? '🌇' : '🌅') + ' ' + escapeHtml(prox) + '</div>';
+    }
+    var ph = doc.weather.sunPhase;
+    if (ph){ var e = /sunset|dusk/i.test(ph) ? '🌇' : (/night/i.test(ph) ? '🌙' : (/daytime/i.test(ph) ? '☀️' : '🌅')); return '<div class="'+(cls||'sunrel')+'" style="'+style+'">' + e + ' ' + escapeHtml(ph) + '</div>'; }
+    return '';
+  }
   function photoConditionHtml(doc){
     if (!doc) return '';
     var bits = [];
