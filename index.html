@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 442</div>
+    <div id="buildBadge">BUILD 443</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9431,6 +9431,78 @@
   }
   function _median(arr){ if (!arr.length) return null; var a = arr.slice().sort(function(x,y){ return x-y; }); var m = Math.floor(a.length/2); return a.length%2 ? a[m] : Math.round((a[m-1]+a[m])/2); }
   function _offMin(mins){ if (mins==null) return '?'; return (mins>=0?'+':'') + mins + 'min'; }
+  // A sit's sightings tally, from the observations logged during that hunt (does + bucks seen from the stand).
+  function _huntSightings(h){
+    var does = 0, bucks = 0, buckIds = {};
+    (h.observationIds || []).forEach(function(oid){
+      var o = (typeof observations !== 'undefined' ? observations : []).filter(function(x){ return x.id === oid; })[0]; if (!o) return;
+      var c = o.count || 1;
+      if (o.type === 'doe') does += c;
+      else if (o.type === 'buck'){ bucks += c; if (o.buckProfileId) buckIds[o.buckProfileId] = 1; }
+    });
+    return { does: does, bucks: bucks, total: does + bucks, namedBucks: Object.keys(buckIds).length };
+  }
+  // Rest state from days-since-last-sit — the actionable "should I let it sit" read.
+  function standRestStatus(daysSince, everHunted){
+    if (!everHunted) return { txt: 'Never hunted — fully rested', tone: '#9ED17A' };
+    if (daysSince <= 1) return { txt: '🔥 Hunted ' + (daysSince === 0 ? 'today' : 'yesterday') + ' — burned, let it rest', tone: '#E8823F' };
+    if (daysSince <= 3) return { txt: 'Cooling — hunted ' + daysSince + ' days ago', tone: '#E8B04B' };
+    if (daysSince <= 6) return { txt: 'Nearly rested — ' + daysSince + ' days since a sit', tone: '#CFE3B8' };
+    return { txt: '✅ Rested ' + daysSince + ' days', tone: '#9ED17A' };
+  }
+  // Hunt/Sit history + pressure for a stand. Pulls sits tied to this site AND nearby ad-hoc "sat a spell"
+  // sits (no stand) within ~80 yd — the founder often sits fresh sign off-stand, and that's real data.
+  // Everything sample-gated: rates and patterns only appear once there are enough sits to mean something.
+  function standHuntHistoryHtml(siteId, s, line){
+    var R = 75, now = Date.now();
+    var all = (typeof huntEvents !== 'undefined' ? huntEvents : []).filter(function(h){
+      if (h.module === 'fishing') return false;
+      if (h.siteId === siteId) return true;
+      return !h.siteId && s && typeof h.lat === 'number' && typeof s.lat === 'number' && distMeters(h.lat, h.lng, s.lat, s.lng) <= R;
+    });
+    if (!all.length) return { html: '', count: 0 };
+    all.sort(function(a, b){ return (b.checkInAt || 0) - (a.checkInAt || 0); });
+    var completed = all.filter(function(h){ return h.checkOutAt; });
+    var totalHrs = completed.reduce(function(sum, h){ return sum + (h.checkOutAt - h.checkInAt) / 3600000; }, 0);
+    var deer = 0, bucks = 0, adhoc = 0;
+    all.forEach(function(h){ var sg = _huntSightings(h); deer += sg.total; bucks += sg.bucks; if (!h.siteId) adhoc++; });
+    var lastSit = all[0].checkInAt || 0;
+    var daysSince = lastSit ? Math.round((now - lastSit) / 86400000) : null;
+    var rest = standRestStatus(daysSince, true);
+    var h = '';
+    h += '<div style="margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">HUNT HISTORY · PRESSURE</div>';
+    h += line('🪑', all.length + ' sit' + (all.length === 1 ? '' : 's') + (adhoc ? (' <span style="color:#9db0a3;">(' + adhoc + ' off-stand nearby)</span>') : '') + (totalHrs >= 1 ? (' · ' + (totalHrs >= 10 ? Math.round(totalHrs) : totalHrs.toFixed(1)) + 'h total') : ''));
+    h += line('👀', deer + ' deer seen from here' + (bucks ? (' · ' + bucks + ' buck' + (bucks === 1 ? '' : 's')) : '') + (totalHrs >= 1 ? (' · <b>' + (deer / totalHrs).toFixed(1) + '</b>/hr') : ''));
+    h += line('🛌', '<b style="color:' + rest.tone + ';">' + rest.txt + '</b>');
+    // Morning vs evening (deer/hr), gated at >=3 completed sits per side.
+    var mSits = [], eSits = [], avg = function(a){ return a.reduce(function(s2, x){ return s2 + x; }, 0) / a.length; };
+    completed.forEach(function(h2){ var dur = (h2.checkOutAt - h2.checkInAt) / 3600000; if (dur <= 0) return; var hr = new Date(h2.checkInAt).getHours(); var rate = _huntSightings(h2).total / dur; if (hr < 11) mSits.push(rate); else if (hr >= 14) eSits.push(rate); });
+    if (mSits.length >= 3 || eSits.length >= 3){
+      var parts = [];
+      if (mSits.length >= 3) parts.push('AM <b>' + avg(mSits).toFixed(1) + '</b>/hr (n=' + mSits.length + ')');
+      if (eSits.length >= 3) parts.push('PM <b>' + avg(eSits).toFixed(1) + '</b>/hr (n=' + eSits.length + ')');
+      h += line('🕑', 'By time: ' + parts.join(' · '));
+      if (mSits.length >= 3 && eSits.length >= 3){ var mv = avg(mSits), ev = avg(eSits); if (Math.abs(mv - ev) >= 0.5) h += '<div style="color:#9db0a3;margin-left:2px;">Historically a stronger <b>' + (ev > mv ? 'evening' : 'morning') + '</b> stand.</div>'; }
+    } else if (completed.length >= 2){
+      h += '<div style="color:#E8B04B;margin-top:2px;">Too few sits to call morning vs evening yet.</div>';
+    }
+    // Rest vs result — deer/hr bucketed by days rested since the prior sit here. Gated: >=2 sits per shown bucket.
+    var byTime = completed.slice().sort(function(a, b){ return a.checkInAt - b.checkInAt; }), rvr = {}, order = ['0–1 days', '2–4 days', '5–7 days', '8+ days'];
+    for (var i = 1; i < byTime.length; i++){
+      var cur = byTime[i], dur2 = (cur.checkOutAt - cur.checkInAt) / 3600000; if (dur2 <= 0) continue;
+      var gap = (cur.checkInAt - byTime[i - 1].checkInAt) / 86400000;
+      var key = gap <= 1 ? '0–1 days' : (gap <= 4 ? '2–4 days' : (gap <= 7 ? '5–7 days' : '8+ days'));
+      (rvr[key] = rvr[key] || []).push(_huntSightings(cur).total / dur2);
+    }
+    var shown = order.filter(function(k){ return rvr[k] && rvr[k].length >= 2; });
+    if (shown.length >= 2){
+      h += '<div style="margin-top:4px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">REST vs RESULT (deer/hr)</div>';
+      shown.forEach(function(k){ h += line('•', k + ': <b>' + avg(rvr[k]).toFixed(1) + '</b>/hr <span style="color:#9db0a3;">(n=' + rvr[k].length + ')</span>'); });
+    } else if (completed.length >= 4){
+      h += '<div style="color:#E8B04B;margin-top:2px;">Not enough repeat sits yet to show a rest-vs-result pattern.</div>';
+    }
+    return { html: h, count: all.length };
+  }
   function standProfileHtml(siteId){
     var s = sites.filter(function(x){ return x.id === siteId; })[0];
     var evs = standEventsForSite(siteId);
@@ -9471,10 +9543,18 @@
       }
     }
 
+    // ---- Hunt/Sit history + pressure (from the hunt log — tied sits + nearby off-stand sits) ----
+    var hh = standHuntHistoryHtml(siteId, s, line);
+    h += hh.html;
+
     if (!n){
-      // No history yet — but the panel still opened with the facts above. NOTE: cameras are optional
-      // by design; this profile builds from sightings/sign and sits too, not just trail-cam photos.
-      h += '<div style="color:#9db0a3;margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;">No sightings, sign, sits, or camera detections tied to this spot yet. Log a field observation here (a rub, scrape, tracks, a sighting), record what you saw on a sit, or add trail-cam photos — and this fills in with activity, timing, and wind / pressure / temperature patterns. <b>No camera required.</b></div>';
+      // No trail-cam/observation DETECTIONS yet. If there are logged sits (hh.count) the panel already has
+      // real history above, so soften the note; otherwise give the full "here's how it fills in" prompt.
+      if (hh.count){
+        h += '<div style="color:#9db0a3;margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;">No trail-cam or field-observation detections tied here yet — the sit history above is what we have. Log sightings/sign or add photos and the activity &amp; timing patterns fill in too.</div>';
+      } else {
+        h += '<div style="color:#9db0a3;margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;">No sightings, sign, sits, or camera detections tied to this spot yet. Log a field observation here (a rub, scrape, tracks, a sighting), record what you saw on a sit, or add trail-cam photos — and this fills in with activity, timing, and wind / pressure / temperature patterns. <b>No camera required.</b></div>';
+      }
       h += '</div>';
       return h;
     }
@@ -9483,9 +9563,6 @@
     var day = evs.filter(function(e){ return !_isNightEvent(e); }), nightN = n - day.length;
     var bucks = evs.filter(function(e){ return e.isBuck; }).length;
     var r7 = evs.filter(function(e){ return e.createdAt >= now - 7*86400000; }).length;
-    var hunts = (typeof huntEvents !== 'undefined' ? huntEvents : []).filter(function(h2){ return h2.siteId === siteId; });
-    var lastHunt = hunts.reduce(function(m,h2){ return Math.max(m, h2.checkInAt||0); }, 0);
-    var daysSince = lastHunt ? Math.round((now - lastHunt)/86400000) : null;
     var wind = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?e.weather.windDir:null; }, 8);
     var press = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?e.weather.pressureTrend:null; }, 8);
     var temp = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?tempBucket(e.weather.tempF):null; }, 8);
@@ -9494,9 +9571,9 @@
     var medMorn = _median(morn.map(function(e){ return e.minFromSunrise; }));
     var medEve  = _median(eve.map(function(e){ return e.minFromSunset; }));
     h += '<div style="margin-top:5px;padding-top:5px;border-top:1px dashed #2c3a31;"></div>';
+    h += '<div style="margin-top:2px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">CAMERA / SIGHTING ACTIVITY</div>';
     h += line('📈', n + ' detection' + (n===1?'':'s') + ' — ☀ ' + day.length + ' daylight · 🌙 ' + nightN + ' night · 🦌 ' + bucks + ' buck' + (bucks===1?'':'s'));
     h += line('🕐', 'Recent: ' + r7 + ' in the last 7 days');
-    h += line('🏹', hunts.length ? (hunts.length + ' hunt' + (hunts.length===1?'':'s') + ' logged · last sat ' + (daysSince===0?'today':daysSince+' day'+(daysSince===1?'':'s')+' ago')) : 'No hunts logged here yet');
     if (day.length < 8){
       h += '<div style="color:#E8B04B;margin-top:4px;">⚠ Only ' + day.length + ' daylight detection' + (day.length===1?'':'s') + ' — too few for a condition pattern.</div>';
     } else {
