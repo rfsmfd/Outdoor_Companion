@@ -1948,7 +1948,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 447</div>
+    <div id="buildBadge">BUILD 448</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3953,6 +3953,8 @@
   // for cameras whose name doesn't contain a number to extract.
   function markerIcon(type, siteName, siteId){
     var t = getActiveTypes()[type] || getFallbackTypeEntry(false);
+    // Gold "buck here" ring for any spot that's produced a buck (sighting or buck-tagged photo).
+    var buckRing = (siteId && typeof _buckSites !== 'undefined' && _buckSites[siteId]) ? 'box-shadow:0 0 0 3px #E0B23A,0 0 8px 2px rgba(224,178,58,.55);' : '';
     // A camera-type site IS a place. Show it as: an orange CAMERA icon with the deployed camera's
     // number when a camera is on it right now, or a small round DOT when it's a known spot with no
     // camera currently — plus the PLACE NAME label under either. (The number comes from the CAMERA
@@ -3964,7 +3966,7 @@
       // spot — SOLID when the spot has photos, HOLLOW when it's an empty spot with nothing collected yet.
       // (Camera spots become the most numerous markers fast, so they stay dots, not icons.)
       var hasPics = !!(siteId && _camSiteHasPics[siteId]);
-      var dot = '<div class="place-dot' + (hasPics ? '' : ' hollow') + '"></div>';
+      var dot = '<div class="place-dot' + (hasPics ? '' : ' hollow') + '" style="' + buckRing + '"></div>';
       // When you're actively working cameras (Camera-icons layer on), a bright camera flag rides above the
       // dot on a spot that has one deployed right now — its lens showing the camera NUMBER (or, for a
       // non-numeric name like GardePro "FLCR", its first two letters). OFF by default to keep the map clean.
@@ -3998,14 +4000,14 @@
     if (t.emoji){
       return L.divIcon({
         className: '',
-        html: '<div class="site-badge-pin"><div class="site-marker" style="background:#fff;border-color:'+t.color+';font-size:16px;">'+t.emoji+'</div>' +
+        html: '<div class="site-badge-pin"><div class="site-marker" style="background:#fff;border-color:'+t.color+';font-size:16px;'+buckRing+'">'+t.emoji+'</div>' +
               (siteNm ? '<div class="site-name-label">'+escapeHtml(siteNm)+'</div>' : '') + '</div>',
         iconSize: [150,46], iconAnchor: [75,14], popupAnchor: [0,-16]
       });
     }
     return L.divIcon({
       className: '',
-      html: '<div class="site-badge-pin"><div class="site-marker" style="--mc:'+t.color+'">'+t.abbrev+'</div>' +
+      html: '<div class="site-badge-pin"><div class="site-marker" style="--mc:'+t.color+';'+buckRing+'">'+t.abbrev+'</div>' +
             (siteNm ? '<div class="site-name-label">'+escapeHtml(siteNm)+'</div>' : '') + '</div>',
       iconSize: [150,46],
       iconAnchor: [75,14],
@@ -9380,8 +9382,27 @@
     if (typeof importedPhotos === 'undefined') return;
     importedPhotos.forEach(function(p){ if (p && p.matchedSiteId) _camSiteHasPics[p.matchedSiteId] = true; });
   }
+  // Start of the CURRENT hunting season — anchored to Aug 1 (pre-season scouting through winter). Before
+  // Aug, we're still in last season's window.
+  function currentSeasonStartMs(){
+    var d = new Date(), y = d.getFullYear(), aug1 = new Date(y, 7, 1).getTime();
+    return d.getTime() < aug1 ? new Date(y - 1, 7, 1).getTime() : aug1;
+  }
+  // The buck-ring window: current season PLUS the previous one (two seasons). A spot that produced a buck two
+  // seasons running is a stronger, more trustworthy signal than a single hit — and it's not a stale ghost.
+  function buckRingSinceMs(){ var cy = new Date(currentSeasonStartMs()).getFullYear(); return new Date(cy - 1, 7, 1).getTime(); }
+  // Sites that have produced a BUCK in the last two seasons — from buck sightings (observations) OR buck-tagged
+  // trail-cam photos dated since that window. Drives a gold "buck here" ring so proven spots read at a glance.
+  var _buckSites = {};
+  function computeBuckSites(){
+    _buckSites = {};
+    var since = buckRingSinceMs();
+    (typeof observations !== 'undefined' ? observations : []).forEach(function(o){ if (o && o.type === 'buck' && o.siteId && (o.createdAt || 0) >= since) _buckSites[o.siteId] = true; });
+    (typeof importedPhotos !== 'undefined' ? importedPhotos : []).forEach(function(p){ if (p && p.matchedSiteId && p.ai && p.ai.isBuck && (p.timestamp || 0) >= since) _buckSites[p.matchedSiteId] = true; });
+  }
   function renderMarkers(){
     computeCamSitePics();
+    computeBuckSites();
     Object.keys(markers).forEach(function(id){ map.removeLayer(markers[id]); });
     markers = {};
     // The Deployment History "View on Map" marker is a one-off, temporary reference (see
