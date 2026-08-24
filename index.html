@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 434</div>
+    <div id="buildBadge">BUILD 435</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9432,31 +9432,49 @@
   function _median(arr){ if (!arr.length) return null; var a = arr.slice().sort(function(x,y){ return x-y; }); var m = Math.floor(a.length/2); return a.length%2 ? a[m] : Math.round((a[m-1]+a[m])/2); }
   function _offMin(mins){ if (mins==null) return '?'; return (mins>=0?'+':'') + mins + 'min'; }
   function standProfileHtml(siteId){
+    var s = sites.filter(function(x){ return x.id === siteId; })[0];
     var evs = standEventsForSite(siteId);
     var n = evs.length;
-    if (!n) return '<div style="font-size:11px;color:#dfeee4;line-height:1.5;border-top:1px solid #33443a;margin-top:6px;padding-top:7px;">' +
-      '<div style="font-weight:700;margin-bottom:4px;">📊 Stand Profile</div>' +
-      '<div style="color:#9db0a3;">No camera detections or logged sits at <b>this</b> spot yet.<br>Open the profile on a camera site that has trail-cam photos (or a stand where you’ve logged sits) and it fills in with activity, timing, wind/pressure patterns and hunt pressure.</div>' +
-      '</div>';
+    var now = Date.now();
+    var line = function(icon, txt){ return '<div style="margin:2px 0;">' + icon + ' ' + txt + '</div>'; };
+    var h = '<div style="font-size:11px;color:#dfeee4;line-height:1.5;border-top:1px solid #33443a;margin-top:6px;padding-top:7px;">';
+    h += '<div style="font-weight:700;margin-bottom:4px;">📊 Stand Profile</div>';
+
+    // ---- Always-on site facts: render useful info even with ZERO detections/sits ----
+    if (s){
+      var tEntry = getActiveTypes()[s.type];
+      if (tEntry) h += line('📍', escapeHtml(tEntry.label) + (siteIsHuntable(s) ? ' · 🏹 hunt spot' : ' · 👁 observation'));
+      var ctxKey = siteCurrentContext(s);
+      if (ctxKey) h += line('🏷', 'Context: <b>' + escapeHtml(siteContextLabel(ctxKey)) + '</b>');
+      var camHere = (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId === siteId; })[0];
+      if (camHere) h += line('📷', escapeHtml(camHere.name) + ' deployed here' + (camHere.lastDeployedAt ? ' · ' + relTime(camHere.lastDeployedAt) : ''));
+      var photoN = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return p.matchedSiteId === siteId; }).length;
+      if (photoN) h += line('🖼', photoN + ' photo' + (photoN===1?'':'s') + ' filed to this spot');
+      if (typeof s.lat === 'number' && typeof s.lng === 'number') h += line('🧭', fmtCoord(s.lat) + ', ' + fmtCoord(s.lng));
+    }
+
+    if (!n){
+      // No matched detections/sits yet — but the panel still opened with the facts above.
+      h += '<div style="color:#9db0a3;margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;">No matched trail-cam detections or logged sits here yet. Activity counts, timing, and wind / pressure / temperature patterns fill in automatically as photos and sits accumulate at this spot.</div>';
+      h += '</div>';
+      return h;
+    }
+
+    // ---- Observed activity (needs detections) ----
     var day = evs.filter(function(e){ return !_isNightEvent(e); }), nightN = n - day.length;
     var bucks = evs.filter(function(e){ return e.isBuck; }).length;
-    var now = Date.now(), r7 = evs.filter(function(e){ return e.createdAt >= now - 7*86400000; }).length;
-    // Hunt pressure — from the hunt log at this site.
-    var hunts = (typeof huntEvents !== 'undefined' ? huntEvents : []).filter(function(h){ return h.siteId === siteId; });
-    var lastHunt = hunts.reduce(function(m,h){ return Math.max(m, h.checkInAt||0); }, 0);
+    var r7 = evs.filter(function(e){ return e.createdAt >= now - 7*86400000; }).length;
+    var hunts = (typeof huntEvents !== 'undefined' ? huntEvents : []).filter(function(h2){ return h2.siteId === siteId; });
+    var lastHunt = hunts.reduce(function(m,h2){ return Math.max(m, h2.checkInAt||0); }, 0);
     var daysSince = lastHunt ? Math.round((now - lastHunt)/86400000) : null;
-    // Daylight-only condition patterns (the huntable signal), sample-gated.
     var wind = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?e.weather.windDir:null; }, 8);
     var press = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?e.weather.pressureTrend:null; }, 8);
     var temp = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?tempBucket(e.weather.tempF):null; }, 8);
-    // Timing: median first-evening (sunset offset) & last-morning (sunrise offset), morning vs evening.
     var morn = day.filter(function(e){ return e.minFromSunrise!=null && e.minFromSunset!=null && Math.abs(e.minFromSunrise) <= Math.abs(e.minFromSunset); });
     var eve  = day.filter(function(e){ return e.minFromSunrise!=null && e.minFromSunset!=null && Math.abs(e.minFromSunset) < Math.abs(e.minFromSunrise); });
     var medMorn = _median(morn.map(function(e){ return e.minFromSunrise; }));
     var medEve  = _median(eve.map(function(e){ return e.minFromSunset; }));
-    var line = function(icon, txt){ return '<div style="margin:2px 0;">' + icon + ' ' + txt + '</div>'; };
-    var h = '<div style="font-size:11px;color:#dfeee4;line-height:1.5;border-top:1px solid #33443a;margin-top:6px;padding-top:7px;">';
-    h += '<div style="font-weight:700;margin-bottom:4px;">📊 Stand Profile</div>';
+    h += '<div style="margin-top:5px;padding-top:5px;border-top:1px dashed #2c3a31;"></div>';
     h += line('📈', n + ' detection' + (n===1?'':'s') + ' — ☀ ' + day.length + ' daylight · 🌙 ' + nightN + ' night · 🦌 ' + bucks + ' buck' + (bucks===1?'':'s'));
     h += line('🕐', 'Recent: ' + r7 + ' in the last 7 days');
     h += line('🏹', hunts.length ? (hunts.length + ' hunt' + (hunts.length===1?'':'s') + ' logged · last sat ' + (daysSince===0?'today':daysSince+' day'+(daysSince===1?'':'s')+' ago')) : 'No hunts logged here yet');
@@ -9523,7 +9541,7 @@
       : '';
     // Stand Profile — expands inline (computed lazily on first tap, not for every pin).
     var profileBtn = (activeModule === 'hunting')
-      ? '<button class="btn-ghost" data-act="standprofile" data-id="'+s.id+'" onclick="ocToggleStandProfile(this)" style="width:100%;margin:3px 0;font-size:11px;">📊 Stand Profile — tap to expand</button><div class="stand-profile" style="display:none;"></div>'
+      ? '<button class="btn-ghost" data-act="standprofile" data-id="'+s.id+'" onclick="event.stopPropagation();ocToggleStandProfile(this);" style="width:100%;margin:3px 0;font-size:11px;">📊 Stand Profile — tap to expand</button><div class="stand-profile" style="display:none;"></div>'
       : '';
     return '' +
       '<div class="pop">' +
