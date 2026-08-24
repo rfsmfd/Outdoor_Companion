@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 416</div>
+    <div id="buildBadge">BUILD 417</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17555,6 +17555,23 @@
       dateChips.appendChild(chip);
     });
     dateGroup.appendChild(dateChips);
+    // Custom range: show two date pickers only when Custom is selected (this is what was missing —
+    // picking Custom set the mode but revealed no inputs, so it silently behaved like All Time).
+    if (analyticsDateRange === 'custom'){
+      var _ymd = function(ms){ var d = new Date(ms); function p(n){ return (n<10?'0':'')+n; } return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); };
+      var crow = document.createElement('div');
+      crow.style.cssText = 'display:flex;gap:6px;margin-top:6px;align-items:center;';
+      var fromI = document.createElement('input'); fromI.type = 'date'; fromI.style.flex = '1'; fromI.title = 'From';
+      var toI = document.createElement('input'); toI.type = 'date'; toI.style.flex = '1'; toI.title = 'To';
+      if (analyticsCustomFrom) fromI.value = _ymd(analyticsCustomFrom);
+      if (analyticsCustomTo) toI.value = _ymd(analyticsCustomTo);
+      fromI.addEventListener('change', function(){ analyticsCustomFrom = fromI.value ? new Date(fromI.value + 'T00:00:00').getTime() : null; renderAnalytics(); });
+      toI.addEventListener('change', function(){ analyticsCustomTo = toI.value ? new Date(toI.value + 'T23:59:59').getTime() : null; renderAnalytics(); });
+      crow.appendChild(fromI);
+      crow.appendChild(document.createTextNode('→'));
+      crow.appendChild(toI);
+      dateGroup.appendChild(crow);
+    }
     bar.appendChild(dateGroup);
 
     // Property
