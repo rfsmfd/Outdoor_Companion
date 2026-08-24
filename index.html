@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 436</div>
+    <div id="buildBadge">BUILD 437</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9450,7 +9450,26 @@
       if (camHere) h += line('📷', escapeHtml(camHere.name) + ' deployed here' + (camHere.lastDeployedAt ? ' · ' + relTime(camHere.lastDeployedAt) : ''));
       var photoN = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return p.matchedSiteId === siteId; }).length;
       if (photoN) h += line('🖼', photoN + ' photo' + (photoN===1?'':'s') + ' filed to this spot');
-      if (typeof s.lat === 'number' && typeof s.lng === 'number') h += line('🧭', fmtCoord(s.lat) + ', ' + fmtCoord(s.lng));
+      if (typeof s.lat === 'number' && typeof s.lng === 'number') h += line('📌', fmtCoord(s.lat) + ', ' + fmtCoord(s.lng));
+
+      // ---- Terrain · Wind · Thermal — camera-free intel useful the moment a pin exists ----
+      // Land cover + current thermal phase are synchronous (already-loaded grid + SunCalc); the wind,
+      // LiDAR slope/aspect and scent-drift line are fetched async and dropped into the placeholder by
+      // fillStandTerrain() when the panel opens. Honors the camera-optional principle.
+      if (typeof s.lat === 'number' && typeof s.lng === 'number'){
+        h += '<div style="margin-top:5px;padding-top:5px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:10px;letter-spacing:.3px;">TERRAIN · WIND · THERMAL</div>';
+        var _prop = (typeof propWithCoverAt === 'function') ? propWithCoverAt(s.lat, s.lng) : null;
+        var _cov = (_prop && typeof coverTypeAt === 'function') ? coverTypeAt(_prop, s.lat, s.lng) : null;
+        if (_cov){
+          var _edge = standEdgeNote(_prop, s.lat, s.lng);
+          h += line('🌲', 'Cover: <b>' + escapeHtml(_cov.label) + '</b>' + (_edge ? ' · on a <b>' + escapeHtml(_edge) + '</b>' : ''));
+        } else {
+          h += line('🌲', '<span style="opacity:.7;">Cover not mapped here yet — run “Field vs woods” on this property to add it.</span>');
+        }
+        var _tp = (typeof thermalPhase === 'function') ? thermalPhase(s.lat, s.lng, Date.now()) : null;
+        if (_tp) h += line('🌡', 'Thermals now: <b>' + escapeHtml(_tp.label) + '</b>');
+        h += '<div class="stand-terrain" data-tsid="' + escapeHtml(s.id) + '" data-tfilled="0" style="margin:2px 0;opacity:.85;">💨 <span style="opacity:.7;">Reading live wind &amp; LiDAR slope…</span></div>';
+      }
     }
 
     if (!n){
@@ -9494,6 +9513,88 @@
     h += '<div style="color:#6f8377;font-size:9.5px;margin-top:6px;">Observed history at this spot — not a forecast. Cameras sample the spot, not the deer.</div>';
     h += '</div>';
     return h;
+  }
+  // Classify a land-cover code into a coarse habitat class, for edge detection.
+  function _coverClass(code){
+    if ('FRA'.indexOf(code) >= 0) return 'open';    // field / crop / pasture
+    if ('WHPC'.indexOf(code) >= 0) return 'woods';  // woods / hardwood / young pine / cutover
+    if ('DSO'.indexOf(code) >= 0) return 'wet';     // drainage / swamp / water
+    return null;
+  }
+  // Is this stand on a habitat edge? Checks the 8 neighboring cover cells; an edge (field↔woods, or a
+  // water/wetland margin) is prime — deer travel and stage along them. Returns a short label or null.
+  function standEdgeNote(prop, lat, lng){
+    var lc = prop && prop.landcover; if (!lc || !lc.grid) return null;
+    var idx = cellIndexAt(lc, lat, lng); if (idx < 0) return null;
+    var types = ensureTypes(lc), cols = lc.cols, rows = lc.rows, here = _coverClass(types.charAt(idx));
+    if (!here) return null;
+    var x = idx % cols, y = (idx / cols) | 0, others = {};
+    for (var dy = -1; dy <= 1; dy++){ for (var dx = -1; dx <= 1; dx++){
+      if (!dx && !dy) continue;
+      var nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+      var cl = _coverClass(types.charAt(ny * cols + nx)); if (cl && cl !== here) others[cl] = (others[cl] || 0) + 1;
+    }}
+    if (!Object.keys(others).length) return null;
+    if (others.wet) return 'water / wetland edge';
+    if (here === 'open' && others.woods) return 'field / woods edge';
+    if (here === 'woods' && others.open) return 'woods / field edge';
+    return 'cover edge';
+  }
+  // Async terrain readout — live wind (scentWeather), LiDAR slope+aspect (3DEP getSamples, same as the
+  // scent cones), thermal phase, and the resulting scent-drift bearing (combineScent). Dropped into the
+  // ".stand-terrain" placeholder when the profile opens, so the sync facts show instantly and this fills
+  // a beat later. Degrades gracefully: missing wind or elevation just drops that line, never throws.
+  async function fillStandTerrain(container, siteId){
+    var s = sites.filter(function(x){ return x.id === siteId; })[0];
+    if (!s || typeof s.lat !== 'number' || typeof s.lng !== 'number'){ container.innerHTML = ''; return; }
+    var L2 = function(icon, txt){ return '<div style="margin:2px 0;">' + icon + ' ' + txt + '</div>'; };
+    var wx = null; try { wx = await scentWeather(s.lat, s.lng); } catch(e){}
+    // LiDAR slope + aspect from 4 points around the stand (E,W,N,S), 35 m off — same math as the cones.
+    var slopeDeg = null, aspectBearing = null;
+    try {
+      var OFF = 35, dLat = OFF / 111320, dLng = OFF / (111320 * Math.cos(s.lat * Math.PI / 180));
+      var pts = [[s.lng + dLng, s.lat], [s.lng - dLng, s.lat], [s.lng, s.lat + dLat], [s.lng, s.lat - dLat]];
+      var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: pts, spatialReference: { wkid: 4326 } })) +
+        '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+      var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+      var data = await resp.json();
+      if (data && data.samples && data.samples.length >= 4){
+        var z = data.samples.map(function(v){ return (v && v.value != null) ? parseFloat(v.value) : NaN; });
+        var zE = z[0], zW = z[1], zN = z[2], zS = z[3];
+        if ([zE, zW, zN, zS].every(isFinite)){
+          var dzdx = (zE - zW) / (2 * OFF), dzdy = (zN - zS) / (2 * OFF);
+          slopeDeg = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
+          aspectBearing = (Math.atan2(-dzdx, -dzdy) * 180 / Math.PI + 360) % 360;  // downhill = the way the slope faces
+        }
+      }
+    } catch(e){}
+    var ph = (typeof thermalPhase === 'function') ? thermalPhase(s.lat, s.lng, Date.now()) : { up:false, label:'' };
+    var thermMph = 0, thermBearing = 0;
+    if (slopeDeg != null){
+      var cloud = (wx && wx.cloudCoverPct != null) ? wx.cloudCoverPct : 40;
+      var slopeF = Math.min(1, slopeDeg / 6), phaseF = ph.up === null ? 0.25 : (ph.label.indexOf('Night') >= 0 ? 0.6 : 1.0), skyF = 1 - 0.6 * (cloud / 100);
+      thermMph = slopeF * phaseF * skyF * 6;
+      thermBearing = ph.up === true ? (aspectBearing + 180) % 360 : aspectBearing;  // morning rides uphill, else drains downhill
+    }
+    var windFromDeg = (wx && wx.windDirDeg != null) ? wx.windDirDeg : null, windMph = wx ? wx.windMph : 0;
+    var sc = combineScent(thermBearing, thermMph, windFromDeg, windMph);
+    var out = '';
+    var windTxt = wx ? ((wx.windDirDisplay || wx.windDir || '?') + ' ' + (wx.windMph != null ? Math.round(wx.windMph) : '?') + ' mph') : null;
+    out += L2('💨', 'Wind now: <b>' + (windTxt ? escapeHtml(windTxt) : '—') + '</b>');
+    if (slopeDeg != null){
+      var steep = slopeDeg < 2 ? 'flat' : (slopeDeg < 6 ? 'gentle' : (slopeDeg < 12 ? 'moderate' : 'steep'));
+      out += L2('⛰', 'Slope: <b>' + slopeDeg.toFixed(0) + '°</b> (' + steep + ') · faces <b>' + scentCompass16(aspectBearing) + '</b>');
+    } else {
+      out += L2('⛰', '<span style="opacity:.7;">Slope/aspect unavailable for this spot.</span>');
+    }
+    if (!sc.calm){
+      var cohTxt = sc.coherence > 0.75 ? 'wind & thermal agree — clean' : (sc.coherence < 0.45 ? '⚠ wind vs thermal fighting — swirly' : 'wind & thermal partly aligned');
+      out += L2('🧭', 'Your scent drifts <b>' + scentCompass16(sc.bearing) + '</b> · ' + cohTxt);
+    } else {
+      out += L2('🧭', '<span style="opacity:.85;">Near-calm — scent hangs; hunt tight.</span>');
+    }
+    out += '<div style="color:#6f8377;font-size:9.5px;margin-top:3px;">Live wind + LiDAR slope, right now. Slip in so the drift arrow points away from where you expect deer.</div>';
+    container.innerHTML = out;
   }
   function popupHtml(s){
     var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
@@ -9707,6 +9808,12 @@
             html = '<div style="font-size:11px;color:#E8B04B;padding:6px 0;">Couldn’t build this stand’s profile:<br>' + escapeHtml((err && err.message) ? err.message : String(err)) + '</div>';
           }
           box.innerHTML = html; box.setAttribute('data-loaded','1');
+          // Fill the async terrain/wind/thermal line (live wind + LiDAR slope) once, after the sync facts render.
+          var terr = box.querySelector('.stand-terrain');
+          if (terr && terr.getAttribute('data-tfilled') !== '1'){
+            terr.setAttribute('data-tfilled','1');
+            try { fillStandTerrain(terr, id).then(function(){ if (typeof map!=='undefined' && map && map._popup && map._popup.update){ try { map._popup.update(); } catch(e){} } }); } catch(e){ console.error('stand terrain fill', e); }
+          }
         }
         box.style.display = 'block'; box.setAttribute('data-open','1'); btn.textContent = '📊 Stand Profile — tap to hide';
       } else {
