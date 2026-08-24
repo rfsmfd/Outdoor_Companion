@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 424</div>
+    <div id="buildBadge">BUILD 425</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16778,8 +16778,12 @@
     if (def.groupBy === 'sunriseband' || def.groupBy === 'sunsetband') labels.sort(function(a,b){ return solarBandLo(a) - solarBandLo(b); });
     else labels.sort(function(a,b){ return counts[b] - counts[a]; });
     var total = labels.reduce(function(s,l){ return s + counts[l]; }, 0);
-    var body = labels.length ? labels.map(function(l){ return l + ': ' + counts[l] + ' (' + (total>0?Math.round(counts[l]/total*100):0) + '%)'; }) : ['(no data for this dimension)'];
-    var entry = { title: describeQuery(), filters: describeFullFilters(), summary: all.length + ' detections', body: body };
+    var body = labels.length ? labels.map(function(l){ return l + ': ' + counts[l] + ' (' + (total>0?Math.round(counts[l]/total*100):0) + '%)'; }) : ['(no detections carry this data)'];
+    // Honest per-dimension sample: how many of his detections actually have this data, + a caution
+    // when it's thin (so a "60% on N wind" off 5 records reads as the anecdote it is, not a law).
+    var summary = (total < all.length ? (total + ' of ' + all.length + ' detections have this data') : (total + ' detections'))
+      + (total < 8 ? '  ⚠ very small — anecdote, not pattern' : (total < 15 ? '  ⚠ small sample — treat as a hint' : ''));
+    var entry = { title: describeQuery(), filters: describeFullFilters(), summary: summary, body: body };
     analyticsBuckProfileId = save.b; queryConditions = save.c; queryGroupBy = save.g;
     return entry;
   }
@@ -16790,7 +16794,20 @@
     var saveBuck = analyticsBuckProfileId; analyticsBuckProfileId = buckId;
     var all = buildAnalyticsEvents().filter(passesSharedAnalyticsFilter);
     analyticsBuckProfileId = saveBuck;
-    reportEntries.push({ title: '═════  MOVEMENT PROFILE: ' + name + '  ═════', filters: '', summary: all.length + ' total detections', body: [] });
+    // Recency + honesty header — "is he active NOW", and how much to trust the rest.
+    var now = Date.now();
+    var d3 = all.filter(function(e){ return e.createdAt >= now - 3*86400000; }).length;
+    var d7 = all.filter(function(e){ return e.createdAt >= now - 7*86400000; }).length;
+    var nightN = all.filter(function(e){ var w = (e.weatherStatus==='ok'&&e.weather)?e.weather:null; return w && w.sunPhase === 'Night'; }).length;
+    var dayN = all.length - nightN;
+    var hdrBody = [
+      'Recent: ' + d3 + ' in last 3 days · ' + d7 + ' in last 7 days · ' + all.length + ' all-time' + (d3 === 0 ? '  (nothing recent)' : ''),
+      'Daylight (non-night): ' + dayN + ' · Night: ' + nightN,
+      (all.length < 15
+        ? '⚠ Small overall sample (' + all.length + ') — everything below is a hint, not proof.'
+        : 'OBSERVED patterns — where/when he has been RECORDED, not predictions. Cameras sample the spot, not the animal; mind sample sizes and Site Context.')
+    ];
+    reportEntries.push({ title: '═════  MOVEMENT PROFILE: ' + name + '  ═════', filters: '', summary: all.length + ' total detections', body: hdrBody });
     MOVEMENT_PROFILE.forEach(function(def){ reportEntries.push(movementEntryFrom(all, buckId, def)); });
     persistReport(); updateReportButton();
     showToast('Movement Profile for ' + name + ' → report');
