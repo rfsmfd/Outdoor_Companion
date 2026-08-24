@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 427</div>
+    <div id="buildBadge">BUILD 428</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -11412,7 +11412,8 @@
       '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:12px;font-size:11.5px;line-height:1.6;">' +
         '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
         (per ? ('<br>⭐ Feeding — major <b>' + fmtSolWin(per.major1) + '</b> & <b>' + fmtSolWin(per.major2) + '</b><br><span style="color:#9db0a3;">minor ' + fmtSolWin(per.minor1) + ' & ' + fmtSolWin(per.minor2) + '</span>') : '') +
-      '</div>';
+      '</div>' +
+      ((buckProfiles && buckProfiles.length) ? '<button class="ht-profile" style="width:100%;margin-bottom:12px;background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:8px;padding:8px;font-size:12px;cursor:pointer;">🦌 See a buck\'s Movement Profile — reference</button>' : '');
     if (!spots.length){
       html += '<div style="font-size:12px;color:#9db0a3;">No spots with deer photos yet. Once your cameras log deer, they\'ll rank here for tonight.</div>';
     } else {
@@ -11443,6 +11444,7 @@
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     card.querySelector('.ht-close').addEventListener('click', close);
     var _htBack = card.querySelector('.ht-back'); if (_htBack) _htBack.addEventListener('click', function(){ close(); if (propsForModule().length > 1) showPropertyRanker(); else showForecastPanel(); });
+    var _htProf = card.querySelector('.ht-profile'); if (_htProf) _htProf.addEventListener('click', function(){ chooseBuckForTemplate('Movement Profile — reference', function(buckId){ showMovementProfileModal(buckId); }); });
     Array.prototype.forEach.call(card.querySelectorAll('.ht-spot'), function(el){
       el.addEventListener('click', function(){ var sid = el.getAttribute('data-sid'), la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng'));
         var st = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === sid; })[0];
@@ -16806,7 +16808,10 @@
     analyticsBuckProfileId = save.b; queryConditions = save.c; queryGroupBy = save.g;
     return entry;
   }
-  function runMovementProfile(buckId){
+  // Build the profile as an array of report-entry objects (header "what matters" + each break-down),
+  // WITHOUT touching the persistent report — so it can be either appended (Analytics) or just viewed
+  // read-only (the Plan-a-Hunt reference link).
+  function buildMovementProfileEntries(buckId){
     var bp = buckProfiles.filter(function(b){ return b.id === buckId; })[0];
     var name = buckId ? (bp ? bp.name : 'buck') : 'All bucks';
     var saveBuck = analyticsBuckProfileId; analyticsBuckProfileId = buckId;
@@ -16844,12 +16849,62 @@
     if (topC && topC !== '(not set)' && all.length && cc[topC]/all.length >= 0.9) facts.push('⚠ Nearly all detections are ' + topC + ' — likely site use, not free movement.');
     if (all.length && all.length < 15) facts.push('Small overall sample (' + all.length + ') — treat everything below as a hint.');
     if (!facts.length) facts.push('Enough spread to read the patterns below with normal caution.');
-    reportEntries.push({ title: '═════  MOVEMENT PROFILE: ' + name + '  ═════', filters: '',
-      summary: '🎯 What matters right now — ' + all.length + ' detections · Recent ' + d3 + '/3d, ' + d7 + '/7d · Daylight ' + dayN + ' vs Night ' + nightN, body: facts });
-    MOVEMENT_PROFILE.forEach(function(def){ reportEntries.push(movementEntryFrom(all, dayAll, buckId, def)); });
+    var entries = [{ title: '═════  MOVEMENT PROFILE: ' + name + '  ═════', filters: '',
+      summary: '🎯 What matters right now — ' + all.length + ' detections · Recent ' + d3 + '/3d, ' + d7 + '/7d · Daylight ' + dayN + ' vs Night ' + nightN, body: facts }];
+    MOVEMENT_PROFILE.forEach(function(def){ entries.push(movementEntryFrom(all, dayAll, buckId, def)); });
+    return { name: name, entries: entries };
+  }
+  function runMovementProfile(buckId){
+    var r = buildMovementProfileEntries(buckId);
+    r.entries.forEach(function(e){ reportEntries.push(e); });
     persistReport(); updateReportButton();
-    showToast('Movement Profile for ' + name + ' → report');
+    showToast('Movement Profile for ' + r.name + ' → report');
     openReportModal();
+  }
+  // Plain-text of a set of entries (reused by the read-only profile viewer).
+  function formatProfileText(entries){
+    var lines = [];
+    entries.forEach(function(e){
+      lines.push(e.title);
+      if (e.summary) lines.push('   ' + e.summary);
+      (e.body || []).forEach(function(l){ lines.push('   • ' + l); });
+      lines.push('');
+    });
+    return lines.join('\n');
+  }
+  // READ-ONLY profile viewer for the planning context — shows the same honest analysis WITHOUT adding
+  // it to the report or feeding any ranking. It's a window into the observed data, never a forecast.
+  function showMovementProfileModal(buckId){
+    var r = buildMovementProfileEntries(buckId);
+    var text = formatProfileText(r.entries);
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100064;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:620px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><div style="font-weight:800;font-size:16px;">🦌 ' + escapeHtml(r.name) + ' — Movement Profile</div><button class="mp-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:10.5px;color:#E8B04B;margin-bottom:8px;line-height:1.45;">Reference only — OBSERVED camera history, not a forecast. It does <b>not</b> affect the spot ranking above. Mind the sample-size and Site Context notes.</div>' +
+      '<textarea class="mp-text" readonly style="width:100%;height:320px;box-sizing:border-box;background:#16211b;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:10px;font-family:monospace;font-size:12px;line-height:1.5;resize:vertical;">' + escapeHtml(text) + '</textarea>' +
+      '<div style="display:flex;gap:8px;margin-top:10px;">' +
+        '<button class="mp-copy btn-primary" style="flex:2;">📋 Copy</button>' +
+        '<button class="mp-report btn-ghost" style="flex:1;">＋ Add to report</button>' +
+        '<button class="mp-done btn-ghost" style="flex:1;">Done</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    card.querySelector('.mp-x').addEventListener('click', close);
+    card.querySelector('.mp-done').addEventListener('click', close);
+    card.querySelector('.mp-copy').addEventListener('click', function(){
+      var ta = card.querySelector('.mp-text');
+      var ok = function(){ showToast('Profile copied'); };
+      if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(ta.value).then(ok, function(){ ta.select(); try{ document.execCommand('copy'); ok(); }catch(e){} }); }
+      else { ta.select(); try{ document.execCommand('copy'); ok(); }catch(e){} }
+    });
+    card.querySelector('.mp-report').addEventListener('click', function(){
+      r.entries.forEach(function(e){ reportEntries.push(e); });
+      persistReport(); updateReportButton(); showToast('Added to report'); close();
+    });
   }
 
   function renderQueryBuilder(container){
