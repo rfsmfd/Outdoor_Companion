@@ -1948,7 +1948,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 444</div>
+    <div id="buildBadge">BUILD 445</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9704,11 +9704,48 @@
     if (!sc.calm){
       var cohTxt = sc.coherence > 0.75 ? 'wind & thermal agree — clean' : (sc.coherence < 0.45 ? '⚠ wind vs thermal fighting — swirly' : 'wind & thermal partly aligned');
       out += L2('🧭', 'Your scent drifts <b>' + scentCompass16(sc.bearing) + '</b> · ' + cohTxt);
+      // The payoff: relate that drift to the deer's world — bedding you'll be winded from, trails/food your
+      // scent crosses. Uses your mapped bedding/feeding/water SITES + trail lines within ~300 yd.
+      out += _scentVsFeatures(s, sc.bearing);
     } else {
       out += L2('🧭', '<span style="opacity:.85;">Near-calm — scent hangs; hunt tight.</span>');
     }
     out += '<div style="color:#9db0a3;font-size:12px;margin-top:3px;">Live wind + LiDAR slope, right now. Slip in so the drift arrow points away from where you expect deer.</div>';
     container.innerHTML = out;
+  }
+  // Bearing difference 0–180.
+  function _angDiff(a, b){ var x = Math.abs(a - b) % 360; return x > 180 ? 360 - x : x; }
+  // Relate the scent-drift bearing to nearby mapped features: warn when it points into bedding (they'll wind
+  // you) or across a trail/food source (deer there catch you); reassure when it blows clear. ~300 yd radius.
+  function _scentVsFeatures(s, driftBearing){
+    if (typeof s.lat !== 'number' || typeof bearingBetween !== 'function') return '';
+    var R = 275, yd = function(m){ return Math.round(m * 1.0936); }, feats = [];
+    (typeof sites !== 'undefined' ? sites : []).forEach(function(o){
+      if (o.id === s.id || typeof o.lat !== 'number') return;
+      var kind = (o.type === 'bedding') ? 'bedding' : (o.type === 'feeding') ? 'food' : (o.type === 'water') ? 'water' : null;
+      if (!kind) return;
+      var d = distMeters(s.lat, s.lng, o.lat, o.lng); if (d > R || d < 5) return;
+      feats.push({ kind: kind, name: o.name || kind, d: d, br: bearingBetween(s.lat, s.lng, o.lat, o.lng) });
+    });
+    (typeof trails !== 'undefined' ? trails : []).forEach(function(tr){
+      if (!tr || !tr.points || !tr.points.length) return;
+      var best = null;
+      tr.points.forEach(function(p){ if (!p || p.lat == null) return; var d = distMeters(s.lat, s.lng, p.lat, p.lng); if (best == null || d < best.d) best = { d: d, la: p.lat, ln: p.lng }; });
+      if (best && best.d <= R && best.d > 5) feats.push({ kind: 'trail', name: tr.name || 'trail', d: best.d, br: bearingBetween(s.lat, s.lng, best.la, best.ln) });
+    });
+    if (!feats.length) return '';
+    var toward = feats.filter(function(f){ return _angDiff(driftBearing, f.br) <= 50; }).sort(function(a, b){ return a.d - b.d; });
+    var beddings = feats.filter(function(f){ return f.kind === 'bedding'; }).sort(function(a, b){ return a.d - b.d; });
+    if (toward.length){
+      var t0 = toward[0];
+      var why = t0.kind === 'bedding' ? 'they\'ll wind you' : (t0.kind === 'trail' ? 'deer on it catch your scent' : 'blows your scent into it');
+      return '<div style="margin:2px 0;color:#E8823F;">🚫 Scent drifting toward <b>' + escapeHtml(t0.name) + '</b> (' + escapeHtml(t0.kind) + ', ' + yd(t0.d) + ' yd ' + scentCompass16(t0.br) + ') — ' + why + '.</div>';
+    }
+    if (beddings.length){
+      var b0 = beddings[0];
+      return '<div style="margin:2px 0;color:#9ED17A;">✅ Scent blows clear of the nearest bedding (' + escapeHtml(b0.name) + ', ' + yd(b0.d) + ' yd ' + scentCompass16(b0.br) + ').</div>';
+    }
+    return '';
   }
   function popupHtml(s){
     var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
