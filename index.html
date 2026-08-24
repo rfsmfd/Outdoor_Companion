@@ -1819,6 +1819,7 @@
       <!-- FIELD FLOW — the daily-drivers up front (hunting only; hidden in fishing) -->
       <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:700;">🗓 Plan a Hunt — when &amp; where</button>
       <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt</button>
+      <button class="btn-ghost" id="fieldCardBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">📋 Field Card — this farm at a glance</button>
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
@@ -1951,7 +1952,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 458</div>
+    <div id="buildBadge">BUILD 459</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10056,6 +10057,83 @@
     if (focus) focus.addEventListener('click', function(){ close(); try { if (!scoutMode) setScoutMode(true); if (hot) map.flyTo([hot.lat, hot.lng], Math.max(map.getZoom(), 16)); } catch(e){} });
     back.appendChild(card); document.body.appendChild(back);
   }
+  // ---------- 📋 Field Card — the per-property hunt-day card, generated live from your data ----------
+  function _fcDist(m){ var yd = m * 1.0936; return yd < 880 ? (Math.round(yd) + ' yd') : ((m / 1609.34).toFixed(1) + ' mi'); }
+  function _fcWalk(m){ return Math.max(1, Math.round(m / 1.25 / 60)); }   // ~1.25 m/s through cover
+  function openFieldCard(){
+    var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
+    function inScope(s){ if (!prop) return true; if (s.propertyId === prop.id) return true; return (typeof pointInProperty === 'function' && typeof s.lat === 'number') ? pointInProperty(s.lat, s.lng, prop) : false; }
+    var now = Date.now(), since90 = now - 90 * 86400000;
+    var parking = sites.filter(function(s){ return s.type === 'access' && typeof s.lat === 'number' && inScope(s); });
+    var stands = sites.filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && inScope(s); });
+    var scoutMarks = sites.filter(function(s){ return s.type === 'scout' && !s.verified && inScope(s); });
+    // Build a data row per stand: rest, buck ring, recent camera, nearest parking + walk.
+    var rows = stands.map(function(s){
+      var hunts = (typeof huntEvents !== 'undefined' ? huntEvents : []).filter(function(h){ return h.module !== 'fishing' && h.siteId === s.id; });
+      var lastSit = hunts.reduce(function(m, h){ return Math.max(m, h.checkInAt || 0); }, 0);
+      var daysSince = lastSit ? Math.round((now - lastSit) / 86400000) : null;
+      var rest = standRestStatus(daysSince, hunts.length > 0);
+      var buck = !!(typeof _buckSites !== 'undefined' && _buckSites[s.id]);
+      var recent = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return p.matchedSiteId === s.id && (p.timestamp || 0) >= since90; }).length;
+      var np = null, nd = Infinity;
+      parking.forEach(function(pk){ var d = distMeters(s.lat, s.lng, pk.lat, pk.lng); if (d < nd){ nd = d; np = pk; } });
+      var restDays = (daysSince == null) ? 9999 : daysSince;   // never-hunted sorts as most rested
+      return { s: s, rest: rest, restDays: restDays, buck: buck, recent: recent, np: np, nd: nd };
+    }).sort(function(a, b){ return b.restDays - a.restDays; });   // most-rested first = freshest to hunt
+    var line = function(icon, txt){ return '<div style="margin:3px 0;">' + icon + ' ' + txt + '</div>'; };
+    var h = '<div style="font-size:13.5px;color:#dfeee4;line-height:1.5;">';
+    if (!prop) h += '<div style="color:#E8B04B;margin-bottom:6px;">Pick a farm in the top dropdown for a focused card. Showing all ground.</div>';
+    // Access
+    h += '<div style="margin-top:2px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">🅿️ ACCESS</div>';
+    h += parking.length ? line('🅿️', parking.map(function(p){ return escapeHtml(p.name); }).join(' · ')) : line('🅿️', '<span style="opacity:.7;">No parking/access points marked.</span>');
+    // Stands
+    h += '<div style="margin-top:8px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">🌲 STANDS — freshest (most rested) first</div>';
+    if (!rows.length){ h += line('🌲', '<span style="opacity:.7;">No hunt spots here yet.</span>'); }
+    rows.forEach(function(r){
+      var s = r.s, tEntry = getActiveTypes()[s.type], stype = s.standType || (tEntry ? tEntry.label : 'Stand');
+      var bits = [];
+      bits.push('<span style="color:' + r.rest.tone + ';">' + escapeHtml(r.rest.txt) + '</span>');
+      bits.push(r.recent ? ('📷 ' + r.recent + ' recent') : '<span style="color:#E8B04B;">⚠ no recent cam</span>');
+      if (r.np) bits.push('🅿️ ' + escapeHtml(r.np.name) + ' ' + _fcDist(r.nd) + ' · ~' + _fcWalk(r.nd) + ' min');
+      h += '<div class="fc-stand" data-sid="' + escapeHtml(s.id) + '" style="cursor:pointer;border-bottom:1px dashed #24382c;padding:8px 0;">' +
+        '<div style="font-weight:600;">' + escapeHtml(s.name) + (r.buck ? ' <span style="color:#E0B23A;">🦌</span>' : '') + ' <span style="color:#9db0a3;font-weight:400;font-size:12px;">· ' + escapeHtml(stype) + '</span></div>' +
+        '<div style="font-size:12px;color:#c7d6cc;margin-top:1px;">' + bits.join(' &nbsp;·&nbsp; ') + '</div>' +
+      '</div>';
+    });
+    // Scout marks
+    if (scoutMarks.length){
+      h += '<div style="margin-top:8px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">👁 SCOUT — unproven, go verify</div>';
+      scoutMarks.forEach(function(s){ var kd = scoutKindDef(s.scoutKind); h += line('👁', '<span style="color:#C79BEA;">' + escapeHtml(s.name) + '</span> <span style="color:#9db0a3;font-size:12px;">· ' + (kd ? escapeHtml(kd.label) : 'scout mark') + '</span>'); });
+    }
+    // Blind spots (huntable stands with no recent camera)
+    var blind = rows.filter(function(r){ return !r.recent; }).map(function(r){ return r.s.name; });
+    if (blind.length){
+      h += '<div style="margin-top:8px;color:#9db0a3;font-size:11.5px;letter-spacing:.3px;">📷 BLIND — no camera in 90 days</div>';
+      h += line('⚠', '<span style="color:#E8B04B;">' + blind.map(escapeHtml).join(' · ') + '</span> — get eyes here.');
+    }
+    h += '<div style="color:#9db0a3;font-size:12px;margin-top:8px;">Tap any stand for its full profile (terrain · wind · scent · history). Generated live — always current.</div></div>';
+    // Modal
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:480px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;"><div style="font-weight:800;font-size:17px;">📋 Field Card</div><button class="fc-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : 'All properties') + '</div>' + h +
+      '<div style="display:flex;gap:8px;margin-top:12px;"><button class="fc-copy" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:9px;font-weight:700;cursor:pointer;">📋 Copy as text</button></div>';
+    card.querySelector('.fc-x').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    Array.prototype.forEach.call(card.querySelectorAll('.fc-stand'), function(el){ el.addEventListener('click', function(){ close(); openStandProfileModal(el.getAttribute('data-sid')); }); });
+    card.querySelector('.fc-copy').addEventListener('click', function(){
+      var txt = 'FIELD CARD — ' + (prop ? prop.name : 'All properties') + '\n\nACCESS: ' + (parking.map(function(p){ return p.name; }).join(', ') || 'none') + '\n\nSTANDS (freshest first):\n' +
+        rows.map(function(r){ return '• ' + r.s.name + (r.buck ? ' [buck]' : '') + ' — ' + r.rest.txt + (r.recent ? (' · ' + r.recent + ' recent pics') : ' · no recent cam') + (r.np ? (' · nearest ' + r.np.name + ' ' + _fcDist(r.nd)) : ''); }).join('\n') +
+        (scoutMarks.length ? ('\n\nSCOUT (unproven): ' + scoutMarks.map(function(s){ return s.name; }).join(', ')) : '') +
+        (blind.length ? ('\n\nBLIND (no recent cam): ' + blind.join(', ')) : '');
+      try { navigator.clipboard.writeText(txt); showToast('Field card copied 📋'); } catch(e){ showToast('Copy not available'); }
+    });
+    back.appendChild(card); document.body.appendChild(back);
+  }
   function popupHtml(s){
     var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
     var camInfo = '';
@@ -11496,6 +11574,7 @@
       if (typeof setBathyTap === 'function') setBathyTap(false);
     }
     var _htb = document.getElementById('huntTodayBtn'); if (_htb) _htb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _fcb = document.getElementById('fieldCardBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _hmb = document.getElementById('huntModeBtn'); if (_hmb) _hmb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _wib = document.getElementById('walkInBtn'); if (_wib) _wib.style.display = activeModule === 'hunting' ? 'block' : 'none';
@@ -12782,6 +12861,8 @@
     if (modeBtn) modeBtn.addEventListener('click', function(){ setScoutMode(!scoutMode); showToast(scoutMode ? '🔍 Scout Mode ON — your conjecture marks & all sign are showing' : 'Scout Mode off — back to your clean hunt map'); });
     var drawBtn = document.getElementById('scoutDrawBtn');
     if (drawBtn) drawBtn.addEventListener('click', function(){ startScoutDraw(); });
+    var fcBtn = document.getElementById('fieldCardBtn');
+    if (fcBtn) fcBtn.addEventListener('click', function(){ if (typeof openFieldCard === 'function') openFieldCard(); });
   })();
 
   map.on('click', function(e){
