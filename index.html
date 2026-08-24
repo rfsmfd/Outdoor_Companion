@@ -1949,7 +1949,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 453</div>
+    <div id="buildBadge">BUILD 454</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7758,6 +7758,19 @@
     row.querySelector('.toggle-switch').addEventListener('click', function(){ setScoutMode(!scoutMode); });
     return row;
   }
+  function trayCameraCoverageRow(){
+    var row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.innerHTML =
+      '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">📷</span> Camera coverage (3 mo) ' +
+        '<select id="covRadiusSel" style="margin-left:6px;padding:2px 4px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.28);color:var(--text);font-size:11px;"><option value="100">100 yd</option><option value="150">150 yd</option><option value="200">200 yd</option></select></div>' +
+      '<div class="toggle-switch' + (cameraCoverageOn ? ' on' : '') + '"><div class="knob"></div></div>';
+    var sel = row.querySelector('#covRadiusSel'); sel.value = String(cameraCoverageYd);
+    sel.addEventListener('click', function(e){ e.stopPropagation(); });
+    sel.addEventListener('change', function(e){ e.stopPropagation(); cameraCoverageYd = parseInt(this.value, 10) || 100; renderCameraCoverage(); });
+    row.querySelector('.toggle-switch').addEventListener('click', function(){ cameraCoverageOn = !cameraCoverageOn; renderChips(); renderCameraCoverage(); });
+    return row;
+  }
   // Builds the WHOLE tray (Sites + Sightings together, grouped by kind). renderObsTypeToggles is kept as
   // an alias so the many existing callers that refresh "just the obs toggles" still repaint everything.
   function renderChips(){
@@ -7773,7 +7786,7 @@
     container.appendChild(traySection('Habitat', ['bedding','feeding','water'].map(traySiteRow)));
     container.appendChild(traySection('Sign &amp; Sightings', ['buck','doe','bear','turkey','scrape','rub','track','trail','hunt','custom'].map(trayObsRow)));
     container.appendChild(traySection('Other Markers', ['sighting','custom'].map(traySiteRow)));   // 'sighting' is retired (hidden) → only Custom Point shows
-    container.appendChild(traySection('Planning', [trayScoutModeRow()].filter(Boolean)));   // Scout Mode = the markup board (governs conjecture marks + all sign)
+    container.appendChild(traySection('Planning', [trayScoutModeRow(), trayCameraCoverageRow()].filter(Boolean)));   // Scout Mode board + camera coverage-gap map
   }
   function renderObsTypeToggles(){ renderChips(); }
 
@@ -10693,7 +10706,26 @@
     });
   }
 
-  function renderAll(){ renderMarkers(); renderList(); if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries(); if (typeof renderLandcoverOverlay === 'function') renderLandcoverOverlay(); }
+  function renderAll(){ renderMarkers(); renderList(); if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries(); if (typeof renderLandcoverOverlay === 'function') renderLandcoverOverlay(); if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); }
+  // ---------- 📷 Camera coverage map — "where am I blind?" ----------
+  // Rings every spot a camera has SAT AND recorded photos in the last 3 months. The GAPS (uncircled ground
+  // inside your property) are the parts of the farm with no recent surveillance — where to scout/deploy next.
+  // Radius is adjustable (100 yd default → up to 200; past that you start blending separate deer's home ranges).
+  var coverageLayer = null, cameraCoverageOn = false, cameraCoverageYd = 100;
+  function renderCameraCoverage(){
+    if (!coverageLayer) coverageLayer = L.layerGroup();
+    coverageLayer.clearLayers();
+    if (!cameraCoverageOn){ if (map.hasLayer(coverageLayer)) map.removeLayer(coverageLayer); return; }
+    if (!map.hasLayer(coverageLayer)) coverageLayer.addTo(map);
+    var since = Date.now() - 90 * 86400000, covered = {};
+    (typeof importedPhotos !== 'undefined' ? importedPhotos : []).forEach(function(p){ if (p && p.matchedSiteId && (p.timestamp || 0) >= since) covered[p.matchedSiteId] = true; });
+    var R = cameraCoverageYd * 0.9144;   // yards → meters
+    (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
+      if (!covered[s.id] || typeof s.lat !== 'number') return;
+      if (typeof passesPropertyFilter === 'function' && !passesPropertyFilter(s)) return;
+      L.circle([s.lat, s.lng], { radius: R, color: '#4CC68A', weight: 1, opacity: 0.55, fillColor: '#4CC68A', fillOpacity: 0.14, interactive: false }).addTo(coverageLayer);
+    });
+  }
 
   // ---------- observation rendering ----------
   // Distinguishes an actual fish species catch (needs weight/length/tag/photo) from
