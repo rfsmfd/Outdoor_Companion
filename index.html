@@ -1948,7 +1948,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 450</div>
+    <div id="buildBadge">BUILD 451</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9698,7 +9698,7 @@
     var L2 = function(icon, txt){ return '<div style="margin:2px 0;">' + icon + ' ' + txt + '</div>'; };
     var wx = null; try { wx = await scentWeather(s.lat, s.lng); } catch(e){}
     // LiDAR slope + aspect from 4 points around the stand (E,W,N,S), 35 m off — same math as the cones.
-    var slopeDeg = null, aspectBearing = null;
+    var slopeDeg = null, aspectBearing = null, elevFt = null;
     try {
       var OFF = 35, dLat = OFF / 111320, dLng = OFF / (111320 * Math.cos(s.lat * Math.PI / 180));
       var pts = [[s.lng + dLng, s.lat], [s.lng - dLng, s.lat], [s.lng, s.lat + dLat], [s.lng, s.lat - dLat]];
@@ -9713,6 +9713,7 @@
           var dzdx = (zE - zW) / (2 * OFF), dzdy = (zN - zS) / (2 * OFF);
           slopeDeg = Math.atan(Math.hypot(dzdx, dzdy)) * 180 / Math.PI;
           aspectBearing = (Math.atan2(-dzdx, -dzdy) * 180 / Math.PI + 360) % 360;  // downhill = the way the slope faces
+          elevFt = ((zE + zW + zN + zS) / 4) * 3.28084;   // center elevation (avg of the 4), meters → feet for mountain hunters
         }
       }
     } catch(e){}
@@ -9729,11 +9730,14 @@
     var out = '';
     var windTxt = wx ? ((wx.windDirDisplay || wx.windDir || '?') + ' ' + (wx.windMph != null ? Math.round(wx.windMph) : '?') + ' mph') : null;
     out += L2('💨', 'Wind now: <b>' + (windTxt ? escapeHtml(windTxt) : '—') + '</b>');
+    var elevTxt = (elevFt != null) ? (Math.round(elevFt).toLocaleString() + ' ft') : null;
     if (slopeDeg != null){
       var steep = slopeDeg < 2 ? 'flat' : (slopeDeg < 6 ? 'gentle' : (slopeDeg < 12 ? 'moderate' : 'steep'));
-      out += L2('⛰', 'Slope: <b>' + slopeDeg.toFixed(0) + '°</b> (' + steep + ') · faces <b>' + scentCompass16(aspectBearing) + '</b>');
+      out += L2('⛰', (elevTxt ? '<b>' + elevTxt + '</b> · ' : '') + 'slope <b>' + slopeDeg.toFixed(0) + '°</b> (' + steep + ') · faces <b>' + scentCompass16(aspectBearing) + '</b>');
+    } else if (elevTxt){
+      out += L2('⛰', 'Elevation <b>' + elevTxt + '</b>');
     } else {
-      out += L2('⛰', '<span style="opacity:.7;">Slope/aspect unavailable for this spot.</span>');
+      out += L2('⛰', '<span style="opacity:.7;">Elevation/slope unavailable for this spot.</span>');
     }
     if (!sc.calm){
       var cohTxt = sc.coherence > 0.75 ? 'wind & thermal agree — clean' : (sc.coherence < 0.45 ? '⚠ wind vs thermal fighting — swirly' : 'wind & thermal partly aligned');
