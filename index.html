@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 437</div>
+    <div id="buildBadge">BUILD 438</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9641,9 +9641,10 @@
     var contextBtn = (activeModule === 'hunting' && isMine)
       ? '<button class="btn-ghost" data-act="context" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">🏷 Context: ' + (_ctxKey ? escapeHtml(siteContextLabel(_ctxKey)) : 'not set — tap to set') + '</button>'
       : '';
-    // Stand Profile — expands inline (computed lazily on first tap, not for every pin).
+    // Stand Profile — opens a full modal panel (like Site Context). Popups are too small/fiddly for the
+    // two-level profile the spec calls for, and inline-in-popup expansion proved unreliable in the field.
     var profileBtn = (activeModule === 'hunting')
-      ? '<button class="btn-ghost" data-act="standprofile" data-id="'+s.id+'" onclick="event.stopPropagation();ocToggleStandProfile(this);" style="width:100%;margin:3px 0;font-size:11px;">📊 Stand Profile — tap to expand</button><div class="stand-profile" style="display:none;"></div>'
+      ? '<button class="btn-ghost" data-act="standprofile" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">📊 Stand Profile — tap to open</button>'
       : '';
     return '' +
       '<div class="pop">' +
@@ -9770,9 +9771,9 @@
     });
     var contextBtn2 = node.querySelector('[data-act="context"]');
     if (contextBtn2) contextBtn2.addEventListener('click', function(){ map.closePopup(); openSiteContextEditor(id); });
-    // NOTE: the Stand Profile expand button is handled by a single DELEGATED document listener
-    // (installStandProfileToggle, below), NOT bound here — delegation can't be "missed" if a popup
-    // re-renders and survives Leaflet swapping the popup content node. See that function.
+    // Stand Profile — same proven path as Context: close the popup, open a full modal panel.
+    var profBtn = node.querySelector('[data-act="standprofile"]');
+    if (profBtn) profBtn.addEventListener('click', function(){ map.closePopup(); openStandProfileModal(id); });
     var huntableBtn = node.querySelector('[data-act="huntable"]');
     if (huntableBtn) huntableBtn.addEventListener('click', async function(){
       var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s) return;
@@ -9783,45 +9784,35 @@
     });
   }
 
-  // Stand Profile expand/collapse. History: per-popup addEventListener and a document-delegated listener
-  // BOTH failed in the field ("button highlights but nothing opens"). The bulletproof binding is an inline
-  // onclick attribute ON the button itself (popupHtml adds onclick="ocToggleStandProfile(this)") — it fires
-  // on the target element directly, immune to event delegation, Leaflet's popup propagation handling, and
-  // popup content rebuilds. Exposed on window so the inline handler in the (Leaflet-rendered) popup can
-  // reach it; it still closes over standProfileHtml/escapeHtml/map. The panel div is the button's next
-  // sibling. On a build error the panel shows the ACTUAL message so a field failure self-reports.
-  window.ocToggleStandProfile = function(btn){
-    try{
-      var box = btn.nextElementSibling;
-      if (!box || (' ' + box.className + ' ').indexOf(' stand-profile ') < 0){
-        box = btn.parentNode ? btn.parentNode.querySelector('.stand-profile') : null;
-      }
-      if (!box){ if (typeof showToast === 'function') showToast('Stand Profile panel not found — please refresh.'); return; }
-      var id = btn.getAttribute('data-id');
-      var isOpen = box.getAttribute('data-open') === '1';
-      if (!isOpen){
-        if (!box.getAttribute('data-loaded')){
-          var html;
-          try { html = standProfileHtml(id); }
-          catch(err){
-            console.error('Outdoor Companion: stand profile build failed', err);
-            html = '<div style="font-size:11px;color:#E8B04B;padding:6px 0;">Couldn’t build this stand’s profile:<br>' + escapeHtml((err && err.message) ? err.message : String(err)) + '</div>';
-          }
-          box.innerHTML = html; box.setAttribute('data-loaded','1');
-          // Fill the async terrain/wind/thermal line (live wind + LiDAR slope) once, after the sync facts render.
-          var terr = box.querySelector('.stand-terrain');
-          if (terr && terr.getAttribute('data-tfilled') !== '1'){
-            terr.setAttribute('data-tfilled','1');
-            try { fillStandTerrain(terr, id).then(function(){ if (typeof map!=='undefined' && map && map._popup && map._popup.update){ try { map._popup.update(); } catch(e){} } }); } catch(e){ console.error('stand terrain fill', e); }
-          }
-        }
-        box.style.display = 'block'; box.setAttribute('data-open','1'); btn.textContent = '📊 Stand Profile — tap to hide';
-      } else {
-        box.style.display = 'none'; box.setAttribute('data-open','0'); btn.textContent = '📊 Stand Profile — tap to expand';
-      }
-      if (typeof map !== 'undefined' && map && map._popup && map._popup.update){ try { map._popup.update(); } catch(e){} }
-    }catch(e){ console.error('Outdoor Companion: stand profile toggle error', e); if (typeof showToast === 'function') showToast('Stand Profile error: ' + (e && e.message ? e.message : e)); }
-  };
+  // Stand Profile — opens in a full MODAL overlay (same reliable path as Site Context), not an in-popup
+  // expansion. History: per-popup addEventListener, a document-delegated listener, and an inline onclick
+  // all proved unreliable inside the Leaflet popup in the field. The modal is a document-level overlay, so
+  // it can't be swallowed by popup rebuild/close/propagation quirks — and it's the right home for the
+  // two-level profile the spec calls for (answer first, evidence below). Bound in bindPopupActions.
+  function openStandProfileModal(siteId){
+    var s = sites.filter(function(x){ return x.id === siteId; })[0];
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:480px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    var body;
+    try { body = standProfileHtml(siteId); }
+    catch(err){ console.error('Outdoor Companion: stand profile build failed', err); body = '<div style="color:#E8B04B;font-size:12px;">Couldn’t build this profile: ' + escapeHtml((err && err.message) ? err.message : String(err)) + '</div>'; }
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">' +
+        '<div style="font-weight:800;font-size:17px;">📊 ' + (s ? escapeHtml(s.name) : 'Stand Profile') + '</div>' +
+        '<button class="sp-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button>' +
+      '</div>' +
+      '<div class="sp-body">' + body + '</div>';
+    card.querySelector('.sp-x').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    document.addEventListener('keydown', function esc(e){ if (e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc); } });
+    back.appendChild(card); document.body.appendChild(back);
+    // Fill the async terrain/wind/thermal line (live wind + LiDAR slope) into the placeholder.
+    var terr = card.querySelector('.stand-terrain');
+    if (terr){ try { fillStandTerrain(terr, siteId); } catch(e){ console.error('stand terrain fill', e); } }
+  }
 
   // ---------- Waypoint import (bring stands/markers in from other apps) ----------
   // HuntStand / onX / Google Earth / ArcGIS / GPS units all EXPORT a file; we read the common ones and
