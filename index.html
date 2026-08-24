@@ -1948,7 +1948,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 446</div>
+    <div id="buildBadge">BUILD 447</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9512,6 +9512,11 @@
     h += line('🪑', all.length + ' sit' + (all.length === 1 ? '' : 's') + (adhoc ? (' <span style="color:#9db0a3;">(' + adhoc + ' off-stand nearby)</span>') : '') + (totalHrs >= 1 ? (' · ' + (totalHrs >= 10 ? Math.round(totalHrs) : totalHrs.toFixed(1)) + 'h total') : ''));
     h += line('👀', deer + ' deer seen from here' + (bucks ? (' · ' + bucks + ' buck' + (bucks === 1 ? '' : 's')) : '') + (totalHrs >= 1 ? (' · <b>' + (deer / totalHrs).toFixed(1) + '</b>/hr') : ''));
     if (shots || harvests) h += line('🎯', shots + ' shot opportunit' + (shots === 1 ? 'y' : 'ies') + (missed ? (' <span style="color:#9db0a3;">(' + missed + ' missed)</span>') : '') + (harvests ? (' · <b>' + harvests + ' harvest' + (harvests === 1 ? '' : 's') + '</b>') : ''));
+    // Attribution — who else has sat this stand (shared stand truth stays counted; you just see who).
+    var byOthers = {};
+    all.forEach(function(h2){ var nm = h2.sitLog && h2.sitLog.hunter; if (nm) byOthers[nm] = (byOthers[nm] || 0) + 1; });
+    var otherNames = Object.keys(byOthers);
+    if (otherNames.length) h += line('🧑‍🤝‍🧑', 'Also sat by ' + otherNames.map(function(nm){ return '<b>' + escapeHtml(nm) + '</b> (' + byOthers[nm] + ')'; }).join(', '));
     h += line('🛌', '<b style="color:' + rest.tone + ';">' + rest.txt + '</b>');
     // Morning vs evening (deer/hr), gated at >=3 completed sits per side.
     var mSits = [], eSits = [], avg = function(a){ return a.reduce(function(s2, x){ return s2 + x; }, 0) / a.length; };
@@ -14275,6 +14280,19 @@
   // into the cross-property ranker, the stand ranking, bucks-in-play, and each buck's movement timeline. Camera-
   // optional by design: this IS the sightings data the whole planner leans on when cameras are thin.
   var SITLOG_ACT = [{ k: 'dead', label: '💤 Dead' }, { k: 'slow', label: '🐾 Slow' }, { k: 'steady', label: '🦌 Steady' }, { k: 'hot', label: '🔥 Hot' }];
+  // Hunter roster — for attributing a sit to whoever actually sat it (you, or a buddy who hunts your ground).
+  // Persisted locally; grows as you add names. "" = you (self). Keeps a buddy's shots/sightings tagged so
+  // shared stand truth (deer moved through, stand was pressured) stays separate from personal shooting stats.
+  var HUNTERS_LS_KEY = 'outdoor_companion_hunters';
+  function loadHunters(){ try { var r = JSON.parse(localStorage.getItem(HUNTERS_LS_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch(e){ return []; } }
+  function saveHunters(list){ try { localStorage.setItem(HUNTERS_LS_KEY, JSON.stringify(list)); } catch(e){} }
+  function addHunterName(name){ name = (name || '').trim(); if (!name) return null; var l = loadHunters(); if (l.map(function(x){ return x.toLowerCase(); }).indexOf(name.toLowerCase()) < 0){ l.push(name); saveHunters(l); } return name; }
+  function hunterOptions(sel){
+    var opts = '<option value=""' + (!sel ? ' selected' : '') + '>Me</option>';
+    loadHunters().forEach(function(nm){ opts += '<option value="' + escapeHtml(nm) + '"' + (sel === nm ? ' selected' : '') + '>' + escapeHtml(nm) + '</option>'; });
+    opts += '<option value="__add__">➕ Add a hunter…</option>';
+    return opts;
+  }
   function _logHuntStands(){ return (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && (typeof passesPropertyFilter !== 'function' || passesPropertyFilter(s)); }); }
   function _logPropIdFor(stand){ if (stand.propertyId) return stand.propertyId; var p = (typeof properties !== 'undefined' ? properties : []).filter(function(x){ return (!x.module || x.module === activeModule) && pointInProperty(stand.lat, stand.lng, x); })[0]; return p ? p.id : null; }
   function showSitLog(hunt){
@@ -14297,7 +14315,7 @@
       });
     }
     var _prefTotal = _pref.does + _pref.unknown + Object.keys(_pref.buckIds).length;
-    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: null, does: _pref.does, unknown: _pref.unknown, bucks: {}, harvest: null, shotResult: null };
+    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: null, does: _pref.does, unknown: _pref.unknown, bucks: {}, harvest: null, shotResult: null, hunter: (hunt && hunt.sitLog && hunt.sitLog.hunter) || null };
     Object.keys(_pref.buckIds).forEach(function(bid){ st.bucks[bid] = true; });
     var back = document.createElement('div'); back.id = 'sitLogPanel'; back.style.cssText = 'position:fixed;inset:0;z-index:100012;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;overflow:auto;';
     var card = document.createElement('div'); card.style.cssText = 'background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;width:440px;max-width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 14px 44px rgba(0,0,0,.6);';
@@ -14312,6 +14330,8 @@
       '<div id="slRollup" style="display:none;font-size:11.5px;color:#bcd18a;background:rgba(124,203,124,.1);border-radius:9px;padding:9px 11px;margin-bottom:12px;line-height:1.5;"></div>' +
       '<div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Stand you sat</div>' +
       '<select id="slStand" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;margin-bottom:12px;">' + standOpts + '</select>' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Who sat it?</div>' +
+      '<select id="slHunter" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;margin-bottom:12px;">' + hunterOptions(st.hunter) + '</select>' +
       '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">How was the movement?</div>' +
       '<div style="display:flex;gap:6px;margin-bottom:13px;">' + SITLOG_ACT.map(function(a){ return '<button class="sl-act" data-k="' + a.k + '" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">' + a.label + '</button>'; }).join('') + '</div>' +
       '<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:13px;">' + step('does', '🦌 Does seen', 0) + step('unknown', '🦌 Bucks (unnamed)', 0) + '</div>' +
@@ -14335,6 +14355,16 @@
     card.querySelector('#slX').addEventListener('click', close);
     card.querySelector('#slCancel').addEventListener('click', close);
     card.querySelector('#slStand').addEventListener('change', function(){ st.standId = this.value; });
+    var slHunter = card.querySelector('#slHunter');
+    slHunter.addEventListener('change', function(){
+      if (this.value === '__add__'){
+        var nm = (window.prompt('Add a hunter’s name (a buddy who hunts your stands):', '') || '').trim();
+        if (nm){ addHunterName(nm); st.hunter = nm; } else { st.hunter = null; }
+        slHunter.innerHTML = hunterOptions(st.hunter);   // rebuild so the new name is an option, selected
+      } else {
+        st.hunter = this.value || null;
+      }
+    });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(b){ b.addEventListener('click', function(){ st.activity = b.getAttribute('data-k'); Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(x){ var on = x.getAttribute('data-k') === st.activity; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-buck'), function(b){ b.addEventListener('click', function(){ var id = b.getAttribute('data-bid'); st.bucks[id] = !st.bucks[id]; var on = st.bucks[id]; b.style.border = '1px solid ' + (on ? '#E8B04B' : '#3c4d42'); b.style.background = on ? '#3a3320' : '#1E2B23'; }); });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(b){ b.addEventListener('click', function(){ st.harvest = b.getAttribute('data-h') || null; Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(x){ var on = (x.getAttribute('data-h') || null) === st.harvest; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
@@ -14356,7 +14386,7 @@
     card.querySelector('#slSave').addEventListener('click', function(){
       var stand = _logHuntStands().filter(function(s){ return s.id === st.standId; })[0]; if (!stand){ showToast('Pick a stand.'); return; }
       var notes = (card.querySelector('#slNotes').value || '').trim(), pid = _logPropIdFor(stand), created = [];
-      function mk(type, buckId, count, harv){ var o = { id: uid(), type: type, lat: stand.lat, lng: stand.lng, approx: false, siteId: stand.id, propertyId: pid, createdAt: st.sitTime, moonPhase: getMoonPhase(new Date(st.sitTime)), solunarPeriod: classifyEventSolunarPeriod(new Date(st.sitTime), stand.lat, stand.lng), weather: null, weatherStatus: 'pending', fromSit: true, activity: st.activity }; if (buckId) o.buckProfileId = buckId; if (count && count > 1) o.count = count; if (harv) o.harvest = true; if (notes) o.note = notes; return o; }
+      function mk(type, buckId, count, harv){ var o = { id: uid(), type: type, lat: stand.lat, lng: stand.lng, approx: false, siteId: stand.id, propertyId: pid, createdAt: st.sitTime, moonPhase: getMoonPhase(new Date(st.sitTime)), solunarPeriod: classifyEventSolunarPeriod(new Date(st.sitTime), stand.lat, stand.lng), weather: null, weatherStatus: 'pending', fromSit: true, activity: st.activity }; if (buckId) o.buckProfileId = buckId; if (count && count > 1) o.count = count; if (harv) o.harvest = true; if (notes) o.note = notes; if (st.hunter) o.hunter = st.hunter; return o; }
       // DELTA only — the prefilled sightings already exist as observations, so we create just what you ADDED.
       var namedSeen = Object.keys(st.bucks).filter(function(b){ return st.bucks[b]; });
       var doeDelta = Math.max(0, st.does - _pref.does), unkDelta = Math.max(0, st.unknown - _pref.unknown);
@@ -14369,7 +14399,7 @@
       if (st.harvest === 'doe'){ var _dh = created.filter(function(o){ return o.type === 'doe'; })[0]; if (_dh) _dh.harvest = true; else created.push(mk('doe', null, 1, true)); }
       if (!created.length && !st.activity && !notes && _prefTotal === 0){ showToast('Nothing logged yet — set the movement, deer seen, or a note.'); return; }
       created.forEach(function(o){ observations.push(o); saveObservation(o).catch(function(e){ console.error('Outdoor Companion: sit-log obs save failed', e); }); });
-      if (st.hunt){ st.hunt.observationIds = (st.hunt.observationIds || []).concat(created.map(function(o){ return o.id; })); st.hunt.sitLog = { activity: st.activity, does: st.does, buckIds: namedSeen, unknownBucks: st.unknown, harvest: st.harvest, shotResult: st.shotResult, shotOpp: !!(st.shotResult || st.harvest), notes: notes, loggedAt: Date.now() }; saveHuntEvent(st.hunt).catch(function(e){ console.error('Outdoor Companion: sit-log hunt save failed', e); }); }
+      if (st.hunt){ st.hunt.observationIds = (st.hunt.observationIds || []).concat(created.map(function(o){ return o.id; })); st.hunt.sitLog = { activity: st.activity, does: st.does, buckIds: namedSeen, unknownBucks: st.unknown, harvest: st.harvest, shotResult: st.shotResult, shotOpp: !!(st.shotResult || st.harvest), hunter: st.hunter || null, notes: notes, loggedAt: Date.now() }; saveHuntEvent(st.hunt).catch(function(e){ console.error('Outdoor Companion: sit-log hunt save failed', e); }); }
       try { renderObsMarkers(); } catch (e) {}
       if (typeof activeTab !== 'undefined' && activeTab === 'log' && typeof renderLogList === 'function') renderLogList();
       var seen = st.does + st.unknown + namedSeen.length;
