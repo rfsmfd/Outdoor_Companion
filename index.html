@@ -1948,7 +1948,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 449</div>
+    <div id="buildBadge">BUILD 450</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9578,7 +9578,11 @@
 
     // ---- Always-on site facts: render useful info even with ZERO detections/sits ----
     if (s){
-      if (s.standPhoto) h += '<img src="' + s.standPhoto + '" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin:2px 0 6px;">';
+      if (s.standPhoto){
+        h += '<img src="' + s.standPhoto + '" class="sp-photo" data-sid="' + escapeHtml(s.id) + '" title="Tap to retake" style="width:100%;max-height:160px;object-fit:cover;border-radius:8px;margin:2px 0 6px;cursor:pointer;">';
+      } else if (s.type === 'stand' || s.type === 'scout'){
+        h += '<div class="sp-addphoto" data-sid="' + escapeHtml(s.id) + '" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;width:100%;height:96px;border:1.5px dashed #4a5d50;border-radius:8px;margin:2px 0 8px;cursor:pointer;color:#9db0a3;background:#20302a;"><div style="font-size:26px;line-height:1;">📷</div><div style="font-size:12px;">Add a photo</div></div>';
+      }
       var tEntry = getActiveTypes()[s.type];
       if (tEntry) h += line('📍', escapeHtml(tEntry.label) + (siteIsHuntable(s) ? ' · 🏹 hunt spot' : ' · 👁 observation'));
       var _si = standInfoLine(s);
@@ -10082,9 +10086,33 @@
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     document.addEventListener('keydown', function esc(e){ if (e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc); } });
     back.appendChild(card); document.body.appendChild(back);
-    // Fill the async terrain/wind/thermal line (live wind + LiDAR slope) into the placeholder.
-    var terr = card.querySelector('.stand-terrain');
-    if (terr){ try { fillStandTerrain(terr, siteId); } catch(e){ console.error('stand terrain fill', e); } }
+    // Fill the async terrain/wind/thermal line, and wire the tap-to-shoot photo tile. Both re-run whenever
+    // the body is re-rendered (e.g. after a photo is added), so the profile stays live inside the modal.
+    function refreshBody(){
+      var terr = card.querySelector('.stand-terrain');
+      if (terr){ try { fillStandTerrain(terr, siteId); } catch(e){ console.error('stand terrain fill', e); } }
+      var addEl = card.querySelector('.sp-addphoto'), imgEl = card.querySelector('.sp-photo');
+      function shoot(){
+        var inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment'); inp.style.display = 'none';
+        document.body.appendChild(inp);
+        inp.addEventListener('change', async function(){
+          var f = inp.files && inp.files[0]; if (inp.parentNode) document.body.removeChild(inp); if (!f) return;
+          try {
+            var data = await compressImageToBase64(f, 900, 0.72);
+            var s2 = sites.filter(function(x){ return x.id === siteId; })[0]; if (!s2) return;
+            s2.standPhoto = data;
+            try { await saveSite(s2); } catch(e){ console.error('save stand photo', e); }
+            renderAll();
+            var bodyEl = card.querySelector('.sp-body'); if (bodyEl){ bodyEl.innerHTML = standProfileHtml(siteId); refreshBody(); }
+            showToast('Photo added 📷');
+          } catch(e){ showToast('Could not read that image'); }
+        });
+        inp.click();
+      }
+      if (addEl) addEl.addEventListener('click', shoot);
+      if (imgEl) imgEl.addEventListener('click', shoot);   // tap existing photo to retake
+    }
+    refreshBody();
   }
 
   // ---------- Waypoint import (bring stands/markers in from other apps) ----------
