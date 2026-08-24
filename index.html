@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 421</div>
+    <div id="buildBadge">BUILD 422</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18754,12 +18754,22 @@
   // Sun-relationship line for cards/caption — DERIVED (never entered): how far the capture time was
   // from that day's sunrise/sunset, already computed & stored in the photo's weather. Gives a hunter
   // instant context ("🌅 58min after sunrise") that a bare clock time can't.
+  // Reformat "125min after sunrise" → "2h 5min after sunrise" for readability past an hour. Pure
+  // display text (analytics never parses this string — it groups on the sun-phase bucket + clock hour).
+  function fmtSunProx(prox){
+    var m = /^(\d+)\s*min\s+(.*)$/i.exec(prox);
+    if (!m) return prox;
+    var mins = parseInt(m[1], 10);
+    if (mins < 60) return prox;
+    var h = Math.floor(mins/60), r = mins % 60;
+    return h + 'h' + (r ? ' ' + r + 'min' : '') + ' ' + m[2];
+  }
   function sunRelHtml(doc, cls){
     if (!doc || doc.weatherStatus !== 'ok' || !doc.weather) return '';
     var prox = doc.weather.sunProximity;
     var style = 'font-size:9.5px;color:#E8B04B;margin-top:1px;';
     if (prox){
-      return '<div class="'+(cls||'sunrel')+'" style="'+style+'">' + (prox.indexOf('sunset') !== -1 ? '🌇' : '🌅') + ' ' + escapeHtml(prox) + '</div>';
+      return '<div class="'+(cls||'sunrel')+'" style="'+style+'">' + (prox.indexOf('sunset') !== -1 ? '🌇' : '🌅') + ' ' + escapeHtml(fmtSunProx(prox)) + '</div>';
     }
     var ph = doc.weather.sunPhase;
     if (ph){ var e = /sunset|dusk/i.test(ph) ? '🌇' : (/night/i.test(ph) ? '🌙' : (/daytime/i.test(ph) ? '☀️' : '🌅')); return '<div class="'+(cls||'sunrel')+'" style="'+style+'">' + e + ' ' + escapeHtml(ph) + '</div>'; }
