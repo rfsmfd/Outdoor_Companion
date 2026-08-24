@@ -1823,8 +1823,8 @@
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
       <button class="btn-ghost" id="scoutModeBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:700;">🔍 Scout Mode — off (tap to show the board)</button>
-      <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:600;">👁 Scout a Spot — flag map potential</button>
-      <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
+      <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">➕ Add a Mark — pinch, rub, possible stand…</button>
+      <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
       <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
       <button class="btn-ghost" id="toolsToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
@@ -1950,7 +1950,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 456</div>
+    <div id="buildBadge">BUILD 457</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7753,11 +7753,17 @@
     renderList();
   }
   function updateScoutModeBtn(){
-    var b = document.getElementById('scoutModeBtn'); if (!b) return;
-    b.textContent = scoutMode ? '🔍 Scout Mode — ON · board showing' : '🔍 Scout Mode — off (tap to show the board)';
-    b.style.background = scoutMode ? '#5a3e78' : '#241E2E';
-    b.style.color = scoutMode ? '#ffffff' : '#e9ddf5';
-    b.style.borderColor = scoutMode ? '#7d5aa8' : '#5a3e78';
+    var b = document.getElementById('scoutModeBtn');
+    if (b){
+      b.textContent = scoutMode ? '🔍 Scout Mode — ON · board showing' : '🔍 Scout Mode — off (tap to show the board)';
+      b.style.background = scoutMode ? '#5a3e78' : '#241E2E';
+      b.style.color = scoutMode ? '#ffffff' : '#e9ddf5';
+      b.style.borderColor = scoutMode ? '#7d5aa8' : '#5a3e78';
+    }
+    // Add-a-Mark and Scouting Report live INSIDE Scout Mode — only show when the board is on.
+    var show = (activeModule === 'hunting' && scoutMode) ? 'block' : 'none';
+    var add = document.getElementById('scoutSpotBtn'); if (add) add.style.display = show;
+    var rep = document.getElementById('scoutReportBtn'); if (rep) rep.style.display = show;
   }
   // On load, restore Scout Mode if it was left on — otherwise a just-dropped conjecture mark appears to vanish
   // on refresh (it's saved, just hidden because unverified marks show only in Scout Mode).
