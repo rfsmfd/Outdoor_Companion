@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 428</div>
+    <div id="buildBadge">BUILD 429</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9410,6 +9410,69 @@
     return s.baselineContext || null;          // otherwise the site's NORMAL context (may be unset)
   }
   function siteCurrentContext(s){ return s ? siteContextAt(s.id, Date.now()) : null; }   // what's effective RIGHT NOW (respects expiry)
+  // ---------- Stand Profile — an honest, sample-gated summary of a spot (expands in the pin popup) ----------
+  // Every stand answers "what have MY deer done HERE, and how much do I trust it." Facts only — no
+  // "hunt here tonight" prediction yet (that's the risky Tier-3 that needs the confidence gate).
+  function standEventsForSite(siteId){
+    var save = analyticsSource; analyticsSource = 'both';
+    var evs;
+    try { evs = buildAnalyticsEvents().filter(function(e){ return e.siteId === siteId; }); }
+    catch(e){ evs = []; }
+    analyticsSource = save;
+    return evs;
+  }
+  function _topCat(events, keyFn, minN){
+    var c = {}; events.forEach(function(e){ var k = keyFn(e); if (k != null && k !== '') c[k] = (c[k]||0)+1; });
+    var keys = Object.keys(c); if (!keys.length) return null;
+    var withData = keys.reduce(function(s,k){ return s + c[k]; }, 0);
+    if (withData < minN) return { thin: true, n: withData };
+    keys.sort(function(a,b){ return c[b]-c[a]; });
+    return { label: keys[0], pct: Math.round(c[keys[0]]/withData*100), n: withData };
+  }
+  function _median(arr){ if (!arr.length) return null; var a = arr.slice().sort(function(x,y){ return x-y; }); var m = Math.floor(a.length/2); return a.length%2 ? a[m] : Math.round((a[m-1]+a[m])/2); }
+  function _offMin(mins){ if (mins==null) return '?'; return (mins>=0?'+':'') + mins + 'min'; }
+  function standProfileHtml(siteId){
+    var evs = standEventsForSite(siteId);
+    var n = evs.length;
+    if (!n) return '<div style="font-size:11px;color:#9db0a3;padding:6px 0;">No detections or sightings logged here yet — its profile fills in as your cameras and log build up.</div>';
+    var day = evs.filter(function(e){ return !_isNightEvent(e); }), nightN = n - day.length;
+    var bucks = evs.filter(function(e){ return e.isBuck; }).length;
+    var now = Date.now(), r7 = evs.filter(function(e){ return e.createdAt >= now - 7*86400000; }).length;
+    // Hunt pressure — from the hunt log at this site.
+    var hunts = (typeof huntEvents !== 'undefined' ? huntEvents : []).filter(function(h){ return h.siteId === siteId; });
+    var lastHunt = hunts.reduce(function(m,h){ return Math.max(m, h.checkInAt||0); }, 0);
+    var daysSince = lastHunt ? Math.round((now - lastHunt)/86400000) : null;
+    // Daylight-only condition patterns (the huntable signal), sample-gated.
+    var wind = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?e.weather.windDir:null; }, 8);
+    var press = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?e.weather.pressureTrend:null; }, 8);
+    var temp = _topCat(day, function(e){ return (e.weatherStatus==='ok'&&e.weather)?tempBucket(e.weather.tempF):null; }, 8);
+    // Timing: median first-evening (sunset offset) & last-morning (sunrise offset), morning vs evening.
+    var morn = day.filter(function(e){ return e.minFromSunrise!=null && e.minFromSunset!=null && Math.abs(e.minFromSunrise) <= Math.abs(e.minFromSunset); });
+    var eve  = day.filter(function(e){ return e.minFromSunrise!=null && e.minFromSunset!=null && Math.abs(e.minFromSunset) < Math.abs(e.minFromSunrise); });
+    var medMorn = _median(morn.map(function(e){ return e.minFromSunrise; }));
+    var medEve  = _median(eve.map(function(e){ return e.minFromSunset; }));
+    var line = function(icon, txt){ return '<div style="margin:2px 0;">' + icon + ' ' + txt + '</div>'; };
+    var h = '<div style="font-size:11px;color:#dfeee4;line-height:1.5;border-top:1px solid #33443a;margin-top:6px;padding-top:7px;">';
+    h += '<div style="font-weight:700;margin-bottom:4px;">📊 Stand Profile</div>';
+    h += line('📈', n + ' detection' + (n===1?'':'s') + ' — ☀ ' + day.length + ' daylight · 🌙 ' + nightN + ' night · 🦌 ' + bucks + ' buck' + (bucks===1?'':'s'));
+    h += line('🕐', 'Recent: ' + r7 + ' in the last 7 days');
+    h += line('🏹', hunts.length ? (hunts.length + ' hunt' + (hunts.length===1?'':'s') + ' logged · last sat ' + (daysSince===0?'today':daysSince+' day'+(daysSince===1?'':'s')+' ago')) : 'No hunts logged here yet');
+    if (day.length < 8){
+      h += '<div style="color:#E8B04B;margin-top:4px;">⚠ Only ' + day.length + ' daylight detection' + (day.length===1?'':'s') + ' — too few for a condition pattern.</div>';
+    } else {
+      h += '<div style="margin-top:5px;color:#9db0a3;font-size:10px;letter-spacing:.3px;">DAYLIGHT PATTERNS (' + day.length + ' detections)</div>';
+      if (wind && !wind.thin) h += line('💨', 'Most on <b>' + escapeHtml(wind.label) + '</b> wind (' + wind.pct + '%)');
+      if (press && !press.thin) h += line('🧭', 'Most on <b>' + escapeHtml(press.label) + '</b> pressure (' + press.pct + '%)');
+      if (temp && !temp.thin) h += line('🌡', 'Most in <b>' + escapeHtml(temp.label) + '</b> (' + temp.pct + '%)');
+      var timing = 'Morning ' + morn.length + ' · Evening ' + eve.length;
+      if (medEve != null) timing += ' · typical evening arrival <b>' + _offMin(medEve) + '</b> vs sunset';
+      if (medMorn != null) timing += ' · morning <b>' + _offMin(medMorn) + '</b> vs sunrise';
+      h += line('⏱', timing);
+    }
+    h += '<div style="color:#6f8377;font-size:9.5px;margin-top:6px;">Observed history at this spot — not a forecast. Cameras sample the spot, not the deer.</div>';
+    h += '</div>';
+    return h;
+  }
   function popupHtml(s){
     var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
     var camInfo = '';
@@ -9455,6 +9518,10 @@
     var contextBtn = (activeModule === 'hunting' && isMine)
       ? '<button class="btn-ghost" data-act="context" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">🏷 Context: ' + (_ctxKey ? escapeHtml(siteContextLabel(_ctxKey)) : 'not set — tap to set') + '</button>'
       : '';
+    // Stand Profile — expands inline (computed lazily on first tap, not for every pin).
+    var profileBtn = (activeModule === 'hunting')
+      ? '<button class="btn-ghost" data-act="standprofile" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">📊 Stand Profile — tap to expand</button><div class="stand-profile" style="display:none;"></div>'
+      : '';
     return '' +
       '<div class="pop">' +
         '<h3>'+escapeHtml(s.name)+'</h3>' +
@@ -9467,6 +9534,7 @@
         spotIntelHtml(s) +
         huntableBtn +
         contextBtn +
+        profileBtn +
         actionRow +
       '</div>';
   }
@@ -9579,6 +9647,16 @@
     });
     var contextBtn2 = node.querySelector('[data-act="context"]');
     if (contextBtn2) contextBtn2.addEventListener('click', function(){ map.closePopup(); openSiteContextEditor(id); });
+    var profBtn = node.querySelector('[data-act="standprofile"]');
+    if (profBtn) profBtn.addEventListener('click', function(){
+      var box = node.querySelector('.stand-profile');
+      if (!box) return;
+      if (box.style.display === 'none'){
+        if (!box.getAttribute('data-loaded')){ box.innerHTML = standProfileHtml(id); box.setAttribute('data-loaded','1'); }
+        box.style.display = 'block'; profBtn.textContent = '📊 Stand Profile — tap to hide';
+      } else { box.style.display = 'none'; profBtn.textContent = '📊 Stand Profile — tap to expand'; }
+      var pop = map._popup; if (pop && pop.update) try { pop.update(); } catch(e){}   // let Leaflet re-measure after it grows
+    });
     var huntableBtn = node.querySelector('[data-act="huntable"]');
     if (huntableBtn) huntableBtn.addEventListener('click', async function(){
       var s = sites.filter(function(x){ return x.id === id; })[0]; if (!s) return;
