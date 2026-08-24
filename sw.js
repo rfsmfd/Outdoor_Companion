@@ -19,7 +19,7 @@
  * Bump VERSION on every build so old shell/lib caches are cleared on activate. The tile
  * caches are intentionally NOT version-suffixed — saved offline maps survive app updates.
  */
-var VERSION = 'b357';
+var VERSION = 'b430';
 var SHELL_CACHE = 'oc-shell-' + VERSION;
 var LIB_CACHE   = 'oc-lib-' + VERSION;
 var TILE_RUNTIME = 'oc-tiles-runtime';   // rolling, auto-filled as you pan (LRU-trimmed)
@@ -129,7 +129,12 @@ self.addEventListener('fetch', function(e){
   var looksLikeShell = sameOrigin && (url.pathname === '/' || /\/(index\.html)?$/.test(url.pathname));
   if (req.mode === 'navigate' || looksLikeShell){
     e.respondWith(
-      fetch(req).then(function(res){
+      // {cache:'no-store'} makes the network-first shell TRULY network-first: without it the
+      // browser's own HTTP cache can hand back a stale index.html (GitHub Pages stamps it with a
+      // ~10-min max-age), so users sat on an old build for up to 10 minutes after a deploy even
+      // though the SW "fetched" it. Bypassing the HTTP cache guarantees the freshest build online;
+      // the cached copy below is still the offline fallback.
+      fetch(req, { cache: 'no-store' }).then(function(res){
         var copy = res.clone();
         caches.open(SHELL_CACHE).then(function(c){ c.put(req, copy); });
         return res;
