@@ -1944,7 +1944,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 413</div>
+    <div id="buildBadge">BUILD 414</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9352,20 +9352,27 @@
     { key:'other',     label:'❓ Other' }
   ];
   function siteContextLabel(key){ if (!key) return null; var c = SITE_CONTEXTS.filter(function(x){ return x.key === key; })[0]; return c ? c.label : key; }
-  function siteContextAt(siteId, ts){   // the context effective at capture time `ts`
+  // Resolve the context effective at capture time `ts`. Each entry {context, from, until?} runs from
+  // its `from` until whichever comes FIRST: its own `until` (an explicit expiry — e.g. "bait should be
+  // gone in 2 weeks; don't keep labeling later photos as baited") OR the next entry's `from`. If a
+  // frame falls after an entry's expiry and before the next entry, context is (not set) — an honest
+  // gap, so forgetting to update it can never silently mislabel a month of photos as baited.
+  function siteContextAt(siteId, ts){
     if (!siteId || ts == null) return null;
     var s = sites.filter(function(x){ return x.id === siteId; })[0];
     if (!s || !s.contextHistory || !s.contextHistory.length) return null;
     var hist = s.contextHistory.slice().sort(function(a,b){ return (a.from||0) - (b.from||0); });
-    var ctx = null;
-    for (var i=0;i<hist.length;i++){ if ((hist[i].from||0) <= ts) ctx = hist[i].context; else break; }
-    return ctx;   // null if `ts` predates the first recorded context — genuinely unknown, not assumed
+    for (var i=0;i<hist.length;i++){
+      var from = hist[i].from||0;
+      if (ts < from) continue;
+      var nextFrom = (i+1 < hist.length) ? (hist[i+1].from||Infinity) : Infinity;
+      var until = (hist[i].until != null) ? hist[i].until : Infinity;
+      var end = Math.min(nextFrom, until);
+      if (ts < end) return hist[i].context;   // windows are non-overlapping, so this is the one
+    }
+    return null;
   }
-  function siteCurrentContext(s){       // latest context, for display on the pin/editor
-    if (!s || !s.contextHistory || !s.contextHistory.length) return null;
-    var hist = s.contextHistory.slice().sort(function(a,b){ return (a.from||0) - (b.from||0); });
-    return hist[hist.length-1].context;
-  }
+  function siteCurrentContext(s){ return s ? siteContextAt(s.id, Date.now()) : null; }   // what's effective RIGHT NOW (respects expiry)
   function popupHtml(s){
     var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
     var camInfo = '';
@@ -9450,9 +9457,13 @@
         '<label style="font-size:11px;color:#9db0a3;">In effect from</label>' +
         '<input type="date" id="sc_from" style="width:100%;padding:8px;margin:3px 0 4px;border-radius:6px;">' +
         '<div style="font-size:10.5px;color:#9db0a3;margin-bottom:10px;">' + (firstEver ? 'Leave blank to apply to <strong>all past photos</strong> here (it’s always been this).' : 'Applies from this date forward; earlier detections keep the previous context.') + '</div>' +
+        '<label style="font-size:11px;color:#9db0a3;">Ends on <span style="opacity:.8;">(optional)</span></label>' +
+        '<input type="date" id="sc_until" style="width:100%;padding:8px;margin:3px 0 4px;border-radius:6px;">' +
+        '<div style="font-size:10.5px;color:#9db0a3;margin-bottom:10px;">Set this if you KNOW it ends (bait law / bait runs out in ~2 weeks). After this date, photos revert to <strong>“not set”</strong> instead of staying labeled — so forgetting to update never mislabels a month of photos.</div>' +
         '<button class="sc-set btn-primary" style="width:100%;">Set context</button>' +
         (hist.length ? '<div style="font-size:11px;color:#9db0a3;margin:14px 0 6px;letter-spacing:.4px;">HISTORY</div>' + hist.map(function(h){
-          return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #35443A;border-radius:8px;padding:6px 9px;margin-bottom:6px;font-size:12px;"><span>' + escapeHtml(siteContextLabel(h.context)) + ' <span style="color:#9db0a3;">· from ' + ((h.from||0) <= 0 ? 'the beginning' : new Date(h.from).toLocaleDateString()) + '</span></span><button class="sc-del" data-from="'+(h.from||0)+'" data-ctx="'+escapeHtml(h.context)+'" style="background:transparent;border:none;color:#D94A2E;font-size:13px;cursor:pointer;">✕</button></div>';
+          var span = ((h.from||0) <= 0 ? 'the beginning' : new Date(h.from).toLocaleDateString()) + (h.until != null ? ' → ' + new Date(h.until).toLocaleDateString() : ' → ongoing');
+          return '<div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #35443A;border-radius:8px;padding:6px 9px;margin-bottom:6px;font-size:12px;"><span>' + escapeHtml(siteContextLabel(h.context)) + ' <span style="color:#9db0a3;">· ' + span + '</span></span><button class="sc-del" data-from="'+(h.from||0)+'" data-ctx="'+escapeHtml(h.context)+'" style="background:transparent;border:none;color:#D94A2E;font-size:13px;cursor:pointer;">✕</button></div>';
         }).join('') : '');
       card.querySelector('.sc-x').addEventListener('click', close);
       var valSel = card.querySelector('#sc_val'); if (siteCurrentContext(s)) valSel.value = siteCurrentContext(s);
@@ -9460,8 +9471,12 @@
       card.querySelector('.sc-set').addEventListener('click', async function(){
         var val = valSel.value;
         var fromStr = card.querySelector('#sc_from').value;
+        var untilStr = card.querySelector('#sc_until').value;
         var fromMs = fromStr ? new Date(fromStr + 'T00:00:00').getTime() : (firstEver ? 0 : Date.now());
-        s.contextHistory.push({ context: val, from: fromMs });
+        var entry = { context: val, from: fromMs };
+        if (untilStr){ entry.until = new Date(untilStr + 'T23:59:59').getTime(); }   // inclusive end of that day
+        if (entry.until != null && entry.until <= entry.from){ alert('The end date must be after the start date.'); return; }
+        s.contextHistory.push(entry);
         try { await saveSite(s); } catch(e){ console.error('save context', e); }
         renderAll(); render(); showToast('Context set: ' + siteContextLabel(val));
       });
