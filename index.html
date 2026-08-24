@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 433</div>
+    <div id="buildBadge">BUILD 434</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9434,7 +9434,10 @@
   function standProfileHtml(siteId){
     var evs = standEventsForSite(siteId);
     var n = evs.length;
-    if (!n) return '<div style="font-size:11px;color:#9db0a3;padding:6px 0;">No detections or sightings logged here yet — its profile fills in as your cameras and log build up.</div>';
+    if (!n) return '<div style="font-size:11px;color:#dfeee4;line-height:1.5;border-top:1px solid #33443a;margin-top:6px;padding-top:7px;">' +
+      '<div style="font-weight:700;margin-bottom:4px;">📊 Stand Profile</div>' +
+      '<div style="color:#9db0a3;">No camera detections or logged sits at <b>this</b> spot yet.<br>Open the profile on a camera site that has trail-cam photos (or a stand where you’ve logged sits) and it fills in with activity, timing, wind/pressure patterns and hunt pressure.</div>' +
+      '</div>';
     var day = evs.filter(function(e){ return !_isNightEvent(e); }), nightN = n - day.length;
     var bucks = evs.filter(function(e){ return e.isBuck; }).length;
     var now = Date.now(), r7 = evs.filter(function(e){ return e.createdAt >= now - 7*86400000; }).length;
