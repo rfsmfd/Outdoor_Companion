@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 435</div>
+    <div id="buildBadge">BUILD 436</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9454,8 +9454,9 @@
     }
 
     if (!n){
-      // No matched detections/sits yet — but the panel still opened with the facts above.
-      h += '<div style="color:#9db0a3;margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;">No matched trail-cam detections or logged sits here yet. Activity counts, timing, and wind / pressure / temperature patterns fill in automatically as photos and sits accumulate at this spot.</div>';
+      // No history yet — but the panel still opened with the facts above. NOTE: cameras are optional
+      // by design; this profile builds from sightings/sign and sits too, not just trail-cam photos.
+      h += '<div style="color:#9db0a3;margin-top:6px;padding-top:5px;border-top:1px dashed #2c3a31;">No sightings, sign, sits, or camera detections tied to this spot yet. Log a field observation here (a rub, scrape, tracks, a sighting), record what you saw on a sit, or add trail-cam photos — and this fills in with activity, timing, and wind / pressure / temperature patterns. <b>No camera required.</b></div>';
       h += '</div>';
       return h;
     }
