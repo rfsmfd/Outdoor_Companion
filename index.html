@@ -1949,7 +1949,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 454</div>
+    <div id="buildBadge">BUILD 455</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7744,11 +7744,15 @@
       if (_scoutPrev){ activeFilters = new Set(_scoutPrev.sites); activeObsFilters = new Set(_scoutPrev.obs); _scoutPrev = null; }
       scoutMode = false;
     }
+    try { localStorage.setItem('oc_scout_mode', scoutMode ? '1' : '0'); } catch(e){}   // remember the mode across reloads so conjecture marks don't "vanish"
     renderChips();
     renderMarkers();
     if (typeof renderObsMarkers === 'function') renderObsMarkers();
     renderList();
   }
+  // On load, restore Scout Mode if it was left on — otherwise a just-dropped conjecture mark appears to vanish
+  // on refresh (it's saved, just hidden because unverified marks show only in Scout Mode).
+  function restoreScoutMode(){ try { if (localStorage.getItem('oc_scout_mode') === '1' && !scoutMode) setScoutMode(true); } catch(e){} }
   function trayScoutModeRow(){
     var row = document.createElement('div');
     row.className = 'toggle-row';
@@ -15897,6 +15901,7 @@
     var stillActive = huntEvents.filter(function(h){ return !h.checkOutAt; })[0];
     if (stillActive){ activeHuntId = stillActive.id; }
     updateActiveHuntBar();
+    if (typeof restoreScoutMode === 'function') restoreScoutMode();   // if you left Scout Mode on, keep it on so conjecture marks don't "vanish" on reload
     handleCameraUrlParam();
     // buckProfiles loads last of everything here — if the user is already on the
     // Analytics tab before this finishes (a real possible race, not just a hypothetical),
