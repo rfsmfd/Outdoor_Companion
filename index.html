@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 429</div>
+    <div id="buildBadge">BUILD 430</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9651,10 +9651,19 @@
     if (profBtn) profBtn.addEventListener('click', function(){
       var box = node.querySelector('.stand-profile');
       if (!box) return;
-      if (box.style.display === 'none'){
-        if (!box.getAttribute('data-loaded')){ box.innerHTML = standProfileHtml(id); box.setAttribute('data-loaded','1'); }
-        box.style.display = 'block'; profBtn.textContent = '📊 Stand Profile — tap to hide';
-      } else { box.style.display = 'none'; profBtn.textContent = '📊 Stand Profile — tap to expand'; }
+      var isOpen = box.getAttribute('data-open') === '1';   // track state ourselves — don't trust the inline style read
+      if (!isOpen){
+        if (!box.getAttribute('data-loaded')){
+          // Never let a build error leave the panel stuck closed — always open, show what we can.
+          var html;
+          try { html = standProfileHtml(id); }
+          catch(err){ console.error('Outdoor Companion: stand profile build failed', err); html = '<div style="font-size:11px;color:#E8B04B;padding:6px 0;">Couldn’t build this stand’s profile — its data may still be loading. Try again in a moment.</div>'; }
+          box.innerHTML = html; box.setAttribute('data-loaded','1');
+        }
+        box.style.display = 'block'; box.setAttribute('data-open','1'); profBtn.textContent = '📊 Stand Profile — tap to hide';
+      } else {
+        box.style.display = 'none'; box.setAttribute('data-open','0'); profBtn.textContent = '📊 Stand Profile — tap to expand';
+      }
       var pop = map._popup; if (pop && pop.update) try { pop.update(); } catch(e){}   // let Leaflet re-measure after it grows
     });
     var huntableBtn = node.querySelector('[data-act="huntable"]');
@@ -16925,6 +16934,15 @@
     var cc = groupCount(all, function(o){ return queryGroupKeyForObs(o,'context'); });
     var topC = Object.keys(cc).sort(function(a,b){ return cc[b]-cc[a]; })[0];
     if (topC && topC !== '(not set)' && all.length && cc[topC]/all.length >= 0.9) facts.push('⚠ Nearly all detections are ' + topC + ' — likely site use, not free movement.');
+    // First/last movement (median, honesty-gated ≥4) — "when does he actually show, relative to the sun".
+    var eveOff = dayAll.filter(function(e){ return e.minFromSunset != null && (e.minFromSunrise == null || Math.abs(e.minFromSunset) < Math.abs(e.minFromSunrise)); }).map(function(e){ return e.minFromSunset; });
+    var mornOff = dayAll.filter(function(e){ return e.minFromSunrise != null && (e.minFromSunset == null || Math.abs(e.minFromSunrise) <= Math.abs(e.minFromSunset)); }).map(function(e){ return e.minFromSunrise; });
+    if (mornOff.length >= 4 || eveOff.length >= 4){
+      var tp = [];
+      if (mornOff.length >= 4) tp.push('mornings ~' + _offMin(_median(mornOff)) + ' vs sunrise (earliest ' + _offMin(Math.min.apply(null, mornOff)) + ', n=' + mornOff.length + ')');
+      if (eveOff.length >= 4) tp.push('evenings ~' + _offMin(_median(eveOff)) + ' vs sunset (earliest ' + _offMin(Math.min.apply(null, eveOff)) + ', n=' + eveOff.length + ')');
+      facts.push('Typical daylight timing: ' + tp.join(' · '));
+    }
     if (all.length && all.length < 15) facts.push('Small overall sample (' + all.length + ') — treat everything below as a hint.');
     if (!facts.length) facts.push('Enough spread to read the patterns below with normal caution.');
     var entries = [{ title: '═════  MOVEMENT PROFILE: ' + name + '  ═════', filters: '',
