@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 418</div>
+    <div id="buildBadge">BUILD 419</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17564,16 +17564,21 @@
     if (analyticsDateRange === 'custom'){
       var _ymd = function(ms){ var d = new Date(ms); function p(n){ return (n<10?'0':'')+n; } return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()); };
       var crow = document.createElement('div');
-      crow.style.cssText = 'display:flex;gap:6px;margin-top:6px;align-items:center;';
-      var fromI = document.createElement('input'); fromI.type = 'date'; fromI.style.flex = '1'; fromI.title = 'From';
-      var toI = document.createElement('input'); toI.type = 'date'; toI.style.flex = '1'; toI.title = 'To';
+      // Stack From/To vertically — the left filter panel is narrow, so two side-by-side date inputs
+      // clip the second one. Full-width stacked fits cleanly with a small "From"/"To" label each.
+      crow.style.cssText = 'display:flex;flex-direction:column;gap:6px;margin-top:6px;';
+      var fromWrap = document.createElement('label'); fromWrap.style.cssText = 'font-size:10px;color:var(--text-dim);display:flex;flex-direction:column;gap:2px;';
+      var toWrap = document.createElement('label'); toWrap.style.cssText = 'font-size:10px;color:var(--text-dim);display:flex;flex-direction:column;gap:2px;';
+      fromWrap.appendChild(document.createTextNode('From'));
+      toWrap.appendChild(document.createTextNode('To'));
+      var fromI = document.createElement('input'); fromI.type = 'date'; fromI.style.width = '100%'; fromI.style.boxSizing = 'border-box';
+      var toI = document.createElement('input'); toI.type = 'date'; toI.style.width = '100%'; toI.style.boxSizing = 'border-box';
       if (analyticsCustomFrom) fromI.value = _ymd(analyticsCustomFrom);
       if (analyticsCustomTo) toI.value = _ymd(analyticsCustomTo);
       fromI.addEventListener('change', function(){ analyticsCustomFrom = fromI.value ? new Date(fromI.value + 'T00:00:00').getTime() : null; renderAnalytics(); });
       toI.addEventListener('change', function(){ analyticsCustomTo = toI.value ? new Date(toI.value + 'T23:59:59').getTime() : null; renderAnalytics(); });
-      crow.appendChild(fromI);
-      crow.appendChild(document.createTextNode('→'));
-      crow.appendChild(toI);
+      fromWrap.appendChild(fromI); toWrap.appendChild(toI);
+      crow.appendChild(fromWrap); crow.appendChild(toWrap);
       dateGroup.appendChild(crow);
     }
     bar.appendChild(dateGroup);
