@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 425</div>
+    <div id="buildBadge">BUILD 426</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3686,12 +3686,20 @@
     } catch (e) { return { sunrise: null, sunset: null }; }
   }
   // 15-minute band label for a signed offset, e.g. 8 → "+0 to +15 min", -8 → "-15 to +0 min".
+  // Clamped to a hunter-meaningful ±3h window; anything beyond collapses into "earlier"/"later"
+  // (a +1125-min-after-sunrise band is technically correct but useless — it's just "midday/night").
   function solarBandLabel(mins){
     if (mins == null || !isFinite(mins)) return null;
+    if (mins < -180) return '⏪ earlier (>3h before)';
+    if (mins >= 180) return '⏩ later (>3h after)';
     var lo = Math.floor(mins / 15) * 15, hi = lo + 15, f = function(n){ return (n >= 0 ? '+' : '') + n; };
     return f(lo) + ' to ' + f(hi) + ' min';
   }
-  function solarBandLo(label){ var m = /^([+-]?\d+)/.exec(label || ''); return m ? parseInt(m[1], 10) : 0; }
+  function solarBandLo(label){
+    if (/earlier/.test(label)) return -100000;
+    if (/later/.test(label)) return 100000;
+    var m = /^([+-]?\d+)/.exec(label || ''); return m ? parseInt(m[1], 10) : 0;
+  }
 
   async function fetchCurrentWeather(lat, lng){
     try{
@@ -16763,26 +16771,37 @@
   // ---------- Buck Movement Profile — one buck, a full temporal/environmental fingerprint ----------
   // Runs a curated set of break-downs on the chosen buck and appends them to the report as one titled
   // section (never clears — so you can profile Moose, then Big 8, and compare both in one report).
+  // `compare:'daylight'` = show OVERALL vs NON-NIGHT side by side (conditions "when photographed" vs
+  // "when potentially huntable") — the distinction the founder called out. Timing/structural dims stay single.
   var MOVEMENT_PROFILE = [
     { groupBy:'sunriseband' }, { groupBy:'sunsetband' }, { groupBy:'sun' }, { groupBy:'hour' },
-    { groupBy:'moon' }, { groupBy:'pressure' }, { groupBy:'wind' }, { groupBy:'temp' },
-    { groupBy:'solunar' }, { groupBy:'context' }, { groupBy:'site' }
+    { groupBy:'wind', compare:'daylight' }, { groupBy:'pressure', compare:'daylight' },
+    { groupBy:'temp', compare:'daylight' }, { groupBy:'moon', compare:'daylight' },
+    { groupBy:'solunar', compare:'daylight' }, { groupBy:'context' }, { groupBy:'site' }
   ];
-  // One break-down → a report entry, from a pre-built event set (no re-render, no rebuild). Drives the
-  // shared state briefly so describeQuery/describeFullFilters read right, then restores it.
-  function movementEntryFrom(all, buckId, def){
+  function _isNightEvent(e){ var w = (e.weatherStatus==='ok'&&e.weather)?e.weather:null; return !!(w && w.sunPhase === 'Night'); }
+  function _sampleCaution(n){ return n < 8 ? '  ⚠ very small — anecdote, not pattern' : (n < 15 ? '  ⚠ small — treat as a hint' : ''); }
+  // One break-down → a report entry from pre-built event sets (no re-render). `dayAll` = non-night subset.
+  function movementEntryFrom(all, dayAll, buckId, def){
     var save = { b:analyticsBuckProfileId, c:queryConditions, g:queryGroupBy };
     analyticsBuckProfileId = buckId; queryConditions = []; queryGroupBy = def.groupBy;
-    var counts = groupCount(all, function(o){ return queryGroupKeyForObs(o, def.groupBy); });
+    var keyOf = function(o){ return queryGroupKeyForObs(o, def.groupBy); };
+    var counts = groupCount(all, keyOf);
     var labels = Object.keys(counts);
     if (def.groupBy === 'sunriseband' || def.groupBy === 'sunsetband') labels.sort(function(a,b){ return solarBandLo(a) - solarBandLo(b); });
     else labels.sort(function(a,b){ return counts[b] - counts[a]; });
-    var total = labels.reduce(function(s,l){ return s + counts[l]; }, 0);
-    var body = labels.length ? labels.map(function(l){ return l + ': ' + counts[l] + ' (' + (total>0?Math.round(counts[l]/total*100):0) + '%)'; }) : ['(no detections carry this data)'];
-    // Honest per-dimension sample: how many of his detections actually have this data, + a caution
-    // when it's thin (so a "60% on N wind" off 5 records reads as the anecdote it is, not a law).
-    var summary = (total < all.length ? (total + ' of ' + all.length + ' detections have this data') : (total + ' detections'))
-      + (total < 8 ? '  ⚠ very small — anecdote, not pattern' : (total < 15 ? '  ⚠ small sample — treat as a hint' : ''));
+    var total = labels.reduce(function(s,l){ return s + counts[l]; }, 0), body, summary;
+    if (def.compare === 'daylight'){
+      var dc = groupCount(dayAll, keyOf), dtot = Object.keys(dc).reduce(function(s,l){ return s + dc[l]; }, 0);
+      body = labels.length ? labels.map(function(l){
+        var oP = total>0?Math.round(counts[l]/total*100):0, dN = dc[l]||0, dP = dtot>0?Math.round(dN/dtot*100):0;
+        return l + ': all ' + counts[l] + ' (' + oP + '%) · daylight ' + dN + ' (' + dP + '%)';
+      }) : ['(no detections carry this data)'];
+      summary = 'all ' + total + ' · daylight ' + dtot + _sampleCaution(dtot) + (dtot > 0 ? '' : '  (no daylight data — night-only so far)');
+    } else {
+      body = labels.length ? labels.map(function(l){ return l + ': ' + counts[l] + ' (' + (total>0?Math.round(counts[l]/total*100):0) + '%)'; }) : ['(no detections carry this data)'];
+      summary = (total < all.length ? (total + ' of ' + all.length + ' have this data') : (total + ' detections')) + _sampleCaution(total);
+    }
     var entry = { title: describeQuery(), filters: describeFullFilters(), summary: summary, body: body };
     analyticsBuckProfileId = save.b; queryConditions = save.c; queryGroupBy = save.g;
     return entry;
@@ -16790,25 +16809,35 @@
   function runMovementProfile(buckId){
     var bp = buckProfiles.filter(function(b){ return b.id === buckId; })[0];
     var name = buckId ? (bp ? bp.name : 'buck') : 'All bucks';
-    // Build the buck's filtered event set ONCE, then break it down every way.
     var saveBuck = analyticsBuckProfileId; analyticsBuckProfileId = buckId;
     var all = buildAnalyticsEvents().filter(passesSharedAnalyticsFilter);
     analyticsBuckProfileId = saveBuck;
-    // Recency + honesty header — "is he active NOW", and how much to trust the rest.
+    var dayAll = all.filter(function(e){ return !_isNightEvent(e); });
     var now = Date.now();
     var d3 = all.filter(function(e){ return e.createdAt >= now - 3*86400000; }).length;
     var d7 = all.filter(function(e){ return e.createdAt >= now - 7*86400000; }).length;
-    var nightN = all.filter(function(e){ var w = (e.weatherStatus==='ok'&&e.weather)?e.weather:null; return w && w.sunPhase === 'Night'; }).length;
-    var dayN = all.length - nightN;
-    var hdrBody = [
-      'Recent: ' + d3 + ' in last 3 days · ' + d7 + ' in last 7 days · ' + all.length + ' all-time' + (d3 === 0 ? '  (nothing recent)' : ''),
-      'Daylight (non-night): ' + dayN + ' · Night: ' + nightN,
-      (all.length < 15
-        ? '⚠ Small overall sample (' + all.length + ') — everything below is a hint, not proof.'
-        : 'OBSERVED patterns — where/when he has been RECORDED, not predictions. Cameras sample the spot, not the animal; mind sample sizes and Site Context.')
-    ];
-    reportEntries.push({ title: '═════  MOVEMENT PROFILE: ' + name + '  ═════', filters: '', summary: all.length + ' total detections', body: hdrBody });
-    MOVEMENT_PROFILE.forEach(function(def){ reportEntries.push(movementEntryFrom(all, buckId, def)); });
+    var nightN = all.length - dayAll.length, dayN = dayAll.length;
+    // --- "WHAT MATTERS RIGHT NOW" — the answer first, strongest OBSERVED facts, no predictions ---
+    var facts = [];
+    if (d7 === 0) facts.push('⚠ NO detections in the last 7 days — not currently showing here.');
+    else if (d3 === 0) facts.push('None in the last 3 days (' + d7 + ' in the last 7).');
+    else facts.push('Active recently: ' + d3 + ' in the last 3 days.');
+    if (all.length){
+      var nPct = Math.round(nightN/all.length*100);
+      if (nPct >= 70) facts.push(nPct + '% of detections were at NIGHT — largely nocturnal at these cameras.');
+    }
+    if (dayN < 8) facts.push('Only ' + dayN + ' non-night detection' + (dayN===1?'':'s') + ' — insufficient for a strong daylight/wind pattern.');
+    var sc = groupCount(all, function(o){ return queryGroupKeyForObs(o,'site'); });
+    var topS = Object.keys(sc).sort(function(a,b){ return sc[b]-sc[a]; })[0];
+    if (topS && all.length && sc[topS]/all.length >= 0.9) facts.push('⚠ ' + sc[topS] + '/' + all.length + ' detections are from ONE site (' + topS + ') — this may describe SITE USE, not general movement.');
+    var cc = groupCount(all, function(o){ return queryGroupKeyForObs(o,'context'); });
+    var topC = Object.keys(cc).sort(function(a,b){ return cc[b]-cc[a]; })[0];
+    if (topC && topC !== '(not set)' && all.length && cc[topC]/all.length >= 0.9) facts.push('⚠ Nearly all detections are ' + topC + ' — likely site use, not free movement.');
+    if (all.length && all.length < 15) facts.push('Small overall sample (' + all.length + ') — treat everything below as a hint.');
+    if (!facts.length) facts.push('Enough spread to read the patterns below with normal caution.');
+    reportEntries.push({ title: '═════  MOVEMENT PROFILE: ' + name + '  ═════', filters: '',
+      summary: '🎯 What matters right now — ' + all.length + ' detections · Recent ' + d3 + '/3d, ' + d7 + '/7d · Daylight ' + dayN + ' vs Night ' + nightN, body: facts });
+    MOVEMENT_PROFILE.forEach(function(def){ reportEntries.push(movementEntryFrom(all, dayAll, buckId, def)); });
     persistReport(); updateReportButton();
     showToast('Movement Profile for ' + name + ' → report');
     openReportModal();
