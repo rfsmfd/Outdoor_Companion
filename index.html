@@ -1948,7 +1948,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 448</div>
+    <div id="buildBadge">BUILD 449</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9578,6 +9578,7 @@
 
     // ---- Always-on site facts: render useful info even with ZERO detections/sits ----
     if (s){
+      if (s.standPhoto) h += '<img src="' + s.standPhoto + '" style="width:100%;max-height:150px;object-fit:cover;border-radius:8px;margin:2px 0 6px;">';
       var tEntry = getActiveTypes()[s.type];
       if (tEntry) h += line('📍', escapeHtml(tEntry.label) + (siteIsHuntable(s) ? ' · 🏹 hunt spot' : ' · 👁 observation'));
       var _si = standInfoLine(s);
@@ -9777,7 +9778,7 @@
     return '';
   }
   // §1 Basic stand info — the physical stand described: type, height, install year, capacity, notes.
-  var STAND_TYPES = ['Ladder', 'Climber', 'Lock-on / Hang-on', 'Ground blind', 'Box blind', 'Shooting house', 'Saddle', 'Tripod', 'Ground / natural', 'Other'];
+  var STAND_TYPES = ['Ladder', 'Climber', 'Lock-on / Hang-on', 'Pop-up / hub blind', 'Ground blind', 'Box blind', 'Shooting house', 'Saddle', 'Tripod', 'Ground / natural', 'Other'];
   function openStandDetailsEditor(siteId){
     var s = sites.filter(function(x){ return x.id === siteId; })[0]; if (!s) return;
     var back = document.createElement('div');
@@ -9800,17 +9801,29 @@
       '<input type="number" id="sd_cap" inputmode="numeric" min="1" max="6" value="' + (s.capacity != null ? s.capacity : '') + '" placeholder="e.g. 1" style="' + inp + '" />' +
       '<label style="' + lab + '">Notes</label>' +
       '<textarea id="sd_notes" placeholder="Access, condition, safety, best conditions…" style="' + inp + 'min-height:60px;resize:vertical;">' + escapeHtml(s.notes || '') + '</textarea>' +
-      '<div style="font-size:11px;color:#6f8377;margin-top:8px;">📷 Stand photo coming soon.</div>' +
+      '<label style="' + lab + '">Photo</label>' +
+      '<div id="sd_photowrap" style="margin-bottom:6px;">' + (s.standPhoto ? '<img src="' + s.standPhoto + '" style="width:100%;max-height:170px;object-fit:cover;border-radius:8px;">' : '') + '</div>' +
+      '<input type="file" id="sd_photo" accept="image/*" style="' + inp + 'font-size:12px;padding:6px;" />' +
+      '<button class="sd-rmphoto" style="margin-top:6px;background:transparent;border:1px solid #6b3a3a;color:#E8823F;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:12px;display:' + (s.standPhoto ? 'inline-block' : 'none') + ';">Remove photo</button>' +
       '<div style="display:flex;gap:8px;margin-top:12px;"><button class="sd-save btn-primary" style="flex:1;">Save</button><button class="sd-cancel btn-ghost">Cancel</button></div>';
     card.querySelector('.sd-x').addEventListener('click', close);
     card.querySelector('.sd-cancel').addEventListener('click', close);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    var _newPhoto = null, _removePhoto = false;
+    var rmBtn = card.querySelector('.sd-rmphoto');
+    card.querySelector('#sd_photo').addEventListener('change', async function(){
+      var f = this.files && this.files[0]; if (!f) return;
+      try { _newPhoto = await compressImageToBase64(f, 900, 0.72); _removePhoto = false; card.querySelector('#sd_photowrap').innerHTML = '<img src="' + _newPhoto + '" style="width:100%;max-height:170px;object-fit:cover;border-radius:8px;">'; if (rmBtn) rmBtn.style.display = 'inline-block'; }
+      catch(e){ showToast('Could not read that image'); }
+    });
+    if (rmBtn) rmBtn.addEventListener('click', function(){ _removePhoto = true; _newPhoto = null; card.querySelector('#sd_photowrap').innerHTML = ''; rmBtn.style.display = 'none'; card.querySelector('#sd_photo').value = ''; });
     card.querySelector('.sd-save').addEventListener('click', async function(){
       s.standType = card.querySelector('#sd_type').value || null;
       var hv = parseFloat(card.querySelector('#sd_height').value); s.heightFt = isFinite(hv) ? hv : null;
       var yv = parseInt(card.querySelector('#sd_year').value, 10); s.installedYear = isFinite(yv) ? yv : null;
       var cv = parseInt(card.querySelector('#sd_cap').value, 10); s.capacity = isFinite(cv) ? cv : null;
       s.notes = (card.querySelector('#sd_notes').value || '').trim();
+      if (_newPhoto) s.standPhoto = _newPhoto; else if (_removePhoto) s.standPhoto = null;
       try { await saveSite(s); } catch(e){ console.error('Outdoor Companion: failed to save stand details', e); }
       renderAll(); close(); showToast('Stand details saved 🪜');
     });
@@ -9863,6 +9876,8 @@
     // "I hunt here" flag — this is how a spot enters the "Where to hunt tonight" ranking. Tree Stands are
     // huntable inherently (no toggle); other sites (observation cams) start observation-only and toggle in.
     var isScout = s.type === 'scout';
+    // Legend for the gold map ring — so it's self-explanatory when you see one.
+    var buckNote = (typeof _buckSites !== 'undefined' && _buckSites[s.id]) ? '<div class="notes" style="color:#E0B23A;">🦌 Gold ring — a buck was seen or photographed here in the last two seasons.</div>' : '';
     var huntableBtn = (activeModule === 'hunting' && isMine && s.type !== 'stand' && !isScout)
       ? '<button class="btn-ghost" data-act="huntable" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;">' + (siteIsHuntable(s) ? '🏹 Hunt spot — tap to make observation-only' : '👁 Observation only — tap: 🏹 I hunt here') + '</button>'
       : '';
@@ -9891,6 +9906,7 @@
         '<div class="ty" style="color:'+t.color+'">'+t.label+'</div>' +
         camInfo +
         (s.notes ? '<div class="notes">'+escapeHtml(s.notes)+'</div>' : '') +
+        buckNote +
         '<div class="coords">'+fmtCoord(s.lat)+', '+fmtCoord(s.lng)+'</div>' +
         photosBtn +
         standHuntabilityHtml(s) +
@@ -14305,14 +14321,54 @@
   // Persisted locally; grows as you add names. "" = you (self). Keeps a buddy's shots/sightings tagged so
   // shared stand truth (deer moved through, stand was pressured) stays separate from personal shooting stats.
   var HUNTERS_LS_KEY = 'outdoor_companion_hunters';
-  function loadHunters(){ try { var r = JSON.parse(localStorage.getItem(HUNTERS_LS_KEY) || '[]'); return Array.isArray(r) ? r : []; } catch(e){ return []; } }
-  function saveHunters(list){ try { localStorage.setItem(HUNTERS_LS_KEY, JSON.stringify(list)); } catch(e){} }
-  function addHunterName(name){ name = (name || '').trim(); if (!name) return null; var l = loadHunters(); if (l.map(function(x){ return x.toLowerCase(); }).indexOf(name.toLowerCase()) < 0){ l.push(name); saveHunters(l); } return name; }
+  // hunters: [{id,name}] — a SYNCED roster (via the storage abstraction, so it follows you across devices)
+  // with a localStorage fallback. "" = you (self). Editable via the manage panel. Loaded in initLoadAndUrlCheck.
+  var hunters = [];
+  function _huntersLocalSave(){ try { localStorage.setItem(HUNTERS_LS_KEY, JSON.stringify(hunters)); } catch(e){} }
+  async function loadHuntersData(){
+    if (hasChatStorage){
+      try {
+        var res = await window.storage.list('hunter:', false); var keys = (res && res.keys) ? res.keys : [], out = [];
+        for (var i = 0; i < keys.length; i++){ try { var r = await window.storage.get(keys[i], false); if (r && r.value) out.push(JSON.parse(r.value)); } catch(e){} }
+        hunters = dedupeById(out);
+      } catch(e){ hunters = []; }
+    } else {
+      var raw = [];
+      try { raw = JSON.parse(localStorage.getItem(HUNTERS_LS_KEY) || '[]'); } catch(e){ raw = []; }
+      if (!Array.isArray(raw)) raw = [];
+      hunters = raw.map(function(x){ return (typeof x === 'string') ? { id: uid(), name: x } : x; }).filter(function(x){ return x && x.name; });   // migrate old string-array format
+    }
+  }
+  function hunterNames(){ return hunters.map(function(h){ return h.name; }); }
+  async function saveHunterRec(h){ if (hasChatStorage){ try { await window.storage.set('hunter:' + h.id, JSON.stringify(h), false); } catch(e){} } else { _huntersLocalSave(); } }
+  async function deleteHunterRec(id){ hunters = hunters.filter(function(h){ return h.id !== id; }); if (hasChatStorage){ try { await window.storage.delete('hunter:' + id, false); } catch(e){} } else { _huntersLocalSave(); } }
+  function addHunterName(name){ name = (name || '').trim(); if (!name) return null; if (hunterNames().map(function(x){ return x.toLowerCase(); }).indexOf(name.toLowerCase()) >= 0) return name; var h = { id: uid(), name: name }; hunters.push(h); saveHunterRec(h); return name; }
   function hunterOptions(sel){
     var opts = '<option value=""' + (!sel ? ' selected' : '') + '>Me</option>';
-    loadHunters().forEach(function(nm){ opts += '<option value="' + escapeHtml(nm) + '"' + (sel === nm ? ' selected' : '') + '>' + escapeHtml(nm) + '</option>'; });
-    opts += '<option value="__add__">➕ Add a hunter…</option>';
+    hunters.forEach(function(h){ opts += '<option value="' + escapeHtml(h.name) + '"' + (sel === h.name ? ' selected' : '') + '>' + escapeHtml(h.name) + '</option>'; });
+    opts += '<option value="__add__">➕ Add a hunter…</option><option value="__manage__">✏️ Manage hunters…</option>';
     return opts;
+  }
+  // Manage the roster — rename or remove names (a typo'd buddy, someone who stopped hunting with you).
+  function openHuntersManager(onClose){
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100070;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:420px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof onClose === 'function') onClose(); }
+    function render(){
+      card.innerHTML =
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;"><div style="font-weight:800;font-size:16px;">✏️ Manage hunters</div><button class="hm-x" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+        (hunters.length ? hunters.map(function(h){ return '<div style="display:flex;align-items:center;gap:8px;border:1px solid #35443A;border-radius:8px;padding:7px 10px;margin-bottom:6px;"><span style="flex:1;font-size:14px;">' + escapeHtml(h.name) + '</span><button class="hm-ren" data-id="' + h.id + '" style="background:transparent;border:none;color:#9db0a3;cursor:pointer;font-size:13px;">✏️</button><button class="hm-del" data-id="' + h.id + '" style="background:transparent;border:none;color:#E8823F;cursor:pointer;font-size:14px;">✕</button></div>'; }).join('') : '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">No hunters yet.</div>') +
+        '<button class="hm-add" style="width:100%;margin-top:4px;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:9px;font-size:13px;font-weight:700;cursor:pointer;">➕ Add a hunter</button>';
+      card.querySelector('.hm-x').addEventListener('click', close);
+      card.querySelector('.hm-add').addEventListener('click', function(){ var nm = (window.prompt('Hunter’s name:', '') || '').trim(); if (nm){ addHunterName(nm); render(); } });
+      Array.prototype.forEach.call(card.querySelectorAll('.hm-ren'), function(b){ b.addEventListener('click', function(){ var h = hunters.filter(function(x){ return x.id === b.getAttribute('data-id'); })[0]; if (!h) return; var nn = (window.prompt('Rename hunter:', h.name) || '').trim(); if (nn){ h.name = nn; saveHunterRec(h); render(); } }); });
+      Array.prototype.forEach.call(card.querySelectorAll('.hm-del'), function(b){ b.addEventListener('click', function(){ var h = hunters.filter(function(x){ return x.id === b.getAttribute('data-id'); })[0]; if (!h) return; if (window.confirm('Remove ' + h.name + ' from the roster? (Past sits keep their attribution.)')){ deleteHunterRec(h.id); render(); } }); });
+    }
+    render();
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    back.appendChild(card); document.body.appendChild(back);
   }
   function _logHuntStands(){ return (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return siteIsHuntable(s) && typeof s.lat === 'number' && (typeof passesPropertyFilter !== 'function' || passesPropertyFilter(s)); }); }
   function _logPropIdFor(stand){ if (stand.propertyId) return stand.propertyId; var p = (typeof properties !== 'undefined' ? properties : []).filter(function(x){ return (!x.module || x.module === activeModule) && pointInProperty(stand.lat, stand.lng, x); })[0]; return p ? p.id : null; }
@@ -14382,6 +14438,9 @@
         var nm = (window.prompt('Add a hunter’s name (a buddy who hunts your stands):', '') || '').trim();
         if (nm){ addHunterName(nm); st.hunter = nm; } else { st.hunter = null; }
         slHunter.innerHTML = hunterOptions(st.hunter);   // rebuild so the new name is an option, selected
+      } else if (this.value === '__manage__'){
+        openHuntersManager(function(){ slHunter.innerHTML = hunterOptions(st.hunter); });
+        slHunter.value = st.hunter || '';   // don't leave the select stuck on "Manage"
       } else {
         st.hunter = this.value || null;
       }
@@ -15630,6 +15689,7 @@
     await loadHuntEvents();
     await loadTrails();
     try { await loadSavedQueries(); await seedStarterTemplates(); } catch (e) {}
+    try { await loadHuntersData(); } catch (e) {}
     await loadBuckProfiles();
     await loadImportedPhotos();
     try { await loadSuggestions(); await loadSuggestionAcks(); } catch (e) {}
@@ -15667,7 +15727,8 @@
     hunt:'hunts', cam:'cameras', dep:'deployments', prop:'properties',
     photo:'photos',
     sug:'suggestions', sugack:'suggestionAcks',   // Phase 2a: member suggestions + owner approvals
-    query:'savedQueries'                          // named Custom Query definitions
+    query:'savedQueries',                         // named Custom Query definitions
+    hunter:'hunters'                              // hunter roster for sit attribution
   };
   function cloudCollName(prefix){
     var p = String(prefix).replace(/:$/, '');
