@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 439</div>
+    <div id="buildBadge">BUILD 440</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9793,19 +9793,20 @@
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
     var card = document.createElement('div');
-    // Flex column so a tall profile scrolls INSIDE the card (header pinned, body scrolls) instead of the
-    // bottom clipping off-screen on a short window. min-height:0 on the body is what lets it actually scroll.
-    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:480px;width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    // Match the Site Context modal EXACTLY (which scrolls reliably in the field): the card just grows to
+    // fit its content and the BACKDROP (back, overflow:auto) scrolls when it's tall — no internal
+    // max-height/overflow, which produced a thin auto-hiding scrollbar the user couldn't see or grab.
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:480px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
     function close(){ if (back.parentNode) document.body.removeChild(back); }
     var body;
     try { body = standProfileHtml(siteId); }
     catch(err){ console.error('Outdoor Companion: stand profile build failed', err); body = '<div style="color:#E8B04B;font-size:12px;">Couldn’t build this profile: ' + escapeHtml((err && err.message) ? err.message : String(err)) + '</div>'; }
     card.innerHTML =
-      '<div style="flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;">' +
         '<div style="font-weight:800;font-size:17px;">📊 ' + (s ? escapeHtml(s.name) : 'Stand Profile') + '</div>' +
         '<button class="sp-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button>' +
       '</div>' +
-      '<div class="sp-body" style="flex:1 1 auto;min-height:0;overflow-y:auto;padding-right:4px;">' + body + '</div>';
+      '<div class="sp-body">' + body + '</div>';
     card.querySelector('.sp-x').addEventListener('click', close);
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     document.addEventListener('keydown', function esc(e){ if (e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc); } });
