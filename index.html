@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 430</div>
+    <div id="buildBadge">BUILD 431</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13376,7 +13376,22 @@
   // Register the offline service worker (sw.js). Runs only over http(s); a no-op on file://.
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0){
     window.addEventListener('load', function(){
-      navigator.serviceWorker.register('sw.js').catch(function(e){ console.warn('Outdoor Companion: service worker registration failed', e); });
+      navigator.serviceWorker.register('sw.js').then(function(reg){
+        // Actively check for a new SW on every load so a shipped build reaches installed PWAs
+        // promptly instead of waiting for the browser's own (up to 24h) update poll.
+        try { reg.update(); } catch (e) {}
+      }).catch(function(e){ console.warn('Outdoor Companion: service worker registration failed', e); });
+      // When a new SW takes control (skipWaiting + clients.claim), reload ONCE so the page actually
+      // runs the new build instead of the old code it was rendered from. Only for a genuine UPDATE:
+      // if there was no controller at load (first-ever install) the page is already the fresh build,
+      // so we skip the reload to avoid a pointless flash.
+      var hadControllerAtLoad = !!navigator.serviceWorker.controller;
+      var reloadedForSw = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function(){
+        if (reloadedForSw || !hadControllerAtLoad) return;
+        reloadedForSw = true;
+        location.reload();
+      });
     });
   }
 
