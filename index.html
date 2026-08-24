@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 419</div>
+    <div id="buildBadge">BUILD 420</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17645,6 +17645,24 @@
 
       bar.appendChild(subjGroup);
     }
+
+    // Informational legend — how the Time-of-Day buckets are defined (collapsible so it doesn't
+    // crowd the panel). Anchored to each photo's real sunrise/sunset (±30 min).
+    var legend = document.createElement('details');
+    legend.style.cssText = 'margin-top:10px;border-top:1px solid var(--line,#33443a);padding-top:8px;';
+    legend.innerHTML =
+      '<summary style="cursor:pointer;font-size:11px;color:var(--text-dim);font-weight:600;">🕐 Time-of-Day guide</summary>' +
+      '<div style="font-size:10.5px;color:var(--text-dim);line-height:1.55;margin-top:7px;">' +
+        'Anchored to the <b>real sunrise/sunset</b> for each photo’s date &amp; place (±30 min):<br>' +
+        '🌆 <b>Dawn</b> — 30 min before sunrise → sunrise<br>' +
+        '🌅 <b>Sunrise</b> — sunrise → +30 min<br>' +
+        '☀️ <b>Daytime</b> — mid-morning to late afternoon<br>' +
+        '🌇 <b>Sunset</b> — 30 min before sunset → sunset<br>' +
+        '🌆 <b>Dusk</b> — sunset → +30 min<br>' +
+        '🌙 <b>Night</b> — everything else<br>' +
+        '<span style="opacity:.85;display:block;margin-top:5px;">Dawn &amp; Dusk ≈ first / last legal light.</span>' +
+      '</div>';
+    bar.appendChild(legend);
 
     container.appendChild(bar);
   }
