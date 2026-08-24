@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 423</div>
+    <div id="buildBadge">BUILD 424</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16760,6 +16760,43 @@
     });
   }
 
+  // ---------- Buck Movement Profile — one buck, a full temporal/environmental fingerprint ----------
+  // Runs a curated set of break-downs on the chosen buck and appends them to the report as one titled
+  // section (never clears — so you can profile Moose, then Big 8, and compare both in one report).
+  var MOVEMENT_PROFILE = [
+    { groupBy:'sunriseband' }, { groupBy:'sunsetband' }, { groupBy:'sun' }, { groupBy:'hour' },
+    { groupBy:'moon' }, { groupBy:'pressure' }, { groupBy:'wind' }, { groupBy:'temp' },
+    { groupBy:'solunar' }, { groupBy:'context' }, { groupBy:'site' }
+  ];
+  // One break-down → a report entry, from a pre-built event set (no re-render, no rebuild). Drives the
+  // shared state briefly so describeQuery/describeFullFilters read right, then restores it.
+  function movementEntryFrom(all, buckId, def){
+    var save = { b:analyticsBuckProfileId, c:queryConditions, g:queryGroupBy };
+    analyticsBuckProfileId = buckId; queryConditions = []; queryGroupBy = def.groupBy;
+    var counts = groupCount(all, function(o){ return queryGroupKeyForObs(o, def.groupBy); });
+    var labels = Object.keys(counts);
+    if (def.groupBy === 'sunriseband' || def.groupBy === 'sunsetband') labels.sort(function(a,b){ return solarBandLo(a) - solarBandLo(b); });
+    else labels.sort(function(a,b){ return counts[b] - counts[a]; });
+    var total = labels.reduce(function(s,l){ return s + counts[l]; }, 0);
+    var body = labels.length ? labels.map(function(l){ return l + ': ' + counts[l] + ' (' + (total>0?Math.round(counts[l]/total*100):0) + '%)'; }) : ['(no data for this dimension)'];
+    var entry = { title: describeQuery(), filters: describeFullFilters(), summary: all.length + ' detections', body: body };
+    analyticsBuckProfileId = save.b; queryConditions = save.c; queryGroupBy = save.g;
+    return entry;
+  }
+  function runMovementProfile(buckId){
+    var bp = buckProfiles.filter(function(b){ return b.id === buckId; })[0];
+    var name = buckId ? (bp ? bp.name : 'buck') : 'All bucks';
+    // Build the buck's filtered event set ONCE, then break it down every way.
+    var saveBuck = analyticsBuckProfileId; analyticsBuckProfileId = buckId;
+    var all = buildAnalyticsEvents().filter(passesSharedAnalyticsFilter);
+    analyticsBuckProfileId = saveBuck;
+    reportEntries.push({ title: '═════  MOVEMENT PROFILE: ' + name + '  ═════', filters: '', summary: all.length + ' total detections', body: [] });
+    MOVEMENT_PROFILE.forEach(function(def){ reportEntries.push(movementEntryFrom(all, buckId, def)); });
+    persistReport(); updateReportButton();
+    showToast('Movement Profile for ' + name + ' → report');
+    openReportModal();
+  }
+
   function renderQueryBuilder(container){
     var section = document.createElement('div');
     section.className = 'query-builder';
@@ -16816,6 +16853,7 @@
           '<button class="btn-ghost" id="qb_save_btn" style="flex:1 1 90px;">💾 Save</button>' +
           '<button class="btn-ghost" id="qb_report_btn" style="flex:1 1 110px;">📋 Report (' + reportEntries.length + ')</button>' +
         '</div>' +
+        '<button class="btn-ghost" id="qb_profile_btn" style="width:100%;margin-top:8px;border-color:#C9832E;color:#E7B45A;">🦌 Buck Movement Profile — full fingerprint, one tap</button>' +
         '<div id="qb_area_note" style="font-size:10.5px;color:var(--text-dim);margin-top:6px;">' + (queryDrawnLayer ? '📍 Area drawn on map — results limited to inside it' : '') + '</div>' +
         '<div id="qb_results" style="margin-top:14px;"></div>' +
       '</div>';
@@ -16859,6 +16897,10 @@
     section.querySelector('#qb_comb_or').addEventListener('click', function(){ setCombiner('OR'); });
     section.querySelector('#qb_save_btn').addEventListener('click', function(){ saveCurrentQuery(); });
     section.querySelector('#qb_report_btn').addEventListener('click', openReportModal);
+    section.querySelector('#qb_profile_btn').addEventListener('click', function(){
+      if (!buckProfiles.length){ alert('No named bucks yet — tag a buck (in a photo or the Buck Gallery) first, then build his movement profile.'); return; }
+      chooseBuckForTemplate('Buck Movement Profile', function(buckId){ runMovementProfile(buckId); });   // buckId '' = all bucks
+    });
     // Delegate the Add-to-report click on the stable #qb_results container (survives innerHTML rebuilds).
     var _res = section.querySelector('#qb_results');
     if (_res) _res.addEventListener('click', function(e){ if (e.target && e.target.id === 'qb_add_report_btn') addCurrentToReport(); });
