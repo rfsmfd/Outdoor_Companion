@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 417</div>
+    <div id="buildBadge">BUILD 418</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16166,6 +16166,8 @@
     var now = Date.now();
     if (analyticsDateRange === 'year') return ts >= now - 365*86400000;
     if (analyticsDateRange === 'month') return ts >= now - 30*86400000;
+    if (analyticsDateRange === 'week') return ts >= now - 7*86400000;
+    if (analyticsDateRange === '3day') return ts >= now - 3*86400000;
     if (analyticsDateRange === 'custom'){
       if (analyticsCustomFrom && ts < analyticsCustomFrom) return false;
       if (analyticsCustomTo && ts > analyticsCustomTo) return false;
@@ -16486,6 +16488,8 @@
     var dr = 'all time';
     if (analyticsDateRange === 'year') dr = 'past year';
     else if (analyticsDateRange === 'month') dr = 'past month';
+    else if (analyticsDateRange === 'week') dr = 'last 7 days';
+    else if (analyticsDateRange === '3day') dr = 'last 3 days';
     else if (analyticsDateRange === 'custom'){
       var f = analyticsCustomFrom ? new Date(analyticsCustomFrom).toLocaleDateString() : '…';
       var t = analyticsCustomTo ? new Date(analyticsCustomTo).toLocaleDateString() : '…';
@@ -17544,7 +17548,7 @@
     dateGroup.innerHTML = '<div class="analytics-filter-label">Date Range</div>';
     var dateChips = document.createElement('div');
     dateChips.className = 'chips';
-    [['all','All Time'],['year','Past Year'],['month','Past Month'],['custom','Custom']].forEach(function(pair){
+    [['all','All Time'],['year','Past Year'],['month','Past Month'],['week','Last 7 Days'],['3day','Last 3 Days'],['custom','Custom']].forEach(function(pair){
       var chip = document.createElement('button');
       chip.className = 'chip' + (analyticsDateRange === pair[0] ? ' active' : '');
       chip.textContent = pair[1];
