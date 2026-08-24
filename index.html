@@ -1944,7 +1944,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 410</div>
+    <div id="buildBadge">BUILD 411</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7365,6 +7365,35 @@
   async function deleteSavedQueryStorage(id){
     if (hasChatStorage){ try{ await window.storage.delete('query:'+id, false); }catch(e){} }
     else { savedQLocalSaveAll(savedQLocalLoadAll().filter(function(x){ return x.id !== id; })); }
+  }
+  // Seed a starter shelf of reusable "Tagged Buck → …" TEMPLATE queries (prompt-for-buck on load),
+  // once per device. Skips any whose name already exists (so it never duplicates across devices, and
+  // a template you delete stays deleted). groupBy keys per queryGroupKeyForObs: sun/pressure/wind/
+  // temp/moon/hour. The "Non-Night" ones carry a `sunPhase is not Night` condition.
+  async function seedStarterTemplates(){
+    try{ if (window.localStorage.getItem('oc_templates_seeded_v1')) return; }catch(e){}
+    var nonNight = [{ field:'sunPhase', op:'isnot', val:'Night', val2:'' }];
+    var defs = [
+      { name:'Tagged Buck → Time of Day',                groupBy:'sun',      conds:[] },
+      { name:'Tagged Buck → Non-Night → Pressure Trend', groupBy:'pressure', conds:nonNight },
+      { name:'Tagged Buck → Non-Night → Wind Direction', groupBy:'wind',     conds:nonNight },
+      { name:'Tagged Buck → Non-Night → Temperature',    groupBy:'temp',     conds:nonNight },
+      { name:'Tagged Buck → Moon Phase',                 groupBy:'moon',     conds:[] },
+      { name:'Tagged Buck → Hour of Day',                groupBy:'hour',     conds:[] }
+    ];
+    var have = {}; savedQueries.forEach(function(q){ have[q.name] = true; });
+    for (var i=0;i<defs.length;i++){
+      var d = defs[i];
+      if (have[d.name]) continue;
+      var q = { id: uid(), name: d.name,
+        conditions: d.conds.map(function(c){ return { field:c.field, op:c.op, val:c.val, val2:c.val2 }; }),
+        combiner:'AND', groupBy:d.groupBy, vizType:'bar', source:'photos',
+        subject:{ buckProfileId:null, promptBuck:true, species:null, buckClass:null, propertyId:null, dateRange:'all' },
+        createdAt: Date.now() + i };
+      savedQueries.push(q);
+      try{ await saveSavedQuery(q); }catch(e){ console.error('seed template', e); }
+    }
+    try{ window.localStorage.setItem('oc_templates_seeded_v1','1'); }catch(e){}
   }
 
   function huntLocalLoadAll(){
@@ -14903,7 +14932,7 @@
     await migratePropertyModules();   // stamp a module on any legacy property missing one (sites → name → default)
     await loadHuntEvents();
     await loadTrails();
-    try { await loadSavedQueries(); } catch (e) {}
+    try { await loadSavedQueries(); await seedStarterTemplates(); } catch (e) {}
     await loadBuckProfiles();
     await loadImportedPhotos();
     try { await loadSuggestions(); await loadSuggestionAcks(); } catch (e) {}
