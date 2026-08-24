@@ -1822,6 +1822,7 @@
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
+      <button class="btn-ghost" id="scoutModeBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:700;">🔍 Scout Mode — off (tap to show the board)</button>
       <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:600;">👁 Scout a Spot — flag map potential</button>
       <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
       <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
@@ -1949,7 +1950,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 455</div>
+    <div id="buildBadge">BUILD 456</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7745,10 +7746,18 @@
       scoutMode = false;
     }
     try { localStorage.setItem('oc_scout_mode', scoutMode ? '1' : '0'); } catch(e){}   // remember the mode across reloads so conjecture marks don't "vanish"
+    updateScoutModeBtn();
     renderChips();
     renderMarkers();
     if (typeof renderObsMarkers === 'function') renderObsMarkers();
     renderList();
+  }
+  function updateScoutModeBtn(){
+    var b = document.getElementById('scoutModeBtn'); if (!b) return;
+    b.textContent = scoutMode ? '🔍 Scout Mode — ON · board showing' : '🔍 Scout Mode — off (tap to show the board)';
+    b.style.background = scoutMode ? '#5a3e78' : '#241E2E';
+    b.style.color = scoutMode ? '#ffffff' : '#e9ddf5';
+    b.style.borderColor = scoutMode ? '#7d5aa8' : '#5a3e78';
   }
   // On load, restore Scout Mode if it was left on — otherwise a just-dropped conjecture mark appears to vanish
   // on refresh (it's saved, just hidden because unverified marks show only in Scout Mode).
@@ -11418,8 +11427,10 @@
     var _fcb = document.getElementById('forecastBtn'); if (_fcb) _fcb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _wib = document.getElementById('walkInBtn'); if (_wib) _wib.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _slb = document.getElementById('sitLogBtn'); if (_slb) _slb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    var _smb = document.getElementById('scoutModeBtn'); if (_smb) _smb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _ssb = document.getElementById('scoutSpotBtn'); if (_ssb) _ssb.style.display = activeModule === 'hunting' ? 'block' : 'none';
     var _srb = document.getElementById('scoutReportBtn'); if (_srb) _srb.style.display = activeModule === 'hunting' ? 'block' : 'none';
+    if (typeof updateScoutModeBtn === 'function') updateScoutModeBtn();
   }
 
   // Named profiles for individual bucks, with any sighting (yours, or a photo a friend
@@ -12693,6 +12704,8 @@
     });
     var reportBtn = document.getElementById('scoutReportBtn');
     if (reportBtn) reportBtn.addEventListener('click', function(){ if (typeof openScoutingReport === 'function') openScoutingReport(); });
+    var modeBtn = document.getElementById('scoutModeBtn');
+    if (modeBtn) modeBtn.addEventListener('click', function(){ setScoutMode(!scoutMode); showToast(scoutMode ? '🔍 Scout Mode ON — your conjecture marks & all sign are showing' : 'Scout Mode off — back to your clean hunt map'); });
   })();
 
   map.on('click', function(e){
