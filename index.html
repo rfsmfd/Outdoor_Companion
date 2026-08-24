@@ -1947,7 +1947,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 426</div>
+    <div id="buildBadge">BUILD 427</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -16813,15 +16813,24 @@
     var all = buildAnalyticsEvents().filter(passesSharedAnalyticsFilter);
     analyticsBuckProfileId = saveBuck;
     var dayAll = all.filter(function(e){ return !_isNightEvent(e); });
-    var now = Date.now();
-    var d3 = all.filter(function(e){ return e.createdAt >= now - 3*86400000; }).length;
-    var d7 = all.filter(function(e){ return e.createdAt >= now - 7*86400000; }).length;
+    var now = Date.now(), DAY = 86400000;
+    // count in a window [a days ago, b days ago); b=null → up to now
+    function cnt(arr, a, b){ return arr.filter(function(e){ return e.createdAt >= now - a*DAY && (b == null || e.createdAt < now - b*DAY); }).length; }
+    // recent vs the immediately-prior equal window, with an honesty gate: tiny totals get no ↑/↓
+    function fmtTrend(r, p){ var t = r + p; var a = (t === 0) ? '' : (t < 6) ? ' (too few to call)' : (r > p ? ' ↑' : r < p ? ' ↓' : ' →'); return r + ' vs ' + p + ' prior' + a; }
+    var d3 = cnt(all,3,null), p3 = cnt(all,6,3), d7 = cnt(all,7,null), p7 = cnt(all,14,7);
+    var nd3 = cnt(dayAll,3,null), np3 = cnt(dayAll,6,3), nd7 = cnt(dayAll,7,null), np7 = cnt(dayAll,14,7);
     var nightN = all.length - dayAll.length, dayN = dayAll.length;
     // --- "WHAT MATTERS RIGHT NOW" — the answer first, strongest OBSERVED facts, no predictions ---
     var facts = [];
-    if (d7 === 0) facts.push('⚠ NO detections in the last 7 days — not currently showing here.');
-    else if (d3 === 0) facts.push('None in the last 3 days (' + d7 + ' in the last 7).');
-    else facts.push('Active recently: ' + d3 + ' in the last 3 days.');
+    if (d7 === 0) facts.push('⚠ No detections in the last 7 days at monitored sites (cameras haven\'t recorded him — not proof he\'s absent).');
+    else if (d3 === 0) facts.push('None in the last 3 days (' + d7 + ' in the last 7) at monitored sites.');
+    else facts.push('Active recently: ' + d3 + ' in the last 3 days at monitored sites.');
+    // Recent activity TREND (in the summary, not another chart), gated so tiny counts don't fake a trend.
+    if (d7 + p7 > 0){
+      facts.push('Trend 3d: total ' + fmtTrend(d3,p3) + ' · daylight ' + fmtTrend(nd3,np3));
+      facts.push('Trend 7d: total ' + fmtTrend(d7,p7) + ' · daylight ' + fmtTrend(nd7,np7));
+    }
     if (all.length){
       var nPct = Math.round(nightN/all.length*100);
       if (nPct >= 70) facts.push(nPct + '% of detections were at NIGHT — largely nocturnal at these cameras.');
