@@ -1961,7 +1961,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 480</div>
+    <div id="buildBadge">BUILD 481</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7810,6 +7810,8 @@
     } else if (!on && scoutMode){
       if (_scoutPrev){ activeFilters = new Set(_scoutPrev.sites); activeObsFilters = new Set(_scoutPrev.obs); _scoutPrev = null; }
       scoutMode = false;
+      cameraCoverageOn = false;   // the coverage circles live ON the Scout Mode board — leave the board, they clear
+      if (typeof renderCameraCoverage === 'function') renderCameraCoverage();
     }
     try { localStorage.setItem('oc_scout_mode', scoutMode ? '1' : '0'); } catch(e){}   // remember the mode across reloads so conjecture marks don't "vanish"
     updateScoutModeBtn();
@@ -10134,6 +10136,8 @@
     });
     return camSites.map(function(s){
       var ph = photos.filter(function(p){ return p.matchedSiteId === s.id && p.timestamp; }).sort(function(a, b){ return a.timestamp - b.timestamp; });
+      var cam = (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId === s.id; })[0];   // the device at this spot
+      var camNo = cam ? (cam.name || '') : '';
       var total = ph.length, placedMs = total ? ph[0].timestamp : null, lastMs = total ? ph[total - 1].timestamp : null;
       var wks = placedMs ? ((now - placedMs) / (7 * DAY)) : 0;
       var recent = ph.filter(function(p){ return p.timestamp >= now - 21 * DAY; }).length;
@@ -10170,7 +10174,7 @@
       }
       var moveable = (role === 'float' && (v === 'MATURED' || v === 'GONE QUIET' || v === 'CHECK IT'));
       var ev = total ? ('Wk ' + Math.max(1, Math.round(wks)) + ' · ' + total + ' pics · ' + namedBucks + ' tagged buck' + (namedBucks === 1 ? '' : 's') + ' · ' + recent + ' in 21d') : 'no captures yet';
-      return { s: s, v: v, why: why, tone: tone, rank: rank, ev: ev, role: role, moveable: moveable };
+      return { s: s, v: v, why: why, tone: tone, rank: rank, ev: ev, role: role, moveable: moveable, camNo: camNo, shared: (role === 'shared') };
     }).sort(function(a, b){ return a.rank - b.rank; });   // actionable (check / gone quiet / matured floaters) first
   }
   function cameraGaps(prop){
@@ -10199,9 +10203,12 @@
     if (!reads.length){ h += line('📷', '<span style="opacity:.7;">No camera spots here yet. Once photos are matched to a site, they show up here.</span>'); }
     else {
       reads.forEach(function(r){
+        var idMark = r.shared
+          ? '<span title="Shared camera — not yours to control" style="color:#F2C14E;font-size:14px;line-height:1;">★</span>'
+          : (r.camNo ? '<span style="color:#5FB6E6;font-weight:800;">#' + escapeHtml(r.camNo) + '</span>' : '');
         h += '<div class="cam-row" data-lat="' + r.s.lat + '" data-lng="' + r.s.lng + '" style="border:1px solid #35443A;border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
-            '<div style="font-weight:700;font-size:12.5px;">📷 ' + escapeHtml(r.s.name || 'Camera') + '</div>' +
+            '<div style="font-weight:700;font-size:12.5px;">📷 ' + (idMark ? (idMark + ' ') : '') + escapeHtml(r.s.name || 'Camera') + '</div>' +
             '<div style="font-size:10.5px;font-weight:800;color:' + r.tone + ';">' + r.v + '</div>' +
           '</div>' +
           '<div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + r.why + '</div>' +
@@ -11154,7 +11161,8 @@
   function renderCameraCoverage(){
     if (!coverageLayer) coverageLayer = L.layerGroup();
     coverageLayer.clearLayers();
-    if (!cameraCoverageOn){ if (map.hasLayer(coverageLayer)) map.removeLayer(coverageLayer); return; }
+    // Coverage circles are part of the Scout Mode board — only ever draw them when the board is on.
+    if (!cameraCoverageOn || !scoutMode){ if (map.hasLayer(coverageLayer)) map.removeLayer(coverageLayer); return; }
     if (!map.hasLayer(coverageLayer)) coverageLayer.addTo(map);
     var since = Date.now() - 90 * 86400000, covered = {};
     (typeof importedPhotos !== 'undefined' ? importedPhotos : []).forEach(function(p){ if (p && p.matchedSiteId && (p.timestamp || 0) >= since) covered[p.matchedSiteId] = true; });
