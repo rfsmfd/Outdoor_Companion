@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 464</div>
+    <div id="buildBadge">BUILD 465</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12123,16 +12123,32 @@
     sources.sort(function(a, b){ return a.dist - b.dist; });
     return { photos: photos, sources: sources };
   }
+  // Rest / hunting pressure as a ranking FACTOR (not just a display). Burned stands sink, rested ones lift —
+  // weighted BELOW wind (±15 vs wind's ±28) so a fresh stand can't outrank a clean-wind one, but a burned
+  // stand drops meaningfully. Also gives camera-less stands a real, honest position (ranked on rest, not "no data").
+  function restForStand(s){
+    var now = Date.now();
+    var hunts = (typeof huntEvents !== 'undefined' ? huntEvents : []).filter(function(h){ return h.module !== 'fishing' && h.siteId === s.id; });
+    var lastSit = hunts.reduce(function(m, h){ return Math.max(m, h.checkInAt || 0); }, 0);
+    var daysSince = lastSit ? Math.round((now - lastSit) / 86400000) : null;
+    var bonus, txt, tone;
+    if (daysSince == null){ bonus = 5; txt = 'Never hunted — fully rested'; tone = '#9ED17A'; }
+    else if (daysSince <= 1){ bonus = -15; txt = '🔥 Burned — sat ' + (daysSince === 0 ? 'today' : 'yesterday'); tone = '#E8823F'; }
+    else if (daysSince <= 3){ bonus = -6; txt = 'Cooling — ' + daysSince + 'd since a sit'; tone = '#E8B04B'; }
+    else if (daysSince <= 6){ bonus = 3; txt = daysSince + 'd rested'; tone = '#CFE3B8'; }
+    else { bonus = 8; txt = '✅ Rested ' + daysSince + 'd'; tone = '#9ED17A'; }
+    return { daysSince: daysSince, bonus: bonus, txt: txt, tone: tone, hunted: hunts.length > 0 };
+  }
   function huntTonightSpots(){
     var out = [];
     (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
       if (typeof s.lat !== 'number') return;
       if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type)) return;
-      var huntable = siteIsHuntable(s);
+      var huntable = siteIsHuntable(s), rest = restForStand(s);
       var r = huntabilityRead(deerPhotosAtSite(s), huntRecentDays);
       if (r.has){
         var sc = scoreSpotRead(r, s);
-        out.push({ site: s, read: r, score: sc.score, huntable: huntable, solunarHit: sc.solunarHit, hasData: true, borrow: null });
+        out.push({ site: s, read: r, score: sc.score + rest.bonus, huntable: huntable, solunarHit: sc.solunarHit, hasData: true, borrow: null, rest: rest });
         return;
       }
       if (!huntable) return; // observation cam with no data → skip
@@ -12141,13 +12157,14 @@
       var br = huntabilityRead(b.photos, huntRecentDays);
       if (br.has){
         var sc2 = scoreSpotRead(br, s);
-        out.push({ site: s, read: br, score: sc2.score, huntable: true, solunarHit: sc2.solunarHit, hasData: true, borrow: b.sources });
+        out.push({ site: s, read: br, score: sc2.score + rest.bonus, huntable: true, solunarHit: sc2.solunarHit, hasData: true, borrow: b.sources, rest: rest });
         return;
       }
-      // truly nothing nearby either
-      out.push({ site: s, read: null, score: -1, huntable: true, solunarHit: null, hasData: false, borrow: null });
+      // No activity data anywhere near — still a real hunt spot: rank it on REST (+ its per-stand wind read below).
+      out.push({ site: s, read: null, score: rest.bonus, huntable: true, solunarHit: null, hasData: false, borrow: null, rest: rest });
     });
-    out.sort(function(a, b){ var as = a.hasData ? a.score : -1000, bs = b.hasData ? b.score : -1000; return bs - as; });
+    // Data spots (we have deer evidence) rank first, then no-data spots by rest — within each group, by score.
+    out.sort(function(a, b){ if (a.hasData !== b.hasData) return a.hasData ? -1 : 1; return b.score - a.score; });
     return out;
   }
   function propertyNameForSite(s){
@@ -12386,9 +12403,11 @@
         return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
             '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' 🏹</div>' +
-            '<div style="font-size:11px;color:#9db0a3;">no data yet</div>' +
+            '<div style="font-size:11px;color:#9db0a3;">on rest &amp; wind</div>' +
           '</div>' + _pnLine +
-          '<div style="font-size:11px;color:#9db0a3;margin-top:3px;">No camera data at this stand yet — hang a camera here to learn when deer move past it.</div>' +
+          (x.rest ? ('<div style="font-size:10.5px;margin-top:3px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
+          '<div style="font-size:11px;color:#9db0a3;margin-top:3px;">No deer data here yet — ranked on rest &amp; tonight\'s wind. Hang a camera to learn its timing.</div>' +
+          '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' +
         '</div>';
       }
       var r = x.read, win = r.windowText ? (bucketLabel(r.useBest) + ' · ' + r.windowText) : '—';
@@ -12401,6 +12420,7 @@
         '</div>' + _pnLine +
         '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;">🌅 ' + win + star + '</div>' +
         '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">Daylight ' + r.base.pct + '% all-time' + (r.recent.located ? (' · ' + r.recent.pct + '% recent') : '') + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '') + '</div>' +
+        (x.rest ? ('<div style="font-size:10.5px;margin-top:2px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
         borrowLine +
         (x.huntable ? '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' : '') +
       '</div>';
@@ -12422,7 +12442,7 @@
       else { html += '<div style="font-size:11.5px;color:#E8B04B;background:rgba(232,176,75,.1);border-radius:8px;padding:9px;margin-bottom:10px;line-height:1.5;">You haven\'t marked any hunt spots yet. Below is where deer are moving on your ground — tap a spot on the map → <b>🏹 I hunt here</b>, or drop a Tree Stand, to turn it into a real recommendation.</div>'; }
       if (obs.length){ html += '<div style="font-weight:700;font-size:12px;margin:12px 0 6px;color:#9db0a3;">👁 Also active (observation cams)</div>'; obs.forEach(function(x){ html += spotCard(x, null); }); }
     }
-    html += '<div style="font-size:9.5px;color:#6f8377;margin-top:10px;line-height:1.45;">Ranks by your own daylight deer activity + recency + tonight\'s solunar. The 💨 line reads tonight\'s wind + thermals at each stand — <b>a spot where your scent blows toward the deer is a pass no matter how hot it is,</b> so let the wind override the order.</div>';
+    html += '<div style="font-size:9.5px;color:#6f8377;margin-top:10px;line-height:1.45;">Ranks by your own daylight deer activity + recency + tonight\'s solunar + <b>rest</b> (🔥 burned stands drop, ✅ rested stands rise). The 💨 line reads tonight\'s wind + thermals at each stand — <b>a spot where your scent blows toward the deer is a pass no matter how hot it is,</b> so let the wind override the order. Spots with no deer data still rank on rest &amp; wind — no camera required.</div>';
     card.innerHTML = html;
     back.appendChild(card); document.body.appendChild(back);
     // 🦌 Bucks-in-play companion panel, docked to the LEFT of Where-to-Hunt (only when you have tagged bucks)
@@ -12471,7 +12491,7 @@
       return scentLight('#E8B04B') + '<span style="color:#E8B04B;">Crosswind — quarters past (' + to + ')</span>' + swirl;
     }
     (async function fillScentLines(){
-      var hs = hunt.filter(function(x){ return x.hasData; });
+      var hs = hunt.filter(function(x){ return x.huntable; });   // fill the wind read for ALL hunt spots, incl. camera-less ones (they show scent direction; no deer direction to compare)
       if (!hs.length || !back.parentNode || lat == null) return;
       var wx = (plannedHunt && plannedHunt.wind) ? { windMph: plannedHunt.wind.mph, windDirDeg: plannedHunt.wind.deg, cloudCoverPct: plannedHunt.cloud } : await scentWeather(lat, lng); if (!back.parentNode) return;
       var windMph = wx ? wx.windMph : 0, windFrom = (wx && wx.windDirDeg != null) ? wx.windDirDeg : null, cloud = (wx && wx.cloudCoverPct != null) ? wx.cloudCoverPct : 40;
