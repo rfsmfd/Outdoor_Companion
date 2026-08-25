@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 489</div>
+    <div id="buildBadge">BUILD 490</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10446,6 +10446,8 @@
   // LiDAR terrain features (from the lay of the land, not cover).
   var LIDAR_KINDS = {
     bottom: { icon: '💧', color: '#4A8AA8', label: 'Low bottom / wet', why: 'Flat low ground — likely a wet bottom or swamp. Deer bed its thick edges and cross at the narrows; hunt the EDGE, not the middle.' },
+    island: { icon: '🏝', color: '#6BA36B', label: 'Swamp island / hummock', why: 'Dry high ground surrounded by wet — classic buck BEDDING. Get downwind; hunt the edge and the crossings leading to it.' },
+    lowcross: { icon: '🚶', color: '#4A9AA8', label: 'Low crossing / narrows', why: 'A narrow neck through the low/wet ground — where deer cross rather than wade the whole thing. A pinch worth a stand.' },
     saddle: { icon: '⛰', color: '#C9832E', label: 'Saddle',       why: 'A low gap in a ridge — deer cross ridgelines at the saddle, the easiest path. A natural funnel.' },
     knob:   { icon: '🗻', color: '#B87333', label: 'Knob / hilltop', why: 'A high point — deer skirt just below the crest; useful to orient off and to play the thermal.' },
     spur:   { icon: '🪝', color: '#C98A3C', label: 'Ridge point / spur', why: 'A finger of high ground running out — a travel route; bucks work the leeward side.' },
@@ -10454,6 +10456,9 @@
   };
   // Label a feature by kind + context (a point on a field edge reads differently than a thick-cover finger).
   function _terrainLabel(f){
+    if (f.t === 'wetland') return { icon: '💧', color: '#4A8AA8', label: 'Swamp / marsh (NHD)', why: 'Mapped wetland — deer bed the thick edges and cross at the narrows. Hunt the EDGE, never the middle.' };
+    if (f.t === 'water') return { icon: '🌊', color: '#4A7AA8', label: 'Pond / water (NHD)', why: 'Open water — deer travel and water at its edge; a barrier that funnels movement around it.' };
+    if (f.t === 'creek') return { icon: '🏞', color: '#5A9AB0', label: 'Creek / stream (NHD)', why: 'A mapped stream — a travel corridor; deer cross at bends, shallows, log-jams, and where trails hit it.' };
     if (LIDAR_KINDS[f.t]) return LIDAR_KINDS[f.t];
     if (f.t === 'bedding') return { icon: '💤', color: '#5AA0C9', label: 'Likely bedding', why: 'A block of thick cover (security) — probable bedding. Hunt the DOWNWIND edge, never the middle.' };
     if (f.ctx === 'cross'){
@@ -10522,9 +10527,9 @@
         // CROSS neighbors, not 3-of-4. That's why entire ravine & ridge systems were invisible before.
         var lowEW = (c < e - PROM) && (c < w - PROM), highEW = (c > e + PROM) && (c > w + PROM);
         var lowNS = (c < n - PROM) && (c < s - PROM), highNS = (c > n + PROM) && (c > s + PROM);
-        if (highEW && highNS){ raw.push({ t: 'knob', gx: xx, gy: yy, score: (c - Math.min(n, s, e, w)) }); continue; }              // hilltop
+        if (highEW && highNS){ var lowNbr = Math.min(n, s, e, w); raw.push({ t: (lowNbr < p25 ? 'island' : 'knob'), gx: xx, gy: yy, score: (c - lowNbr) }); continue; }   // hilltop, or a DRY ISLAND if it rises out of low/wet ground
         else if (lowEW && lowNS){ raw.push({ t: 'draw', gx: xx, gy: yy, score: ((e - c) + (w - c) + (n - c) + (s - c)) }); continue; }  // pocket / draw head
-        else if ((lowEW && highNS) || (lowNS && highEW)){ raw.push({ t: 'saddle', gx: xx, gy: yy, score: (Math.abs(e - c) + Math.abs(w - c) + Math.abs(n - c) + Math.abs(s - c)) }); continue; }   // pass / crossing
+        else if ((lowEW && highNS) || (lowNS && highEW)){ raw.push({ t: (c < p25 ? 'lowcross' : 'saddle'), gx: xx, gy: yy, score: (Math.abs(e - c) + Math.abs(w - c) + Math.abs(n - c) + Math.abs(s - c)) }); continue; }   // pass; a LOW pass = swamp/creek crossing
         else if (highEW || highNS){ raw.push({ t: 'spur', gx: xx, gy: yy, score: Math.max((c - e) + (c - w), (c - n) + (c - s)) }); continue; }   // ridge line / spur
         else if (lowEW || lowNS){ raw.push({ t: 'draw', gx: xx, gy: yy, score: Math.max((e - c) + (w - c), (n - c) + (s - c)) }); continue; }      // ravine / draw line
         var lv = Math.max(Math.abs(c - n), Math.abs(c - s), Math.abs(c - e), Math.abs(c - w)), grad = Math.abs(n - s) + Math.abs(e - w);
@@ -10548,6 +10553,37 @@
     var onp = feats.filter(function(f){ return !f.off; }).sort(byScore).slice(0, 16);
     var offp = feats.filter(function(f){ return f.off; }).sort(byScore).slice(0, 8);
     return onp.concat(offp);
+  }
+  function _polyCentroid(geom){
+    if (!geom) return null;
+    var ring = geom.type === 'Polygon' ? geom.coordinates[0] : (geom.type === 'MultiPolygon' ? (geom.coordinates[0] && geom.coordinates[0][0]) : null);
+    if (!ring || !ring.length) return null;
+    var sx = 0, sy = 0; ring.forEach(function(p){ sx += p[0]; sy += p[1]; });
+    return { lat: sy / ring.length, lng: sx / ring.length };
+  }
+  // Pull real HYDROGRAPHY from USGS NHD (same service the drainage burn + lake shoreline use): layer 12 =
+  // waterbodies (swamp/marsh fcode 466x, ponds), layer 6 = streams/creeks. So the app FINDS the swamp on its own
+  // instead of needing it hand-marked in the cover scan. Non-fatal, 12 s timeout each.
+  async function fetchNhdHydro(bb){
+    var env = [bb.w, bb.s, bb.e, bb.n].join(',');
+    var base = 'https://hydro.nationalmap.gov/arcgis/rest/services/nhd/MapServer/';
+    var sfx = '/query?geometry=' + env + '&geometryType=esriGeometryEnvelope&inSR=4326&outSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=true&outFields=fcode&f=geojson';
+    var out = { wet: [], creek: [] };
+    function timed(url){ var t = null; return Promise.race([ fetch(url), new Promise(function(_, rej){ t = setTimeout(function(){ rej(new Error('nhd-timeout')); }, 12000); }) ]).then(function(r){ if (t) clearTimeout(t); return r; }); }
+    try { var r1 = await timed(base + '12' + sfx); if (r1 && r1.ok){ var g1 = await r1.json(); (g1.features || []).forEach(function(f){ var fc = String((f.properties && (f.properties.fcode || f.properties.FCODE || f.properties.FCode)) || ''); var ctr = _polyCentroid(f.geometry); if (ctr) out.wet.push({ lat: ctr.lat, lng: ctr.lng, swamp: fc.indexOf('466') === 0 }); }); } } catch (e) {}
+    try { var r2 = await timed(base + '6' + sfx); if (r2 && r2.ok){ var g2 = await r2.json(); (g2.features || []).forEach(function(f){ var g = f.geometry; if (!g) return; var lines = g.type === 'LineString' ? [g.coordinates] : (g.type === 'MultiLineString' ? g.coordinates : []); lines.forEach(function(c){ out.creek.push(c); }); }); } } catch (e) {}
+    return out;
+  }
+  async function detectNhdFeatures(prop){
+    var bb0 = _propBBox(prop); if (!bb0) return [];
+    var mlat0 = (bb0.n + bb0.s) / 2, PAD = 805, padLat = PAD / 111320, padLng = PAD / (111320 * Math.cos(mlat0 * Math.PI / 180));
+    var bb = { n: bb0.n + padLat, s: bb0.s - padLat, e: bb0.e + padLng, w: bb0.w - padLng };
+    var hydro = await fetchNhdHydro(bb), feats = [], kept = [];
+    hydro.wet.forEach(function(w){ feats.push({ t: w.swamp ? 'wetland' : 'water', lat: w.lat, lng: w.lng, score: w.swamp ? 6 : 4 }); });
+    hydro.creek.forEach(function(coords){ for (var i = 0; i < coords.length; i++){ var ln = coords[i][0], la = coords[i][1]; if (!kept.some(function(k){ return distMeters(la, ln, k.lat, k.lng) < 180; })){ kept.push({ lat: la, lng: ln }); feats.push({ t: 'creek', lat: la, lng: ln, score: 3 }); } } });
+    var hasBnd = !!(prop && prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function');
+    feats.forEach(function(f){ f.off = hasBnd ? !pointInProperty(f.lat, f.lng, prop) : false; });
+    return feats;
   }
   var terrainLayer = null;
   function clearTerrainPins(){ if (terrainLayer){ try { map.removeLayer(terrainLayer); } catch (e) {} terrainLayer = null; } }
@@ -10576,7 +10612,7 @@
       if (res.needScan) h += '<div style="color:#E8B04B;font-size:11.5px;margin-bottom:6px;">Run <b>Field vs woods</b> in Property Setup for the COVER read (corners, points, pinches, bedding). I\'ll still read the land\'s shape below.</div>';
       else if (!res.feats.length) h += '<div style="opacity:.8;font-size:11.5px;margin-bottom:6px;">No cover features jump out — the edges look straight.</div>';
       else { h += '<div style="color:#9db0a3;font-size:11px;letter-spacing:.3px;margin:4px 0 4px;">🌲 FROM THE COVER</div>'; res.feats.forEach(function(f){ h += trRow(f); }); }
-      h += '<div id="tr-lidar" style="margin-top:6px;padding-top:6px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:11.5px;">🗻 Reading the lay of the land (LiDAR — ridges, saddles, draws, benches)…</div>';
+      h += '<div id="tr-lidar" style="margin-top:6px;padding-top:6px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:11.5px;">🗻 Reading the land &amp; water — ridges, saddles, draws, swamps &amp; creeks (LiDAR + NHD), out to ½ mi around you…</div>';
     }
     h += '<div style="color:#9db0a3;font-size:11.5px;margin-top:8px;">This is me pointing at the map like a hunting buddy would — sometimes fresh eyes catch the obvious. But you know the dirt. What do you see that I don\'t?</div></div>';
     var back = document.createElement('div');
@@ -10593,20 +10629,32 @@
     card.querySelector('.tr-x').addEventListener('click', close);
     var _c2 = card.querySelector('.tr-close2'); if (_c2) _c2.addEventListener('click', close);
     function bindTrRows(scope){ Array.prototype.forEach.call((scope || card).querySelectorAll('.tr-row'), function(el){ if (el._trb) return; el._trb = 1; el.addEventListener('click', function(){ var la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng')); try { map.flyTo([la, ln], Math.max(map.getZoom(), 16)); } catch (e) {} if (typeof flashSiteRing === 'function') flashSiteRing(la, ln); }); }); }
-    try { if (!scoutMode) setScoutMode(true); if (typeof renderTerrainPins === 'function') renderTerrainPins(res.feats); } catch (e) {}
+    try {
+      if (!scoutMode) setScoutMode(true);
+      if (typeof renderTerrainPins === 'function') renderTerrainPins(res.feats);
+      // Draw the ~1/2-mile READ AREA so the perimeter is visibly captured, not just claimed.
+      var _pb = prop ? _propBBox(prop) : null;
+      if (_pb){ var _pl = 805 / 111320, _pg = 805 / (111320 * Math.cos((_pb.n + _pb.s) / 2 * Math.PI / 180)); if (!terrainLayer) terrainLayer = L.layerGroup().addTo(map); L.rectangle([[_pb.s - _pl, _pb.w - _pg], [_pb.n + _pl, _pb.e + _pg]], { color: '#C9832E', weight: 1.5, dashArray: '8 8', fill: false, interactive: false }).addTo(terrainLayer); }
+    } catch (e) {}
     bindTrRows(card);
     back.appendChild(card); document.body.appendChild(back);
     document.addEventListener('keydown', onKey);
     setTimeout(function(){ try { map.on('click', onMapClose); } catch (e) {} }, 80);   // tap the map to close (deferred so the opening tap doesn't)
-    // Async LiDAR terrain — fill the placeholder + add pins when it returns (skip if the panel was closed).
-    if (prop && typeof detectLidarTerrain === 'function'){
-      detectLidarTerrain(prop).then(function(lf){
+    // Async LAND & WATER read — LiDAR terrain + NHD hydrography (swamps/creeks), across the 1/2-mi perimeter.
+    if (prop){
+      Promise.all([
+        (typeof detectLidarTerrain === 'function' ? detectLidarTerrain(prop) : Promise.resolve([])),
+        (typeof detectNhdFeatures === 'function' ? detectNhdFeatures(prop) : Promise.resolve([]))
+      ]).then(function(rr){
         var el = document.getElementById('tr-lidar'); if (!el || !document.body.contains(card)) return;
-        if (!lf || !lf.length){ el.innerHTML = '🗻 The land reads mostly flat here — no strong terrain features to point out.'; return; }
-        var html = '<div style="color:#9db0a3;font-size:11px;letter-spacing:.3px;margin:0 0 4px;">🗻 FROM THE LAY OF THE LAND</div>';
+        var lf = (rr[0] || []).concat(rr[1] || []);
+        lf.sort(function(a, b){ if ((a.off ? 1 : 0) !== (b.off ? 1 : 0)) return a.off ? 1 : -1; return (b.score || 0) - (a.score || 0); });
+        lf = lf.slice(0, 28);
+        if (!lf.length){ el.innerHTML = '🗻 The land reads mostly flat & dry here — no strong terrain or water features.'; return; }
+        var html = '<div style="color:#9db0a3;font-size:11px;letter-spacing:.3px;margin:0 0 4px;">🗻 FROM THE LAND &amp; WATER (incl. ½-mi around you)</div>';
         lf.forEach(function(f){ html += trRow(f); });
         el.innerHTML = html; bindTrRows(el); if (typeof addTerrainPins === 'function') addTerrainPins(lf);
-      }).catch(function(){ var el = document.getElementById('tr-lidar'); if (el) el.innerHTML = '🗻 Couldn\'t reach the elevation service for the land read (needs a connection).'; });
+      }).catch(function(){ var el = document.getElementById('tr-lidar'); if (el) el.innerHTML = '🗻 Couldn\'t reach the terrain/water services (needs a connection).'; });
     }
   }
   // ---------- 📋 Field Card — the per-property hunt-day card, generated live from your data ----------
