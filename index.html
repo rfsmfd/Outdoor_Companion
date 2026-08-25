@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 466</div>
+    <div id="buildBadge">BUILD 467</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12441,11 +12441,22 @@
         '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;line-height:1.5;">' + reasons.join(' &nbsp;·&nbsp; ') + '.</div>' +
       '</div>';
     }
+    // "When are you hunting?" quick picker — the sit window that drives the ranking wind AND the sit-check.
+    function whenChip(k, d, label){
+      var pick = (k === 'now') ? 'now' : (k + '|' + d);
+      var active = plannedHunt ? (plannedHunt.pick === pick) : (k === 'now');
+      return '<button class="ht-when" data-k="' + k + '" data-d="' + d + '" style="flex:1 1 auto;padding:6px 8px;border-radius:8px;border:1px solid ' + (active ? '#3c6d42' : '#3c4d42') + ';background:' + (active ? '#2E4636' : '#1E2B23') + ';color:' + (active ? '#dff0e4' : '#9db0a3') + ';font-size:11.5px;font-weight:' + (active ? '700' : '400') + ';cursor:pointer;white-space:nowrap;">' + label + '</button>';
+    }
+    var whenRow = '<div style="font-size:11px;color:#9db0a3;margin:2px 0 5px;">🗓 When are you hunting?</div>' +
+      '<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">' +
+        whenChip('now', 0, 'Now') + whenChip('pm', 0, 'This evening') + whenChip('am', 1, 'Tomorrow AM') + whenChip('pm', 1, 'Tomorrow PM') +
+      '</div>';
     var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
         '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">← Back</button>' +
         '<div style="font-weight:800;font-size:16px;flex:1;min-width:0;">🎯 Where to hunt</div>' +
         '<button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button></div>' +
       '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + (plannedHunt ? ('🗓 Planning: <b style="color:#dff0e4;">' + plannedHunt.label + '</b>') : now.toDateString()) + (activePropertyId ? (' · 📍 ' + escapeHtml(propertyNameForSite({ propertyId: activePropertyId }))) : '') + '</div>' +
+      whenRow +
       '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:12px;font-size:11.5px;line-height:1.6;">' +
         '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
         (per ? ('<br>⭐ Feeding — major <b>' + fmtSolWin(per.major1) + '</b> & <b>' + fmtSolWin(per.major2) + '</b><br><span style="color:#9db0a3;">minor ' + fmtSolWin(per.minor1) + ' & ' + fmtSolWin(per.minor2) + '</span>') : '') +
@@ -12483,6 +12494,14 @@
     card.querySelector('.ht-close').addEventListener('click', close);
     var _htBack = card.querySelector('.ht-back'); if (_htBack) _htBack.addEventListener('click', function(){ close(); if (propsForModule().length > 1) showPropertyRanker(); else showForecastPanel(); });
     var _htProf = card.querySelector('.ht-profile'); if (_htProf) _htProf.addEventListener('click', function(){ chooseBuckForTemplate('Movement Profile — reference', function(buckId){ showMovementProfileModal(buckId); }); });
+    // Time-frame picker → set the sit window (Now / This evening / Tomorrow AM / PM) and re-rank for it.
+    Array.prototype.forEach.call(card.querySelectorAll('.ht-when'), function(b){
+      b.addEventListener('click', async function(){
+        var k = b.getAttribute('data-k'), d = parseInt(b.getAttribute('data-d'), 10) || 0;
+        try { await planForWindow(k, d, lat, lng); } catch(e){ planNow(); }
+        close(); showHuntTodayPanel();
+      });
+    });
     Array.prototype.forEach.call(card.querySelectorAll('.ht-spot'), function(el){
       el.addEventListener('click', function(){ var sid = el.getAttribute('data-sid'), la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng'));
         var st = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === sid; })[0];
@@ -12604,8 +12623,24 @@
   // the forecast at that hour when it's a future sit. plannedHunt = null → treat as Now.
   var plannedHunt = null;
   function huntTimeMs(){ return plannedHunt ? plannedHunt.ms : Date.now(); }
-  function planNow(){ plannedHunt = { kind: 'now', ms: Date.now(), label: 'Now (live)', wind: null, cloud: null }; }
+  function planNow(){ plannedHunt = { kind: 'now', ms: Date.now(), label: 'Now (live)', wind: null, cloud: null, pick: 'now' }; }
   function planFromSit(sit){ plannedHunt = { kind: sit.kind, ms: sit.timeMs, label: fcDayLabel(sit.timeMs) + ' ' + (sit.kind === 'am' ? 'AM' : 'PM'), wind: { mph: sit.windMph, dir: sit.windDir, deg: sit.windDeg }, cloud: sit.cloudPct }; }
+  // Quick "when are you hunting" window for the Where-to-Hunt picker → sets plannedHunt (prime AM = ~30 min
+  // after sunrise, prime PM = ~90 min before sunset) with the forecast wind at that time. Drives the ranking
+  // AND the sit-check window, so picking "Tomorrow AM" gives the full morning, not just "from now."
+  async function planForWindow(kind, dayOffset, lat, lng){
+    if (kind === 'now' || lat == null){ planNow(); return; }
+    try { await ensureForecast(lat, lng); } catch(e){}
+    var day = new Date(Date.now() + dayOffset * 86400000), t = SunCalc.getTimes(day, lat, lng);
+    var ms = (kind === 'am') ? (t.sunrise.getTime() + 1800000) : (t.sunset.getTime() - 5400000);
+    var f = (typeof forecastAt === 'function') ? (forecastAt(ms) || {}) : {};
+    plannedHunt = {
+      kind: kind, ms: ms,
+      label: (typeof fcDayLabel === 'function' ? fcDayLabel(ms) : '') + ' ' + (kind === 'am' ? 'AM' : 'PM'),
+      wind: (f.windDirDeg != null) ? { mph: f.windMph, dir: (f.windDirDisplay || f.windDir), deg: f.windDirDeg } : null,
+      cloud: f.cloudCoverPct, pick: kind + '|' + dayOffset
+    };
+  }
   // Pulsing ring to flag a just-picked stand on the map (the "farm opens with the stand highlighted" hand-off).
   var _siteRing = null, _wiPreStand = null;
   function flashSiteRing(lat, lng){
