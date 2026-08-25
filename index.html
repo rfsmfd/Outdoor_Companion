@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 470</div>
+    <div id="buildBadge">BUILD 471</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12209,7 +12209,7 @@
     var nocturnal = top.frac != null && top.frac < 0.34;   // mostly-after-dark buck (Moose) — flag it honestly
     var label = who + ' ' + (top.kind === 'pic' ? 'on cam' : 'seen') + ' ' + ydsLabel(top.d) + ' off · ' + when +
       (keys.length > 1 ? (' · ' + keys.length + ' bucks in range') : '') + (nocturnal ? ' · mostly after dark' : '');
-    return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, bucks: keys.length, nocturnal: nocturnal, label: label };
+    return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, buckId: top.buckId || null, bucks: keys.length, nocturnal: nocturnal, label: label };
   }
   function huntTonightSpots(){
     var out = [], _hrPts = buckActivityPoints(), _hrDay = buckDayProfiles(_hrPts);
@@ -12482,6 +12482,7 @@
       if (!x.hasData || !x.read){
         var hrTail = x.hr ? (x.hr.nocturnal ? ' — visits after dark; likely beds off this ground' : ' — no camera here, but a buck ranges through') : '';
         var hrLine = x.hr ? ('<div style="font-size:10.5px;color:#E8B04B;margin-top:3px;">🦌 <b>' + escapeHtml(x.hr.label) + '</b>' + hrTail + '</div>') : '';
+        var hrMove = (x.hr && x.hr.buckId) ? ('<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="margin-top:5px;background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>') : '';
         var noDataMsg = x.hr
           ? 'Ranked on a buck in the area + rest &amp; tonight\'s wind — the camera-less way you actually hunt it.'
           : 'No deer data here yet — ranked on rest &amp; tonight\'s wind. Hang a camera to learn its timing.';
@@ -12490,7 +12491,7 @@
             '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' 🏹</div>' +
             '<div style="font-size:11px;color:#9db0a3;">' + (x.hr ? 'buck in range' : 'on rest &amp; wind') + '</div>' +
           '</div>' + _pnLine +
-          hrLine +
+          hrLine + hrMove +
           (x.rest ? ('<div style="font-size:10.5px;margin-top:3px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
           '<div style="font-size:11px;color:#9db0a3;margin-top:3px;">' + noDataMsg + '</div>' +
           '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' +
@@ -12509,6 +12510,7 @@
         (x.rest ? ('<div style="font-size:10.5px;margin-top:2px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
         borrowLine +
         (x.hr ? ('<div style="font-size:10px;color:#E8B04B;margin-top:2px;">🦌 ' + escapeHtml(x.hr.label) + '</div>') : '') +
+        ((x.hr && x.hr.buckId) ? ('<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="margin-top:5px;background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>') : '') +
         (x.huntable ? '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' : '') +
       '</div>';
     }
@@ -12598,6 +12600,17 @@
         var st = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s.id === sid; })[0];
         close(); try { map.setView([la, ln], 17); } catch (e) {} flashSiteRing(la, ln);
         if (st) showSitCommit(st);
+      });
+    });
+    // "🎬 See his movement web" — jump straight from the recommendation to the tool the founder trusts most:
+    // step/play the buck's sightings in time order across the map. stopPropagation so it doesn't also fire the
+    // card's "go to this stand" click.
+    Array.prototype.forEach.call(card.querySelectorAll('.ht-move'), function(b){
+      b.addEventListener('click', function(e){ e.stopPropagation();
+        var bid = b.getAttribute('data-buck');
+        var prof = (typeof buckProfiles !== 'undefined' ? buckProfiles : []).filter(function(p){ return p.id === bid; })[0];
+        if (!prof){ if (typeof showToast === 'function') showToast('That buck\'s profile isn\'t available.'); return; }
+        close(); if (typeof showBuckMovement === 'function') showBuckMovement(prof);
       });
     });
     if (plannedHunt && plannedHunt.wind){ var _hw = document.getElementById('ht-wind'); if (_hw) _hw.textContent = plannedHunt.wind.dir + ' ' + plannedHunt.wind.mph + ' mph'; }
