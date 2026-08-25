@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 471</div>
+    <div id="buildBadge">BUILD 472</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12152,6 +12152,16 @@
   // NAMED/tagged buck weighing more than an anonymous "saw a buck." A camera-less stand in a shooter's core
   // becomes a top pick, which is exactly how he hunts.
   var HR_RANGE_M = 900;   // ~1000 yds / half a mile — a mature buck's core-to-home-range footprint (tunable)
+  // HUNTING STYLE — the founder + his son-in-law are both excellent but hunt trophies two different ways, so the
+  // ranker asks once and gears to it (see the daylight-zone-hunting-method design note):
+  //   'zone'   = founder's method: hunt AREAS with the most DAYLIGHT activity across the WHOLE group of bucks;
+  //              nocturnal activity barely counts ("useless if he's nocturnal"); a good buck is a good buck.
+  //   'target' = son-in-law's method: lock onto one/two named shooters, learn HIS pattern; privilege named bucks
+  //              and lead with the movement web + rings.
+  // Persisted in localStorage; a one-tap toggle in the hunt panel flips it. Unset defaults to 'zone'.
+  function getHuntStyle(){ try { return localStorage.getItem('oc_hunt_style') === 'target' ? 'target' : (localStorage.getItem('oc_hunt_style') === 'zone' ? 'zone' : ''); } catch(e){ return ''; } }
+  function setHuntStyle(v){ try { localStorage.setItem('oc_hunt_style', v === 'target' ? 'target' : 'zone'); } catch(e){} }
+  function huntStyleIsZone(){ return getHuntStyle() !== 'target'; }   // unset or 'zone' → daylight-zone method
   function _isDayMs(ms, lat, lng){ try { var t = SunCalc.getTimes(new Date(ms), lat, lng); return ms >= t.sunrise.getTime() && ms <= t.sunset.getTime(); } catch(e){ return true; } }
   function buckActivityPoints(){
     var since = buckRingSinceMs(), pts = [];
@@ -12188,28 +12198,45 @@
   // bonus + the closest/strongest buck point (so the wind factor can keep your scent off HIM) + a plain-language
   // reason. null when nothing recent is nearby.
   function spotHomeRange(s, pts, dayProf){
+    var zone = huntStyleIsZone();
+    var dayFloor = zone ? 0.12 : 0.35;   // zone: a nocturnal buck barely counts (his rule); target: softer
+    var namedMult = zone ? 1.0 : 1.4;    // zone: a good buck is a good buck; target: privilege your named shooters
     var now = Date.now(), best = {};
     (pts || []).forEach(function(p){
       var d = distMeters(s.lat, s.lng, p.lat, p.lng); if (d > HR_RANGE_M) return;
       var days = Math.max(0, Math.round((now - p.ms) / 86400000));
       var rw = days <= 7 ? 10 : (days <= 30 ? 6 : (days <= 120 ? 3 : 1.5));   // recency weight
       var dfac = d <= 275 ? 1 : (d <= 550 ? 0.6 : 0.3);                        // distance falloff
-      if (p.named) rw *= 1.3;                                                   // a TAGGED buck counts for more
+      if (p.named) rw *= namedMult;
       var frac = p.buckId ? (dayProf && dayProf[p.buckId] != null ? dayProf[p.buckId] : (p.day ? 1 : 0)) : (p.day ? 1 : 0.25);
-      var dayMult = 0.3 + 0.7 * frac;                                          // nocturnal buck → most of his weight bleeds off
+      var dayMult = dayFloor + (1 - dayFloor) * frac;                          // DAYLIGHT is the lens — nocturnal weight bleeds off (hard in zone mode)
       var w = rw * dfac * dayMult, key = p.buckId || '__anon__', cur = best[key];
-      if (!cur || w > cur.w) best[key] = { w: w, d: d, days: days, buckId: p.buckId, named: p.named, kind: p.kind, lat: p.lat, lng: p.lng, frac: frac };
+      if (!cur || w > cur.w) best[key] = { w: w, d: d, days: days, buckId: p.buckId, named: p.named, kind: p.kind, lat: p.lat, lng: p.lng, frac: frac, day: (cur && cur.day) || !!p.day };
     });
     var keys = Object.keys(best); if (!keys.length) return null;
-    var raw = 0, top = null;
-    keys.forEach(function(k){ raw += best[k].w; if (!top || best[k].w > top.w) top = best[k]; });
+    // He hunts the group of his TAGGED bucks — so the group count is tagged-only (a buckId). Untagged buck
+    // detections still add to the lift (a buck IS there), but the headline count names his tagged group.
+    var raw = 0, top = null, taggedTotal = 0, taggedDay = 0;
+    keys.forEach(function(k){ raw += best[k].w; var tagged = (k !== '__anon__'); if (tagged){ taggedTotal++; if (best[k].day) taggedDay++; } if (!top || best[k].w > top.w) top = best[k]; });
     var bonus = Math.min(24, Math.round(raw));   // capped ≈ a strong wind swing, so it lifts but never dominates
-    var who = top.named ? (buckNameById(top.buckId) || 'A named buck') : (keys.length > 1 ? (keys.length + ' bucks') : 'A buck');
     var when = top.days <= 0 ? 'today' : (top.days === 1 ? 'yesterday' : (top.days <= 30 ? (top.days + 'd ago') : (top.days <= 120 ? 'this season' : 'last season')));
     var nocturnal = top.frac != null && top.frac < 0.34;   // mostly-after-dark buck (Moose) — flag it honestly
-    var label = who + ' ' + (top.kind === 'pic' ? 'on cam' : 'seen') + ' ' + ydsLabel(top.d) + ' off · ' + when +
-      (keys.length > 1 ? (' · ' + keys.length + ' bucks in range') : '') + (nocturnal ? ' · mostly after dark' : '');
-    return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, buckId: top.buckId || null, bucks: keys.length, nocturnal: nocturnal, label: label };
+    var dayBucks = zone ? taggedDay : taggedTotal;   // zone method keys on tagged bucks moving in DAYLIGHT
+    var label;
+    if (zone){
+      // Zone method: lead with DAYLIGHT concentration across the group of TAGGED bucks, not one deer.
+      label = (taggedDay > 0)
+        ? ('🌞 ' + taggedDay + ' tagged buck' + (taggedDay === 1 ? '' : 's') + ' in daylight here' + (taggedTotal > taggedDay ? (' (of ' + taggedTotal + ')') : '') + ' · last ' + when)
+        : (taggedTotal > 0
+            ? (taggedTotal + ' tagged buck' + (taggedTotal === 1 ? '' : 's') + ' here — but after dark · last ' + when)
+            : ('buck activity here — not a tagged buck · last ' + when));
+    } else {
+      // Target method: lead with the (named) buck himself.
+      var who = top.named ? (buckNameById(top.buckId) || 'A named buck') : (keys.length > 1 ? (keys.length + ' bucks') : 'A buck');
+      label = who + ' ' + (top.kind === 'pic' ? 'on cam' : 'seen') + ' ' + ydsLabel(top.d) + ' off · ' + when +
+        (keys.length > 1 ? (' · ' + keys.length + ' bucks in range') : '') + (nocturnal ? ' · mostly after dark' : '');
+    }
+    return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, buckId: top.buckId || null, bucks: keys.length, dayBucks: dayBucks, nocturnal: nocturnal, zone: zone, label: label };
   }
   function huntTonightSpots(){
     var out = [], _hrPts = buckActivityPoints(), _hrDay = buckDayProfiles(_hrPts);
@@ -12480,11 +12507,11 @@
     function spotCard(x, rank){
       var _pn = propertyNameForSite(x.site), _pnLine = _pn ? ('<div style="font-size:10px;color:#8aa596;margin-top:2px;">📍 ' + escapeHtml(_pn) + '</div>') : '';
       if (!x.hasData || !x.read){
-        var hrTail = x.hr ? (x.hr.nocturnal ? ' — visits after dark; likely beds off this ground' : ' — no camera here, but a buck ranges through') : '';
+        var hrTail = x.hr ? (x.hr.nocturnal ? ' — visits after dark; likely beds off this ground' : ' — no camera here, but tagged bucks range through') : '';
         var hrLine = x.hr ? ('<div style="font-size:10.5px;color:#E8B04B;margin-top:3px;">🦌 <b>' + escapeHtml(x.hr.label) + '</b>' + hrTail + '</div>') : '';
         var hrMove = (x.hr && x.hr.buckId) ? ('<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="margin-top:5px;background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>') : '';
         var noDataMsg = x.hr
-          ? 'Ranked on a buck in the area + rest &amp; tonight\'s wind — the camera-less way you actually hunt it.'
+          ? 'Ranked on tagged-buck activity in this area + rest &amp; tonight\'s wind — the camera-less way you actually hunt it.'
           : 'No deer data here yet — ranked on rest &amp; tonight\'s wind. Hang a camera to learn its timing.';
         return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid ' + (x.hr ? '#5c5326' : '#3c4d42') + ';border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
@@ -12521,10 +12548,11 @@
       var reasons = [];
       if (top.rest){ if (top.rest.daysSince == null) reasons.push('never pressured'); else if (top.rest.daysSince >= 5) reasons.push('rested ' + top.rest.daysSince + 'd'); else if (top.rest.daysSince <= 1) reasons.push('⚠ sat recently'); }
       if (top.hasData && top.read) reasons.push(top.read.base.pct + '% daylight' + (top.read.recent && top.read.recent.located ? ' · seen recently' : ''));
-      if (top.hr) reasons.push('🦌 ' + escapeHtml(top.hr.label));
+      if (top.hr) reasons.push((top.hr.zone ? '' : '🦌 ') + escapeHtml(top.hr.label));
       var windNote = (top.windBonus > 0) ? 'wind in your favor' : (top.windBonus < 0 ? '⚠ wind marginal — read the 💨 below' : 'confirm the 💨 read below');
       reasons.push('<span id="ht-headwind">' + windNote + '</span>');
-      var conf = top.hasData ? (top.read && top.read.base.pct >= 25 ? 'STRONG' : 'WORTH A SIT') : (top.hr ? 'BUCK IN THE AREA' : 'BEST UNTRACKED SPOT');
+      var conf = top.hasData ? (top.read && top.read.base.pct >= 25 ? 'STRONG' : 'WORTH A SIT')
+        : (top.hr ? (top.hr.zone ? (top.hr.dayBucks > 0 ? 'DAYLIGHT ZONE' : 'BUCKS HERE — AFTER DARK') : 'BUCK IN THE AREA') : 'BEST UNTRACKED SPOT');
       // Honesty: when the runner-up is dead even (same score — common with camera-less stands the wind can't
       // separate), say so instead of presenting a coin-flip as a hard single call. This is what made the top pick
       // look like it "changed its mind" between runs — they were tied, and the tie-break is your call, not the app's.
@@ -12545,11 +12573,22 @@
       '<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">' +
         whenChip('nowdark', 'Now → dark') + whenChip('morning', 'Light → noon') + whenChip('afternoon', 'Noon → dark') + whenChip('allday', 'All day') +
       '</div>';
+    // How do you hunt? — one tap gears every pick to your method (daylight zones vs. lock onto a buck). Remembered.
+    function styleChip(v, label, sub){
+      var on = huntStyleIsZone() ? (v === 'zone') : (v === 'target');
+      return '<button class="ht-style" data-style="' + v + '" style="flex:1 1 auto;padding:6px 9px;border-radius:8px;border:1px solid ' + (on ? '#C9832E' : '#3c4d42') + ';background:' + (on ? '#3a2f1e' : '#1E2B23') + ';color:' + (on ? '#E7B45A' : '#9db0a3') + ';font-size:11.5px;font-weight:' + (on ? '700' : '400') + ';cursor:pointer;text-align:left;">' + label + '<div style="font-size:9px;opacity:.85;font-weight:400;margin-top:1px;">' + sub + '</div></button>';
+    }
+    var styleRow = '<div style="font-size:11px;color:#9db0a3;margin:2px 0 5px;">🏹 How do you hunt? — tunes the picks to your style' + (getHuntStyle() ? '' : ' <span style="color:#E7B45A;">(pick one)</span>') + '</div>' +
+      '<div style="display:flex;gap:6px;margin-bottom:12px;">' +
+        styleChip('zone', '🌞 Daylight zones', 'best daylight areas · your tagged bucks') +
+        styleChip('target', '🎯 Target a buck', 'lock onto one tagged shooter') +
+      '</div>';
     var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
         '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">← Back</button>' +
         '<div style="font-weight:800;font-size:16px;flex:1;min-width:0;">🎯 Where to hunt</div>' +
         '<button class="ht-close" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;flex:0 0 auto;">×</button></div>' +
       '<div style="font-size:11px;color:#9db0a3;margin-bottom:10px;">' + (plannedHunt ? ('🗓 Planning: <b style="color:#dff0e4;">' + plannedHunt.label + '</b>') : now.toDateString()) + (activePropertyId ? (' · 📍 ' + escapeHtml(propertyNameForSite({ propertyId: activePropertyId }))) : '') + '</div>' +
+      styleRow +
       whenRow +
       '<div style="background:#1b2822;border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:12px;font-size:11.5px;line-height:1.6;">' +
         '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
@@ -12589,6 +12628,10 @@
     var _htBack = card.querySelector('.ht-back'); if (_htBack) _htBack.addEventListener('click', function(){ close(); if (propsForModule().length > 1) showPropertyRanker(); else showForecastPanel(); });
     var _htProf = card.querySelector('.ht-profile'); if (_htProf) _htProf.addEventListener('click', function(){ chooseBuckForTemplate('Movement Profile — reference', function(buckId){ showMovementProfileModal(buckId); }); });
     // Time-frame picker → set the sit window (Now / This evening / Tomorrow AM / PM) and re-rank for it.
+    // Hunting-style toggle — flip zone/target, remember it, re-rank instantly for that method.
+    Array.prototype.forEach.call(card.querySelectorAll('.ht-style'), function(b){
+      b.addEventListener('click', function(){ setHuntStyle(b.getAttribute('data-style')); close(); showHuntTodayPanel(); });
+    });
     Array.prototype.forEach.call(card.querySelectorAll('.ht-when'), function(b){
       b.addEventListener('click', async function(){
         try { await planSpan(b.getAttribute('data-span'), lat, lng); } catch(e){ planNow(); }
