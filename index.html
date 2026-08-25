@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 486</div>
+    <div id="buildBadge">BUILD 487</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10325,15 +10325,19 @@
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:440px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); document.removeEventListener('keydown', onKey); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    function onKey(e){ if (e.key === 'Escape') close(); }
     _scoutPanels.push(close);
     card.innerHTML =
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;"><div style="font-weight:800;font-size:17px;">📸 Camera Plan <span style="font-size:11px;color:#7f9488;font-weight:400;">· drag to move</span></div><button class="cp-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
-      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : 'All properties') + '</div>' + h;
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;"><div style="font-weight:800;font-size:17px;">📸 Camera Plan <span style="font-size:11px;color:#7f9488;font-weight:400;">· drag to move</span></div><button class="cp-x" style="background:transparent;border:none;color:#9db0a3;font-size:26px;cursor:pointer;line-height:1;padding:0 4px;">×</button></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : 'All properties') + '</div>' + h +
+      '<button class="cp-close2" style="width:100%;margin-top:4px;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">✕ Close</button>';
     card.querySelector('.cp-x').addEventListener('click', close);
+    var _cpc2 = card.querySelector('.cp-close2'); if (_cpc2) _cpc2.addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
     // Show the capture-range rings around every deployed camera + the suggested-spot pins while the plan is open.
     try { if (!scoutMode) setScoutMode(true); cameraCoverageOn = true; if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); if (typeof renderCamSuggestPins === 'function') renderCamSuggestPins(suggestions); } catch (e) {}
-    function flyTo(la, ln){ try { map.flyTo([la, ln], Math.max(map.getZoom(), 16)); } catch (e) {} }
+    function flyTo(la, ln){ try { map.flyTo([la, ln], Math.max(map.getZoom(), 16)); } catch (e) {} if (typeof flashSiteRing === 'function') flashSiteRing(la, ln); }
     Array.prototype.forEach.call(card.querySelectorAll('.cam-row'), function(el){ el.addEventListener('click', function(){ flyTo(parseFloat(el.getAttribute('data-lat')), parseFloat(el.getAttribute('data-lng'))); }); });
     // Anchor/Float toggle — persists on the CAMERA device, re-ranks. stopPropagation so it doesn't fire the row's fly.
     Array.prototype.forEach.call(card.querySelectorAll('.cam-role'), function(b){
@@ -10471,10 +10475,19 @@
   // Prominence is ADAPTIVE to the farm's relief so flat ground doesn't over-flag. Async; returns [] gracefully.
   async function detectLidarTerrain(prop){
     if (typeof HILLSHADE_URL === 'undefined') return [];
-    var bb = _propBBox(prop); if (!bb) return [];
-    var G = 26, gpts = [];
-    for (var gy = 0; gy < G; gy++){ var lat = bb.n - (gy + 0.5) / G * (bb.n - bb.s); for (var gx = 0; gx < G; gx++){ gpts.push([bb.w + (gx + 0.5) / G * (bb.e - bb.w), lat]); } }
-    var z = new Array(G * G), CH = 480;
+    var bb0 = _propBBox(prop); if (!bb0) return [];
+    // Read a ~1/2-mile PERIMETER past the line — off-property bedding & funnels pull deer onto you (founder's call).
+    var mlat0 = (bb0.n + bb0.s) / 2, PAD = 805, padLat = PAD / 111320, padLng = PAD / (111320 * Math.cos(mlat0 * Math.PI / 180));
+    var bb = { n: bb0.n + padLat, s: bb0.s - padLat, e: bb0.e + padLng, w: bb0.w - padLng };
+    var mlat = (bb.n + bb.s) / 2;
+    var widthM = (bb.e - bb.w) * 111320 * Math.cos(mlat * Math.PI / 180), heightM = (bb.n - bb.s) * 111320;
+    // Finer grid (~45 m cells) so RAVINES & bottoms register — clamped, and total points capped so the fetch stays sane.
+    function clampG(m){ return Math.max(20, Math.min(48, Math.round(m / 45))); }
+    var Gx = clampG(widthM), Gy = clampG(heightM);
+    if (Gx * Gy > 2300){ var scl = Math.sqrt(2300 / (Gx * Gy)); Gx = Math.max(18, Math.round(Gx * scl)); Gy = Math.max(18, Math.round(Gy * scl)); }
+    var gpts = [];
+    for (var gy = 0; gy < Gy; gy++){ var lat = bb.n - (gy + 0.5) / Gy * (bb.n - bb.s); for (var gx = 0; gx < Gx; gx++){ gpts.push([bb.w + (gx + 0.5) / Gx * (bb.e - bb.w), lat]); } }
+    var z = new Array(Gx * Gy), CH = 480;
     try {
       for (var i = 0; i < gpts.length; i += CH){
         var chunk = gpts.slice(i, i + CH);
@@ -10484,14 +10497,14 @@
         for (var k = 0; k < chunk.length; k++){ var v = samp[k]; z[i + k] = (v && v.value != null) ? parseFloat(v.value) : NaN; }
       }
     } catch (e){ return []; }
-    function Z(gx, gy){ if (gx < 0 || gy < 0 || gx >= G || gy >= G) return NaN; return z[gy * G + gx]; }
-    var vals = z.filter(isFinite); if (vals.length < G * G * 0.5) return [];
+    function Z(gx, gy){ if (gx < 0 || gy < 0 || gx >= Gx || gy >= Gy) return NaN; return z[gy * Gx + gx]; }
+    var vals = z.filter(isFinite); if (vals.length < Gx * Gy * 0.5) return [];
     var relief = Math.max.apply(null, vals) - Math.min.apply(null, vals);
-    if (relief < 3) return [];                       // <3 m across the whole farm → essentially flat
-    var PROM = Math.max(1.2, relief * 0.06);         // adaptive prominence
+    if (relief < 3) return [];                       // essentially flat
+    var PROM = Math.max(1.0, relief * 0.05);         // adaptive prominence (a touch finer for ravines)
     var raw = [];
-    for (var yy = 1; yy < G - 1; yy++){
-      for (var xx = 1; xx < G - 1; xx++){
+    for (var yy = 1; yy < Gy - 1; yy++){
+      for (var xx = 1; xx < Gx - 1; xx++){
         var c = Z(xx, yy); if (!isFinite(c)) continue;
         var n = Z(xx, yy - 1), s = Z(xx, yy + 1), e = Z(xx + 1, yy), w = Z(xx - 1, yy);
         if (!([n, s, e, w].every(isFinite))) continue;
@@ -10512,11 +10525,13 @@
         for (var b2 = 0; b2 < raw.length; b2++){ if (raw[b2].t === f.t && !used[key(raw[b2])] && Math.abs(raw[b2].gx - f.gx) <= 2 && Math.abs(raw[b2].gy - f.gy) <= 2){ used[key(raw[b2])] = 1; stack.push(raw[b2]); } }
       }
       var mgx = sx / cnt, mgy = sy / cnt;
-      feats.push({ t: raw[a2].t, score: sc, lat: bb.n - ((mgy + 0.5) / G) * (bb.n - bb.s), lng: bb.w + ((mgx + 0.5) / G) * (bb.e - bb.w) });
+      feats.push({ t: raw[a2].t, score: sc, lat: bb.n - ((mgy + 0.5) / Gy) * (bb.n - bb.s), lng: bb.w + ((mgx + 0.5) / Gx) * (bb.e - bb.w) });
     }
-    if (prop && prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function') feats = feats.filter(function(f){ return pointInProperty(f.lat, f.lng, prop); });
-    feats.sort(function(a, b){ return b.score - a.score; });
-    return feats.slice(0, 10);
+    // DON'T clip to the line — tag off-property instead (still within the perimeter), and rank on-property first.
+    var hasBnd = !!(prop && prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function');
+    feats.forEach(function(f){ f.off = hasBnd ? !pointInProperty(f.lat, f.lng, prop) : false; });
+    feats.sort(function(a, b){ if ((a.off ? 1 : 0) !== (b.off ? 1 : 0)) return a.off ? 1 : -1; return b.score - a.score; });
+    return feats.slice(0, 14);
   }
   var terrainLayer = null;
   function clearTerrainPins(){ if (terrainLayer){ try { map.removeLayer(terrainLayer); } catch (e) {} terrainLayer = null; } }
@@ -10525,8 +10540,8 @@
     if (!terrainLayer) terrainLayer = L.layerGroup().addTo(map);
     feats.forEach(function(f){
       var k = _terrainLabel(f);
-      var m = L.marker([f.lat, f.lng], { icon: L.divIcon({ className: '', iconSize: [28, 28], iconAnchor: [14, 14], html: '<div style="width:26px;height:26px;border-radius:6px;background:rgba(20,29,24,.85);border:2px solid ' + (k.color || '#E7B45A') + ';display:flex;align-items:center;justify-content:center;font-size:15px;">' + (k.icon || '📍') + '</div>' }) }).addTo(terrainLayer);
-      m.bindPopup('<div style="font-size:12px;max-width:210px;line-height:1.4;">' + (k.icon || '') + ' <b>' + (k.label || 'Feature') + '</b><br>' + (k.why || '') + '<br><span style="color:#9db0a3;">My read of the map — go verify on the ground.</span></div>');
+      var m = L.marker([f.lat, f.lng], { icon: L.divIcon({ className: '', iconSize: [28, 28], iconAnchor: [14, 14], html: '<div style="width:26px;height:26px;border-radius:6px;background:rgba(20,29,24,.85);border:2px ' + (f.off ? 'dashed' : 'solid') + ' ' + (k.color || '#E7B45A') + ';display:flex;align-items:center;justify-content:center;font-size:15px;' + (f.off ? 'opacity:.85;' : '') + '">' + (k.icon || '📍') + '</div>' }) }).addTo(terrainLayer);
+      m.bindPopup('<div style="font-size:12px;max-width:210px;line-height:1.4;">' + (k.icon || '') + ' <b>' + (k.label || 'Feature') + '</b>' + (f.off ? ' <span style="color:#C98A3C;">· off your line</span>' : '') + '<br>' + (k.why || '') + '<br><span style="color:#9db0a3;">My read of the map — go verify on the ground.</span></div>');
     });
   }
   function renderTerrainPins(feats){ clearTerrainPins(); addTerrainPins(feats); }
@@ -10534,7 +10549,10 @@
     if (typeof closeScoutPanels === 'function') closeScoutPanels();   // one panel at a time
     var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
     var res = detectTerrainFeatures(prop || {});
-    function trRow(f){ var k = _terrainLabel(f); return '<div class="tr-row" data-lat="' + f.lat + '" data-lng="' + f.lng + '" style="border:1px solid #35443A;border-left:3px solid ' + k.color + ';border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;"><div style="font-weight:700;font-size:12.5px;">' + k.icon + ' ' + k.label + '</div><div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + k.why + '</div></div>'; }
+    function trRow(f){ var k = _terrainLabel(f);
+      var off = f.off ? ' <span style="color:#C98A3C;font-weight:400;">· off your line</span>' : '';
+      var sub = f.off ? ' <span style="color:#9db0a3;">(neighbor\'s ground — can still pull deer onto you)</span>' : '';
+      return '<div class="tr-row" data-lat="' + f.lat + '" data-lng="' + f.lng + '" style="border:1px ' + (f.off ? 'dashed' : 'solid') + ' #35443A;border-left:3px solid ' + k.color + ';border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;"><div style="font-weight:700;font-size:12.5px;">' + k.icon + ' ' + k.label + off + '</div><div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + k.why + sub + '</div></div>'; }
     var h = '<div style="font-size:13px;color:#dfeee4;line-height:1.5;">';
     if (!prop){ h += '<div style="color:#E8B04B;">Pick a farm in the top dropdown — I read one property\'s map at a time.</div>'; }
     else {
@@ -10549,15 +10567,21 @@
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:430px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearTerrainPins === 'function') clearTerrainPins(); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearTerrainPins === 'function') clearTerrainPins(); try { map.off('click', onMapClose); } catch (e) {} document.removeEventListener('keydown', onKey); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    function onKey(e){ if (e.key === 'Escape') close(); }
+    function onMapClose(){ close(); }   // it's a read panel — tapping the map (to go look) dismisses it
     _scoutPanels.push(close);
-    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;"><div style="font-weight:800;font-size:17px;">🗺 Terrain Read <span style="font-size:11px;color:#7f9488;font-weight:400;">· drag to move</span></div><button class="tr-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
-      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : '—') + '</div>' + h;
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;"><div style="font-weight:800;font-size:17px;">🗺 Terrain Read <span style="font-size:11px;color:#7f9488;font-weight:400;">· drag to move</span></div><button class="tr-x" style="background:transparent;border:none;color:#9db0a3;font-size:26px;cursor:pointer;line-height:1;padding:0 4px;">×</button></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : '—') + '</div>' + h +
+      '<button class="tr-close2" style="width:100%;margin-top:4px;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;">✕ Close</button>';
     card.querySelector('.tr-x').addEventListener('click', close);
-    function bindTrRows(scope){ Array.prototype.forEach.call((scope || card).querySelectorAll('.tr-row'), function(el){ if (el._trb) return; el._trb = 1; el.addEventListener('click', function(){ try { map.flyTo([parseFloat(el.getAttribute('data-lat')), parseFloat(el.getAttribute('data-lng'))], Math.max(map.getZoom(), 16)); } catch (e) {} }); }); }
+    var _c2 = card.querySelector('.tr-close2'); if (_c2) _c2.addEventListener('click', close);
+    function bindTrRows(scope){ Array.prototype.forEach.call((scope || card).querySelectorAll('.tr-row'), function(el){ if (el._trb) return; el._trb = 1; el.addEventListener('click', function(){ var la = parseFloat(el.getAttribute('data-lat')), ln = parseFloat(el.getAttribute('data-lng')); try { map.flyTo([la, ln], Math.max(map.getZoom(), 16)); } catch (e) {} if (typeof flashSiteRing === 'function') flashSiteRing(la, ln); }); }); }
     try { if (!scoutMode) setScoutMode(true); if (typeof renderTerrainPins === 'function') renderTerrainPins(res.feats); } catch (e) {}
     bindTrRows(card);
     back.appendChild(card); document.body.appendChild(back);
+    document.addEventListener('keydown', onKey);
+    setTimeout(function(){ try { map.on('click', onMapClose); } catch (e) {} }, 80);   // tap the map to close (deferred so the opening tap doesn't)
     // Async LiDAR terrain — fill the placeholder + add pins when it returns (skip if the panel was closed).
     if (prop && typeof detectLidarTerrain === 'function'){
       detectLidarTerrain(prop).then(function(lf){
