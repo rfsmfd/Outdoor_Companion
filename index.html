@@ -1961,7 +1961,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 479</div>
+    <div id="buildBadge">BUILD 480</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10149,13 +10149,24 @@
       else if (recent === 0){ v = 'GONE QUIET'; tone = '#E8823F'; rank = 1; why = 'Nothing in ' + dLast + 'd (' + total + ' pics all-time). Dead spot? A move may do more good.'; }
       else if (namedBucks >= 1 && dNewBuck != null && dNewBuck >= 21 && wks >= 4){ v = 'MATURED'; tone = '#E8B04B'; rank = 2; why = 'Learned this spot — knows ' + namedBucks + ' buck' + (namedBucks === 1 ? '' : 's') + ', no NEW buck in ' + dNewBuck + 'd. Move candidate — it\'s told you what it will.'; }
       else { v = 'PRODUCING'; tone = '#9ED17A'; rank = 3; why = 'Still teaching you' + (dNewBuck != null ? (' — newest buck ' + dNewBuck + 'd ago') : '') + '. Keep it.'; }
-      // ANCHOR vs FLOAT (founder's call): an anchor is a strategic hold (e.g. a field cam that keeps catching NEW
-      // deer filtering in) — its job is inventory, so a lull is NOT a reason to move it. Only FLOATERS get nudged
-      // to relocate and fill the missing pieces. Never tell an anchor to move.
-      var role = (s.camRole === 'anchor') ? 'anchor' : 'float';
+      // ROLE decides whether a "move" nudge even makes sense:
+      //  • SHARED — a camp member's camera (you don't control its movement), detected by ownership. Data still
+      //    counts (coverage + the read), but NEVER tell him to move it.
+      //  • ANCHOR — a strategic hold (e.g. a field cam catching NEW deer that filter in); its job is inventory, so
+      //    a lull is not a reason to move it.
+      //  • FLOAT — free to rove and fill the missing pieces; the only role that gets a move nudge.
+      var myUid = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+      var siteShared = !!(myUid && s.__ownerUid && s.__ownerUid !== myUid);
+      var photoOthers = ph.some(function(p){ return p.__ownerUid && p.__ownerUid !== myUid; });
+      var photoMine = ph.some(function(p){ return !p.__ownerUid || p.__ownerUid === myUid; });
+      var shared = siteShared || (photoOthers && !photoMine);
+      var role = shared ? 'shared' : ((s.camRole === 'anchor') ? 'anchor' : 'float');
       if (role === 'anchor'){
         if (v === 'MATURED'){ v = 'ANCHOR'; tone = '#7FB39A'; rank = 3; why = 'Anchor — held for new deer that filter in. Its job is inventory, so a quiet stretch is fine. Leave it.'; }
         else if (v === 'GONE QUIET'){ v = 'ANCHOR · QUIET'; tone = '#E8B04B'; rank = 3; why = 'Quiet ' + dLast + 'd, but it\'s your anchor — deer filter through over a season. Leave it (check batteries if it\'s been long).'; }
+      } else if (role === 'shared'){
+        if (v === 'MATURED' || v === 'GONE QUIET' || v === 'CHECK IT'){ v = '👥 SHARED'; tone = '#7FB3FF'; rank = 3; why = 'A camp member\'s camera — you can\'t move it, but it\'s still feeding you data. Just read it.'; }
+        else { v = '👥 ' + v; tone = '#7FB3FF'; }   // NEW / PRODUCING — informational
       }
       var moveable = (role === 'float' && (v === 'MATURED' || v === 'GONE QUIET' || v === 'CHECK IT'));
       var ev = total ? ('Wk ' + Math.max(1, Math.round(wks)) + ' · ' + total + ' pics · ' + namedBucks + ' tagged buck' + (namedBucks === 1 ? '' : 's') + ' · ' + recent + ' in 21d') : 'no captures yet';
@@ -10195,7 +10206,9 @@
           '</div>' +
           '<div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + r.why + '</div>' +
           '<div style="font-size:10px;color:#8aa596;margin-top:2px;">' + r.ev + '</div>' +
-          '<div style="display:flex;gap:6px;align-items:center;margin-top:5px;"><span style="font-size:9.5px;color:#6f8579;">role:</span>' + roleChip(r, 'anchor', '📌 Anchor') + roleChip(r, 'float', '🎈 Float') + '</div>' +
+          (r.role === 'shared'
+            ? '<div style="margin-top:5px;font-size:9.5px;color:#7FB3FF;">👥 shared camera — a camp member controls this one</div>'
+            : '<div style="display:flex;gap:6px;align-items:center;margin-top:5px;"><span style="font-size:9.5px;color:#6f8579;">role:</span>' + roleChip(r, 'anchor', '📌 Anchor') + roleChip(r, 'float', '🎈 Float') + '</div>') +
         '</div>';
       });
     }
