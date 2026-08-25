@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 477</div>
+    <div id="buildBadge">BUILD 478</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18657,6 +18657,7 @@
     contours.sort(function(a,b){ return a.value - b.value; });
     var ringLabels = ['25%', '50%', '75%', '100%'];
     var ringColors = ['#6B8F5C', '#8FA05C', '#D4B24C', '#FF6A13']; // green (edge) to blaze orange (core), matching the app's own established palette
+    var _corePolysA = [];   // collect the 100% (core) band polygons so we can tag the center "CORE"
 
     contours.forEach(function(contour, idx){
       var label = ringLabels[idx] || ((idx+1) + '');
@@ -18679,10 +18680,12 @@
           fillOpacity: 0.18,
           interactive: false
         }).addTo(map);
-        poly.bindTooltip(label + ' band', {sticky: true});
+        poly.bindTooltip(_rangeBandName(label) + ' (' + label + ')', {sticky: true});
         queryHomeRangeLayers.push(poly);
+        if (label === '100%') _corePolysA.push({ label: label, latlngs: latlngs });
       });
     });
+    _addCoreLabel(_corePolysA, queryHomeRangeLayers);   // permanent CORE tag on the blaze center
 
     var bounds = L.latLngBounds(source.map(function(o){ return [o.lat, o.lng]; }));
     map.fitBounds(bounds, {padding: [40, 40]});
@@ -18732,6 +18735,24 @@
     });
     return { polys: polys, bounds: L.latLngBounds(source.map(function(o){ return [o.lat, o.lng]; })) };
   }
+  // Friendly band names on the ring tooltips (his framing: 100% density = core, 25% = outer edge of activity).
+  function _rangeBandName(lab){ return lab === '100%' ? 'CORE' : (lab === '75%' ? 'inner range' : (lab === '50%' ? 'mid range' : 'outer range')); }
+  // Drop ONE permanent "CORE" tag at the center of the innermost (100%) blaze band, so the core reads at a glance
+  // the moment the rings open. Picks the largest 100% polygon (shoelace area), labels its centroid. Added to
+  // layerArr so it clears with the rings.
+  function _addCoreLabel(polys, layerArr){
+    var core = null, bestA = -1;
+    (polys || []).forEach(function(pl){
+      if (pl.label !== '100%') return; var r = pl.latlngs && pl.latlngs[0]; if (!r || r.length < 3) return;
+      var a = 0; for (var i = 0, j = r.length - 1; i < r.length; j = i++){ a += (r[j][1] * r[i][0] - r[i][1] * r[j][0]); }
+      a = Math.abs(a / 2); if (a > bestA){ bestA = a; core = r; }
+    });
+    if (!core) return;
+    var la = 0, ln = 0; core.forEach(function(p){ la += p[0]; ln += p[1]; }); la /= core.length; ln /= core.length;
+    var m = L.marker([la, ln], { interactive: false, keyboard: false, icon: L.divIcon({ className: '', iconSize: [0, 0], iconAnchor: [0, 0],
+      html: '<div style="font:800 11px/1.2 system-ui,Arial,sans-serif;letter-spacing:1.5px;color:#fff;background:rgba(255,106,19,.94);border:1px solid #fff;border-radius:5px;padding:2px 7px;white-space:nowrap;box-shadow:0 1px 4px rgba(0,0,0,.55);transform:translate(-50%,-50%);">CORE</div>' }) }).addTo(map);
+    if (layerArr) layerArr.push(m);
+  }
   // "⭕ See his range" from a ranker pick — draw a tagged buck's home-range rings (his trusted mental picture)
   // straight on the map, no query builder. Uses the SAME located detections the ranker weighed. If he can't form
   // a ring (<3 spread sightings), that inability IS the honest tell he's an edge/unknown-range buck — say so.
@@ -18746,9 +18767,10 @@
     if (queryHomeRangeLayers.length){ queryHomeRangeLayers.forEach(function(l){ try{ map.removeLayer(l); }catch(e){} }); queryHomeRangeLayers = []; }
     rr.polys.forEach(function(pl){
       var poly = L.polygon(pl.latlngs, { color: pl.color, weight: 2, fillColor: pl.color, fillOpacity: 0.18, interactive: false }).addTo(map);
-      poly.bindTooltip(pl.label + ' band', { sticky: true });
+      poly.bindTooltip(_rangeBandName(pl.label) + ' (' + pl.label + ')', { sticky: true });
       queryHomeRangeLayers.push(poly);
     });
+    _addCoreLabel(rr.polys, queryHomeRangeLayers);   // permanent CORE tag on the blaze center
     try { map.fitBounds(rr.bounds, { padding: [50, 50] }); } catch (e) {}
     var ex = document.getElementById('buckRingCtl'); if (ex && ex.parentNode) ex.parentNode.removeChild(ex);
     var ctl = document.createElement('div'); ctl.id = 'buckRingCtl';
