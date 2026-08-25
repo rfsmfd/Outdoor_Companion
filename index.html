@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 488</div>
+    <div id="buildBadge">BUILD 489</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10399,8 +10399,11 @@
     function isField(c){ return 'FRA'.indexOf(c) >= 0; }
     function isThick(c){ return 'CPS'.indexOf(c) >= 0; }
     function isTimber(c){ return 'WH'.indexOf(c) >= 0; }
+    function isWet(c){ return 'DSO'.indexOf(c) >= 0; }               // drainage / swamp / water
+    function isDry(c){ return 'FRACWHP'.indexOf(c) >= 0; }           // any walkable upland
     runPass(function(c){ return isThick(c) || isTimber(c); }, function(c){ return isField(c) || c === 'O'; }, 'field');  // classic field edge
     runPass(isThick, isTimber, 'cover');                                                                                // bedding-cover edge inside the timber
+    runPass(isDry, isWet, 'cross');                                                                                     // SWAMP/CREEK CROSSINGS — dry necks/points through the wet
     for (var yy = 0; yy < rows; yy++){ for (var xx = 0; xx < cols; xx++){ if (code(xx, yy) === 'D') raw.push({ t: 'drain', ctx: 'drain', x: xx, y: yy }); } }   // drainage corridors
     if (raw.length > 6000) raw = raw.slice(0, 6000);   // safety cap on the O(n^2) clustering below
     var used = {}, feats = [];
@@ -10442,6 +10445,7 @@
   }
   // LiDAR terrain features (from the lay of the land, not cover).
   var LIDAR_KINDS = {
+    bottom: { icon: '💧', color: '#4A8AA8', label: 'Low bottom / wet', why: 'Flat low ground — likely a wet bottom or swamp. Deer bed its thick edges and cross at the narrows; hunt the EDGE, not the middle.' },
     saddle: { icon: '⛰', color: '#C9832E', label: 'Saddle',       why: 'A low gap in a ridge — deer cross ridgelines at the saddle, the easiest path. A natural funnel.' },
     knob:   { icon: '🗻', color: '#B87333', label: 'Knob / hilltop', why: 'A high point — deer skirt just below the crest; useful to orient off and to play the thermal.' },
     spur:   { icon: '🪝', color: '#C98A3C', label: 'Ridge point / spur', why: 'A finger of high ground running out — a travel route; bucks work the leeward side.' },
@@ -10452,6 +10456,11 @@
   function _terrainLabel(f){
     if (LIDAR_KINDS[f.t]) return LIDAR_KINDS[f.t];
     if (f.t === 'bedding') return { icon: '💤', color: '#5AA0C9', label: 'Likely bedding', why: 'A block of thick cover (security) — probable bedding. Hunt the DOWNWIND edge, never the middle.' };
+    if (f.ctx === 'cross'){
+      if (f.t === 'pinch') return { icon: '🚶', color: '#4A9AA8', label: 'Swamp/creek crossing', why: 'A dry neck through the wet — deer funnel across here rather than wade. A pinch worth a stand.' };
+      if (f.t === 'point') return { icon: '🚶', color: '#4A9AA8', label: 'Crossing point', why: 'A finger of dry upland pushing into the swamp/creek — a natural crossing and staging spot.' };
+      return { icon: '🚶', color: '#4A9AA8', label: 'Wet-edge corner', why: 'An inside corner where dry ground meets the wet — deer skirt and cross here.' };
+    }
     if (f.t === 'drain') return { icon: '🌊', color: '#4A7AA8', label: 'Drainage corridor', why: 'A drainage / creek bottom — a natural travel corridor deer follow through cover.' };
     if (f.ctx === 'cover'){
       if (f.t === 'point') return { icon: '📌', color: '#C88BE0', label: 'Cover point', why: 'A finger of thick cover pushes into the timber — a bedding edge deer stage off and travel.' };
@@ -10501,6 +10510,7 @@
     var vals = z.filter(isFinite); if (vals.length < Gx * Gy * 0.5) return [];
     var relief = Math.max.apply(null, vals) - Math.min.apply(null, vals);
     if (relief < 3) return [];                       // essentially flat
+    var _sv = vals.slice().sort(function(a, b){ return a - b; }), p25 = _sv[Math.floor(_sv.length * 0.25)];   // low-ground threshold (swamp/bottom)
     var PROM = Math.max(0.8, relief * 0.04);         // adaptive; lower so subtler ravines/ridges still register
     var raw = [];
     for (var yy = 1; yy < Gy - 1; yy++){
@@ -10518,6 +10528,7 @@
         else if (highEW || highNS){ raw.push({ t: 'spur', gx: xx, gy: yy, score: Math.max((c - e) + (c - w), (c - n) + (c - s)) }); continue; }   // ridge line / spur
         else if (lowEW || lowNS){ raw.push({ t: 'draw', gx: xx, gy: yy, score: Math.max((e - c) + (w - c), (n - c) + (s - c)) }); continue; }      // ravine / draw line
         var lv = Math.max(Math.abs(c - n), Math.abs(c - s), Math.abs(c - e), Math.abs(c - w)), grad = Math.abs(n - s) + Math.abs(e - w);
+        if (lv < PROM * 0.5 && c < p25){ raw.push({ t: 'bottom', gx: xx, gy: yy, score: (p25 - c + 1) }); continue; }   // flat + LOW = wet bottom / swamp
         if (lv < PROM * 0.4 && grad > PROM * 2.5) raw.push({ t: 'bench', gx: xx, gy: yy, score: grad });   // flat shelf on a slope
       }
     }
