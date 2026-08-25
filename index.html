@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 467</div>
+    <div id="buildBadge">BUILD 468</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12218,16 +12218,17 @@
     var t = SunCalc.getTimes(new Date(base), lat, lng), sr = t.sunrise.getTime(), ss = t.sunset.getTime();
     var legalStart = sr - 1800000, legalEnd = ss + 1800000;
     var kind = (typeof plannedHunt !== 'undefined' && plannedHunt) ? plannedHunt.kind : 'now', start, end;
-    if (kind === 'am'){ start = legalStart; end = sr + 3.5 * H; }
+    if (plannedHunt && plannedHunt.startMs != null && plannedHunt.endMs != null){ start = plannedHunt.startMs; end = plannedHunt.endMs; }   // explicit sit span → show the WHOLE thing
+    else if (kind === 'am'){ start = legalStart; end = sr + 3.5 * H; }
     else if (kind === 'pm'){ start = ss - 3 * H; end = legalEnd; }
     else { if (base < sr + 2.5 * H){ start = Math.max(base, legalStart); end = sr + 3.5 * H; }
       else if (base > legalEnd){ var t2 = SunCalc.getTimes(new Date(base + 86400000), lat, lng); ss = t2.sunset.getTime(); legalEnd = ss + 1800000; sr = t2.sunrise.getTime(); start = ss - 3 * H; end = legalEnd; }
       else { start = Math.max(base, ss - 3 * H); end = legalEnd; } }
     // hourly samples across the window (cap ~7 rows)
     var hours = [], firstHr = Math.ceil(start / H) * H; if (firstHr - start > H * 0.5) firstHr -= H;
-    for (var ms = firstHr; ms <= end + 1000; ms += H){ if (ms < start - H * 0.5) continue; hours.push(ms); if (hours.length >= 7) break; }
+    for (var ms = firstHr; ms <= end + 1000; ms += H){ if (ms < start - H * 0.5) continue; hours.push(ms); if (hours.length >= 15) break; }   // all-day spans can be ~13 hrs — the panel scrolls
     if (!hours.length) hours = [start];
-    var rows = '', flipHr = null, prevUp = null;
+    var rows = '', flipHr = null, prevUp = null, primeMs = (plannedHunt && plannedHunt.ms) ? plannedHunt.ms : base;
     hours.forEach(function(ms){
       var f = forecastAt(ms) || {}, th = thermalForHour(ms, f.cloudCoverPct), sc = combineScent(th.bearing, th.mph, f.windDirDeg, f.windMph);
       var thTxt = th.up === true ? '↑ rise' : (th.up === false ? '↓ fall' : (th.up === null ? '– flat' : '↓ pool'));
@@ -12236,8 +12237,9 @@
       var rain = (f.precipProb != null) ? f.precipProb : null, rainWet = (rain != null && rain >= 25);
       var rainTxt = rain == null ? '—' : (rainWet ? '🌧 ' + rain + '%' : rain + '%');
       var isDusk = (ms <= ss && ms + H > ss), isDawn = (ms <= sr && ms + H > sr), isLast = (ms <= legalEnd && ms + H > legalEnd && kind !== 'am');
-      var mark = isLast ? ' 🌆' : (isDusk ? ' 🌇' : (isDawn ? ' 🌅' : ''));
-      rows += '<tr style="' + ((isDusk || isDawn || isLast) ? 'background:#20302a;' : '') + '">' +
+      var isPrime = Math.abs(ms - primeMs) <= H * 0.5;
+      var mark = (isPrime ? ' 🎯' : '') + (isLast ? ' 🌆' : (isDusk ? ' 🌇' : (isDawn ? ' 🌅' : '')));
+      rows += '<tr style="' + (isPrime ? 'background:#2c3f2e;box-shadow:inset 3px 0 0 #E8B04B;' : ((isDusk || isDawn || isLast) ? 'background:#20302a;' : '')) + '">' +
         '<td style="padding:5px 5px;font-weight:700;white-space:nowrap;">' + hmClock(ms) + mark + '</td>' +
         '<td style="padding:5px 5px;white-space:nowrap;">' + (f.windDir || '—') + (f.windMph != null ? ' ' + f.windMph : '') + '</td>' +
         '<td style="padding:5px 5px;white-space:nowrap;color:' + (th.up === false ? '#5FB0C9' : th.up === true ? '#E8B04B' : '#9db0a3') + ';">' + thTxt + '</td>' +
@@ -12260,6 +12262,7 @@
     var rainHr = null; hours.forEach(function(ms){ var f = forecastAt(ms); if (rainHr === null && f && f.precipProb != null && f.precipProb >= 40) rainHr = ms; });
     if (rainHr) sum.push('🌧 <b>Rain likely by ' + hmClock(rainHr) + '</b> — plan to be settled (or out) before it moves in.');
     sum.push('Last legal light <b>' + hmClock(legalEnd) + '</b>.');
+    sum.unshift('🎯 <b>Prime ~' + hmClock(primeMs) + '</b> (🎯 row) — be on stand by <b>' + hmClock(primeMs - 1800000) + '</b>.');
     body.innerHTML =
       '<div style="font-weight:800;font-size:13px;margin-bottom:6px;">🌦 Sit check — hour by hour</div>' +
       '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11.5px;color:#dbe7df;">' +
@@ -12441,15 +12444,14 @@
         '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;line-height:1.5;">' + reasons.join(' &nbsp;·&nbsp; ') + '.</div>' +
       '</div>';
     }
-    // "When are you hunting?" quick picker — the sit window that drives the ranking wind AND the sit-check.
-    function whenChip(k, d, label){
-      var pick = (k === 'now') ? 'now' : (k + '|' + d);
-      var active = plannedHunt ? (plannedHunt.pick === pick) : (k === 'now');
-      return '<button class="ht-when" data-k="' + k + '" data-d="' + d + '" style="flex:1 1 auto;padding:6px 8px;border-radius:8px;border:1px solid ' + (active ? '#3c6d42' : '#3c4d42') + ';background:' + (active ? '#2E4636' : '#1E2B23') + ';color:' + (active ? '#dff0e4' : '#9db0a3') + ';font-size:11.5px;font-weight:' + (active ? '700' : '400') + ';cursor:pointer;white-space:nowrap;">' + label + '</button>';
+    // "When are you hunting?" — pick the SIT SPAN you'll actually sit; the ranking + sit-check use that window.
+    function whenChip(spanKey, label){
+      var active = plannedHunt ? (plannedHunt.pick === spanKey) : (spanKey === 'nowdark');
+      return '<button class="ht-when" data-span="' + spanKey + '" style="flex:1 1 auto;padding:6px 8px;border-radius:8px;border:1px solid ' + (active ? '#3c6d42' : '#3c4d42') + ';background:' + (active ? '#2E4636' : '#1E2B23') + ';color:' + (active ? '#dff0e4' : '#9db0a3') + ';font-size:11.5px;font-weight:' + (active ? '700' : '400') + ';cursor:pointer;white-space:nowrap;">' + label + '</button>';
     }
-    var whenRow = '<div style="font-size:11px;color:#9db0a3;margin:2px 0 5px;">🗓 When are you hunting?</div>' +
+    var whenRow = '<div style="font-size:11px;color:#9db0a3;margin:2px 0 5px;">🗓 When are you sitting? — the read is for that whole window</div>' +
       '<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;">' +
-        whenChip('now', 0, 'Now') + whenChip('pm', 0, 'This evening') + whenChip('am', 1, 'Tomorrow AM') + whenChip('pm', 1, 'Tomorrow PM') +
+        whenChip('nowdark', 'Now → dark') + whenChip('morning', 'Light → noon') + whenChip('afternoon', 'Noon → dark') + whenChip('allday', 'All day') +
       '</div>';
     var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
         '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">← Back</button>' +
@@ -12497,8 +12499,7 @@
     // Time-frame picker → set the sit window (Now / This evening / Tomorrow AM / PM) and re-rank for it.
     Array.prototype.forEach.call(card.querySelectorAll('.ht-when'), function(b){
       b.addEventListener('click', async function(){
-        var k = b.getAttribute('data-k'), d = parseInt(b.getAttribute('data-d'), 10) || 0;
-        try { await planForWindow(k, d, lat, lng); } catch(e){ planNow(); }
+        try { await planSpan(b.getAttribute('data-span'), lat, lng); } catch(e){ planNow(); }
         close(); showHuntTodayPanel();
       });
     });
@@ -12625,20 +12626,31 @@
   function huntTimeMs(){ return plannedHunt ? plannedHunt.ms : Date.now(); }
   function planNow(){ plannedHunt = { kind: 'now', ms: Date.now(), label: 'Now (live)', wind: null, cloud: null, pick: 'now' }; }
   function planFromSit(sit){ plannedHunt = { kind: sit.kind, ms: sit.timeMs, label: fcDayLabel(sit.timeMs) + ' ' + (sit.kind === 'am' ? 'AM' : 'PM'), wind: { mph: sit.windMph, dir: sit.windDir, deg: sit.windDeg }, cloud: sit.cloudPct }; }
-  // Quick "when are you hunting" window for the Where-to-Hunt picker → sets plannedHunt (prime AM = ~30 min
-  // after sunrise, prime PM = ~90 min before sunset) with the forecast wind at that time. Drives the ranking
-  // AND the sit-check window, so picking "Tomorrow AM" gives the full morning, not just "from now."
-  async function planForWindow(kind, dayOffset, lat, lng){
-    if (kind === 'now' || lat == null){ planNow(); return; }
+  // "When are you hunting?" picker → sets plannedHunt to a real SIT SPAN (the founder hunts light→noon,
+  // noon→dark, or all day). Carries explicit startMs/endMs so the sit-check shows the WHOLE span's hourly
+  // conditions, and a `ms` = prime movement time within it (dawn / last light) for the ranking wind read.
+  // A span already finished today rolls to tomorrow automatically.
+  async function planSpan(spanKey, lat, lng){
+    if (spanKey === 'now' || lat == null){ planNow(); return; }
     try { await ensureForecast(lat, lng); } catch(e){}
-    var day = new Date(Date.now() + dayOffset * 86400000), t = SunCalc.getTimes(day, lat, lng);
-    var ms = (kind === 'am') ? (t.sunrise.getTime() + 1800000) : (t.sunset.getTime() - 5400000);
-    var f = (typeof forecastAt === 'function') ? (forecastAt(ms) || {}) : {};
+    var now = Date.now();
+    function windowFor(off){
+      var day = new Date(now + off * 86400000), t = SunCalc.getTimes(day, lat, lng);
+      var sr = t.sunrise.getTime(), ss = t.sunset.getTime(), noon = t.solarNoon.getTime(), legalStart = sr - 1800000, legalEnd = ss + 1800000;
+      if (spanKey === 'morning') return { start: legalStart, end: noon, prime: sr + 1800000 };
+      if (spanKey === 'afternoon') return { start: noon, end: legalEnd, prime: ss - 5400000 };
+      if (spanKey === 'allday') return { start: legalStart, end: legalEnd, prime: ss - 5400000 };
+      return { start: Math.max(now, legalStart), end: legalEnd, prime: ss - 5400000 };   // nowdark
+    }
+    var w = windowFor(0);
+    if (w.end <= now){ w = windowFor(1); }   // this span already passed today → next day's
+    var f = (typeof forecastAt === 'function') ? (forecastAt(w.prime) || {}) : {};
+    var spanName = spanKey === 'morning' ? 'light → noon' : (spanKey === 'afternoon' ? 'noon → dark' : (spanKey === 'allday' ? 'all day' : 'now → dark'));
     plannedHunt = {
-      kind: kind, ms: ms,
-      label: (typeof fcDayLabel === 'function' ? fcDayLabel(ms) : '') + ' ' + (kind === 'am' ? 'AM' : 'PM'),
+      kind: (spanKey === 'morning') ? 'am' : 'pm', ms: w.prime, startMs: w.start, endMs: w.end,
+      label: (typeof fcDayLabel === 'function' ? fcDayLabel(w.start) : '') + ' · ' + spanName,
       wind: (f.windDirDeg != null) ? { mph: f.windMph, dir: (f.windDirDisplay || f.windDir), deg: f.windDirDeg } : null,
-      cloud: f.cloudCoverPct, pick: kind + '|' + dayOffset
+      cloud: f.cloudCoverPct, pick: spanKey
     };
   }
   // Pulsing ring to flag a just-picked stand on the map (the "farm opens with the stand highlighted" hand-off).
