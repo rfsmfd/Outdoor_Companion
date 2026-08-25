@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 484</div>
+    <div id="buildBadge">BUILD 485</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10354,47 +10354,69 @@
     corner: { icon: '📐', color: '#7FB3FF', label: 'Inside corner', why: 'An inside corner of the field — deer skirting the edge cut across here instead of walking the whole perimeter.' },
     pinch:  { icon: '⏳', color: '#9ED17A', label: 'Pinch / neck',   why: 'A narrow neck of cover connects two open areas — a natural funnel that squeezes travel.' }
   };
+  // Cover-code buckets for terrain reading: FIELD (F/R/A), THICK bedding cover (C cutover / P young pine / S
+  // swamp), mature TIMBER travel (W/H), WATER (O), DRAINAGE (D). Features live at boundaries between these — not
+  // just field↔woods, so unbroken timber still reads (thick-vs-timber edges, drainages).
   function detectTerrainFeatures(prop){
     var lc = prop && prop.landcover; if (!lc || !lc.grid) return { needScan: true, feats: [] };
     var cols = lc.cols, rows = lc.rows, bb = lc.bbox, types = ensureTypes(lc);
-    function cls(x, y){ if (x < 0 || y < 0 || x >= cols || y >= rows) return '?'; var c = _coverClass(types.charAt(y * cols + x)); return c === 'woods' ? 'W' : (c === 'open' ? 'O' : (c === 'wet' ? 'A' : '?')); }
+    function code(x, y){ if (x < 0 || y < 0 || x >= cols || y >= rows) return null; return types.charAt(y * cols + x); }
     var midLat = (bb.n + bb.s) / 2, cellM = ((bb.e - bb.w) / cols) * 111320 * Math.cos(midLat * Math.PI / 180);
-    var NECK = Math.max(2, Math.round(80 / Math.max(1, cellM)));   // ~80 m woods span = a neck
-    function openWithin(x, y, dx, dy){ for (var k = 1; k <= NECK; k++){ var cc = cls(x + dx * k, y + dy * k); if (cc === 'O') return true; if (cc === 'W') continue; return false; } return false; }
+    var NECK = Math.max(2, Math.round(80 / Math.max(1, cellM)));   // ~80 m span = a neck
     var raw = [];
-    for (var y = 1; y < rows - 1; y++){
-      for (var x = 1; x < cols - 1; x++){
-        var c = cls(x, y); if (c === '?') continue;
-        var n = cls(x, y - 1), s = cls(x, y + 1), e = cls(x + 1, y), w = cls(x - 1, y);
-        if (c === 'W'){
-          var opens = (n === 'O') + (s === 'O') + (e === 'O') + (w === 'O');
-          if (opens >= 3){ raw.push({ t: 'point', x: x, y: y }); continue; }
-          var horiz = openWithin(x, y, 1, 0) && openWithin(x, y, -1, 0);
-          var vert = openWithin(x, y, 0, 1) && openWithin(x, y, 0, -1);
-          if (horiz && !vert && n === 'W' && s === 'W') raw.push({ t: 'pinch', x: x, y: y });
-          else if (vert && !horiz && e === 'W' && w === 'W') raw.push({ t: 'pinch', x: x, y: y });
-        } else if (c === 'O'){
-          var L = ((n === 'W' && e === 'W' && s !== 'W' && w !== 'W') || (n === 'W' && w === 'W' && s !== 'W' && e !== 'W') || (s === 'W' && e === 'W' && n !== 'W' && w !== 'W') || (s === 'W' && w === 'W' && n !== 'W' && e !== 'W'));
-          if (L) raw.push({ t: 'corner', x: x, y: y });
+    // One pass with (feature-class test, background test, context tag) — the SAME point/corner/pinch geometry,
+    // applied to different boundaries so it reads field edges AND cover edges inside the timber.
+    function runPass(isFeat, isBg, ctx){
+      function cl(x, y){ var c = code(x, y); if (c == null) return '?'; return isFeat(c) ? 'W' : (isBg(c) ? 'O' : '?'); }
+      function openWithin(x, y, dx, dy){ for (var k = 1; k <= NECK; k++){ var cc = cl(x + dx * k, y + dy * k); if (cc === 'O') return true; if (cc === 'W') continue; return false; } return false; }
+      for (var y = 1; y < rows - 1; y++){
+        for (var x = 1; x < cols - 1; x++){
+          var c = cl(x, y); if (c === '?') continue;
+          var n = cl(x, y - 1), s = cl(x, y + 1), e = cl(x + 1, y), w = cl(x - 1, y);
+          if (c === 'W'){
+            if ((n === 'O') + (s === 'O') + (e === 'O') + (w === 'O') >= 3){ raw.push({ t: 'point', ctx: ctx, x: x, y: y }); continue; }
+            var horiz = openWithin(x, y, 1, 0) && openWithin(x, y, -1, 0), vert = openWithin(x, y, 0, 1) && openWithin(x, y, 0, -1);
+            if (horiz && !vert && n === 'W' && s === 'W') raw.push({ t: 'pinch', ctx: ctx, x: x, y: y });
+            else if (vert && !horiz && e === 'W' && w === 'W') raw.push({ t: 'pinch', ctx: ctx, x: x, y: y });
+          } else if (c === 'O'){
+            if ((n === 'W' && e === 'W' && s !== 'W' && w !== 'W') || (n === 'W' && w === 'W' && s !== 'W' && e !== 'W') || (s === 'W' && e === 'W' && n !== 'W' && w !== 'W') || (s === 'W' && w === 'W' && n !== 'W' && e !== 'W')) raw.push({ t: 'corner', ctx: ctx, x: x, y: y });
+          }
         }
       }
     }
+    function isField(c){ return 'FRA'.indexOf(c) >= 0; }
+    function isThick(c){ return 'CPS'.indexOf(c) >= 0; }
+    function isTimber(c){ return 'WH'.indexOf(c) >= 0; }
+    runPass(function(c){ return isThick(c) || isTimber(c); }, function(c){ return isField(c) || c === 'O'; }, 'field');  // classic field edge
+    runPass(isThick, isTimber, 'cover');                                                                                // bedding-cover edge inside the timber
+    for (var yy = 0; yy < rows; yy++){ for (var xx = 0; xx < cols; xx++){ if (code(xx, yy) === 'D') raw.push({ t: 'drain', ctx: 'drain', x: xx, y: yy }); } }   // drainage corridors
+    if (raw.length > 6000) raw = raw.slice(0, 6000);   // safety cap on the O(n^2) clustering below
     var used = {}, feats = [];
-    function key(f){ return f.t + ':' + f.x + ':' + f.y; }
+    function key(f){ return f.t + ':' + f.ctx + ':' + f.x + ':' + f.y; }
     for (var i = 0; i < raw.length; i++){
       if (used[key(raw[i])]) continue;
       var stack = [raw[i]], cx = 0, cy = 0, cnt = 0; used[key(raw[i])] = 1;
       while (stack.length){
         var f = stack.pop(); cx += f.x; cy += f.y; cnt++;
-        for (var j = 0; j < raw.length; j++){ if (raw[j].t === f.t && !used[key(raw[j])] && Math.abs(raw[j].x - f.x) <= 3 && Math.abs(raw[j].y - f.y) <= 3){ used[key(raw[j])] = 1; stack.push(raw[j]); } }
+        for (var j = 0; j < raw.length; j++){ if (raw[j].t === f.t && raw[j].ctx === f.ctx && !used[key(raw[j])] && Math.abs(raw[j].x - f.x) <= 3 && Math.abs(raw[j].y - f.y) <= 3){ used[key(raw[j])] = 1; stack.push(raw[j]); } }
       }
-      if (cnt < 2) continue;   // ignore lone specks (noise)
+      if (cnt < (raw[i].t === 'drain' ? 4 : 2)) continue;   // ignore specks
       var mx = cx / cnt, my = cy / cnt;
-      feats.push({ t: raw[i].t, size: cnt, lat: bb.n - ((my + 0.5) / rows) * (bb.n - bb.s), lng: bb.w + ((mx + 0.5) / cols) * (bb.e - bb.w) });
+      feats.push({ t: raw[i].t, ctx: raw[i].ctx, size: cnt, lat: bb.n - ((my + 0.5) / rows) * (bb.n - bb.s), lng: bb.w + ((mx + 0.5) / cols) * (bb.e - bb.w) });
     }
     if (prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function') feats = feats.filter(function(f){ return pointInProperty(f.lat, f.lng, prop); });
     feats.sort(function(a, b){ return b.size - a.size; });
-    return { needScan: false, feats: feats.slice(0, 8) };
+    return { needScan: false, feats: feats.slice(0, 12) };
+  }
+  // Label a feature by kind + context (a point on a field edge reads differently than a thick-cover finger).
+  function _terrainLabel(f){
+    if (f.t === 'drain') return { icon: '🌊', color: '#4A7AA8', label: 'Drainage corridor', why: 'A drainage / creek bottom — a natural travel corridor deer follow through cover.' };
+    if (f.ctx === 'cover'){
+      if (f.t === 'point') return { icon: '📌', color: '#C88BE0', label: 'Cover point', why: 'A finger of thick cover pushes into the timber — a bedding edge deer stage off and travel.' };
+      if (f.t === 'corner') return { icon: '📐', color: '#C88BE0', label: 'Cover pocket corner', why: 'An inside corner of a thick-cover block — a travel pinch along the bedding edge.' };
+      return { icon: '⏳', color: '#C88BE0', label: 'Cover neck', why: 'A narrow neck of thick cover — a funnel between bedding pockets.' };
+    }
+    return TERRAIN_KINDS[f.t] || TERRAIN_KINDS.point;
   }
   var terrainLayer = null;
   function clearTerrainPins(){ if (terrainLayer){ try { map.removeLayer(terrainLayer); } catch (e) {} terrainLayer = null; } }
@@ -10402,7 +10424,7 @@
     clearTerrainPins(); if (!feats || !feats.length) return;
     terrainLayer = L.layerGroup().addTo(map);
     feats.forEach(function(f){
-      var k = TERRAIN_KINDS[f.t] || {};
+      var k = _terrainLabel(f);
       var m = L.marker([f.lat, f.lng], { icon: L.divIcon({ className: '', iconSize: [28, 28], iconAnchor: [14, 14], html: '<div style="width:26px;height:26px;border-radius:6px;background:rgba(20,29,24,.85);border:2px solid ' + (k.color || '#E7B45A') + ';display:flex;align-items:center;justify-content:center;font-size:15px;">' + (k.icon || '📍') + '</div>' }) }).addTo(terrainLayer);
       m.bindPopup('<div style="font-size:12px;max-width:210px;line-height:1.4;">' + (k.icon || '') + ' <b>' + (k.label || 'Feature') + '</b><br>' + (k.why || '') + '<br><span style="color:#9db0a3;">My read of the map — go verify on the ground.</span></div>');
     });
@@ -10415,18 +10437,17 @@
     else if (res.needScan){ h += '<div style="color:#E8B04B;">I need your land read first — run <b>Field vs woods</b> in Property Setup, then I can point out corners, points &amp; pinches.</div>'; }
     else if (!res.feats.length){ h += '<div style="opacity:.85;">Nothing jumps out on the cover map here — the edges are pretty straight. Your eye on the ground will still beat the map.</div>'; }
     else {
-      var byT = {}; res.feats.forEach(function(f){ (byT[f.t] = byT[f.t] || []).push(f); });
-      h += '<div style="color:#9db0a3;font-size:11.5px;margin-bottom:6px;">Here\'s what I notice on your map — candidates to go check, not gospel. Tap one to fly there; the 📌 pins are on the map.</div>';
-      ['point', 'corner', 'pinch'].forEach(function(t){
-        if (!byT[t]) return; var k = TERRAIN_KINDS[t];
-        byT[t].forEach(function(f, i){
-          h += '<div class="tr-row" data-lat="' + f.lat + '" data-lng="' + f.lng + '" style="border:1px solid #35443A;border-left:3px solid ' + k.color + ';border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
-            '<div style="font-weight:700;font-size:12.5px;">' + k.icon + ' ' + k.label + (byT[t].length > 1 ? (' ' + (i + 1)) : '') + '</div>' +
-            '<div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + k.why + '</div>' +
-          '</div>';
-        });
+      h += '<div style="color:#9db0a3;font-size:11.5px;margin-bottom:6px;">Here\'s what I notice on your map — candidates to go check, not gospel. Tap one to fly there; the pins are on the map.</div>';
+      var seen = {};
+      res.feats.forEach(function(f){
+        var k = _terrainLabel(f); var n = (seen[k.label] = (seen[k.label] || 0) + 1);
+        h += '<div class="tr-row" data-lat="' + f.lat + '" data-lng="' + f.lng + '" style="border:1px solid #35443A;border-left:3px solid ' + k.color + ';border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
+          '<div style="font-weight:700;font-size:12.5px;">' + k.icon + ' ' + k.label + ' ' + n + '</div>' +
+          '<div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + k.why + '</div>' +
+        '</div>';
       });
     }
+    if (prop && !res.needScan) h += '<div style="color:#9db0a3;font-size:11px;margin-top:8px;padding-top:6px;border-top:1px dashed #2c3a31;">🗻 Ground that reads as <b>unbroken timber</b> won\'t show here — its features are pure <b>terrain</b> (ridges, saddles, draws, benches). That\'s the <b>LiDAR read</b> coming next; this pass is cover only.</div>';
     h += '<div style="color:#9db0a3;font-size:11.5px;margin-top:8px;">This is me pointing at the map like a hunting buddy would — sometimes fresh eyes catch the obvious. But you know the dirt. What do you see that I don\'t?</div></div>';
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
