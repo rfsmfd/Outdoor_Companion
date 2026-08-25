@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 473</div>
+    <div id="buildBadge">BUILD 474</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12238,6 +12238,35 @@
     }
     return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, buckId: top.buckId || null, bucks: keys.length, dayBucks: dayBucks, nocturnal: nocturnal, zone: zone, label: label };
   }
+  // RUT NUDGE — the founder's #1 rule made active ([[flexibility-first-principle]]): a normally-NOCTURNAL tagged
+  // buck who suddenly starts showing DAYLIGHT hits is the classic rut tell — time to switch from daylight-zone
+  // hunting to specifically TARGETING him before he beds down the pattern again. Returns the bucks "slipping up":
+  // low lifetime daylight fraction (a night buck), but with fresh daytime detections in the last 2 weeks at a
+  // higher daylight rate than his norm. Honesty-gated: needs a real baseline (≥5 detections) so one photo can't
+  // fake a trend.
+  function rutNudges(){
+    var pts = buckActivityPoints(), now = Date.now(), RUT_MS = 14 * 86400000, by = {};
+    pts.forEach(function(p){
+      if (!p.buckId) return;
+      var g = by[p.buckId] || (by[p.buckId] = { total: 0, day: 0, rTotal: 0, rDay: 0, lastDay: 0 });
+      g.total++; if (p.day) g.day++;
+      if (p.ms >= now - RUT_MS){ g.rTotal++; if (p.day){ g.rDay++; if (p.ms > g.lastDay) g.lastDay = p.ms; } }
+    });
+    var out = [];
+    Object.keys(by).forEach(function(id){
+      var g = by[id];
+      if (g.total < 5) return;                              // need a baseline before we call a trend
+      var frac = g.total ? g.day / g.total : 0;
+      if (frac >= 0.35) return;                             // he already moves in daylight — not a "waking up" story
+      if (g.rDay < 1) return;                               // no fresh daytime hit
+      var rFrac = g.rTotal ? g.rDay / g.rTotal : 0;
+      if (rFrac <= frac) return;                            // recent daylight rate must EXCEED his lifetime norm
+      out.push({ buckId: id, name: buckNameById(id) || 'A tagged buck', rDay: g.rDay, dayFrac: frac,
+                 lastDayMs: g.lastDay, days: Math.max(0, Math.round((now - g.lastDay) / 86400000)) });
+    });
+    out.sort(function(a, b){ return (b.rDay - a.rDay) || (b.lastDayMs - a.lastDayMs); });
+    return out;
+  }
   function huntTonightSpots(){
     var out = [], _hrPts = buckActivityPoints(), _hrDay = buckDayProfiles(_hrPts);
     (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
@@ -12589,6 +12618,31 @@
         styleChip('zone', '🌞 Daylight zones', 'best daylight areas · your tagged bucks') +
         styleChip('target', '🎯 Target a buck', 'lock onto one tagged shooter') +
       '</div>';
+    // Rut nudge — a normally-nocturnal buck now moving in daylight. Only surfaced in ZONE mode (it's a prompt to
+    // switch INTO target mode) and scoped to the active property. One tap flips to Target him and re-ranks.
+    var _rutProp = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
+    var _rutPts = huntStyleIsZone() ? buckActivityPoints() : [];
+    var _rut = huntStyleIsZone() ? rutNudges().filter(function(n){
+      if (!_rutProp || !(_rutProp.boundary && _rutProp.boundary.length >= 3)) return true;   // no farm boundary → don't over-filter
+      // keep the nudge relevant to the farm you're looking at: does this buck have activity inside it?
+      return _rutPts.some(function(p){ return p.buckId === n.buckId && pointInProperty(p.lat, p.lng, _rutProp); });
+    }) : [];
+    function rutBanner(){
+      if (!_rut.length) return '';
+      return _rut.slice(0, 2).map(function(n){
+        var when = n.days <= 0 ? 'today' : (n.days === 1 ? 'yesterday' : n.days + 'd ago');
+        return '<div style="background:#3a2f1e;border:1px solid #C9832E;border-radius:11px;padding:10px 12px;margin-bottom:12px;">' +
+          '<div style="font-size:10.5px;letter-spacing:.5px;color:#E7B45A;font-weight:800;">🌅 DAYLIGHT TELL — HE\'S SLIPPING UP</div>' +
+          '<div style="font-size:14px;font-weight:800;margin-top:2px;">' + escapeHtml(n.name) + ' is moving in daylight lately</div>' +
+          '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;line-height:1.5;">' + n.rDay + ' daytime hit' + (n.rDay === 1 ? '' : 's') + ' in the last 2 weeks (last ' + when + ') — he\'s normally a night buck. Rut may be pulling him onto his feet in daylight — the window to target him.</div>' +
+          '<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">' +
+            '<button class="ht-rut-target" data-buck="' + escapeHtml(n.buckId) + '" style="background:#C9832E;border:none;color:#231a0e;border-radius:7px;padding:5px 11px;font-size:11.5px;font-weight:700;cursor:pointer;">🎯 Target ' + escapeHtml(n.name) + '</button>' +
+            '<button class="ht-move" data-buck="' + escapeHtml(n.buckId) + '" style="background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:5px 11px;font-size:11.5px;cursor:pointer;">🎬 Web</button>' +
+            '<button class="ht-range" data-buck="' + escapeHtml(n.buckId) + '" style="background:transparent;border:1px solid #6B8F5C;color:#9ED17A;border-radius:7px;padding:5px 11px;font-size:11.5px;cursor:pointer;">⭕ Range</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
     var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
         '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">← Back</button>' +
         '<div style="font-weight:800;font-size:16px;flex:1;min-width:0;">🎯 Where to hunt</div>' +
@@ -12600,6 +12654,7 @@
         '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
         (per ? ('<br>⭐ Feeding — major <b>' + fmtSolWin(per.major1) + '</b> & <b>' + fmtSolWin(per.major2) + '</b><br><span style="color:#9db0a3;">minor ' + fmtSolWin(per.minor1) + ' & ' + fmtSolWin(per.minor2) + '</span>') : '') +
       '</div>' +
+      rutBanner() +
       (hunt.length ? rankHeadline() : '') +
       ((buckProfiles && buckProfiles.length) ? '<button class="ht-profile" style="width:100%;margin-bottom:12px;background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:8px;padding:8px;font-size:12px;cursor:pointer;">🦌 See a buck\'s Movement Profile — reference</button>' : '');
     if (!spots.length){
@@ -12637,6 +12692,10 @@
     // Hunting-style toggle — flip zone/target, remember it, re-rank instantly for that method.
     Array.prototype.forEach.call(card.querySelectorAll('.ht-style'), function(b){
       b.addEventListener('click', function(){ setHuntStyle(b.getAttribute('data-style')); close(); showHuntTodayPanel(); });
+    });
+    // Rut nudge "🎯 Target him" — flip to target mode (which privileges this named buck) and re-rank for it.
+    Array.prototype.forEach.call(card.querySelectorAll('.ht-rut-target'), function(b){
+      b.addEventListener('click', function(){ setHuntStyle('target'); close(); showHuntTodayPanel(); });
     });
     Array.prototype.forEach.call(card.querySelectorAll('.ht-when'), function(b){
       b.addEventListener('click', async function(){
