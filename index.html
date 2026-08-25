@@ -1836,6 +1836,7 @@
       <button class="btn-ghost" id="scoutDrawBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">✏️ Draw a Line — rub line, corridor, route</button>
       <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
       <button class="btn-ghost" id="cameraPlanBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">📸 Camera Plan — is each cam earning its spot?</button>
+      <button class="btn-ghost" id="terrainReadBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🗺 Terrain Read — a second set of eyes on your map</button>
       <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
       <button class="btn-ghost" id="toolsToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
@@ -1961,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 483</div>
+    <div id="buildBadge">BUILD 484</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7835,6 +7836,7 @@
     var draw = document.getElementById('scoutDrawBtn'); if (draw) draw.style.display = show;
     var rep = document.getElementById('scoutReportBtn'); if (rep) rep.style.display = show;
     var camp = document.getElementById('cameraPlanBtn'); if (camp) camp.style.display = show;
+    var terr = document.getElementById('terrainReadBtn'); if (terr) terr.style.display = show;
   }
   // ---------- ✏️ Scout line pen — tap-to-place rub lines / corridors / routes on the markup board ----------
   // Dashed purple conjecture lines, saved via the trail store (so they persist + sync) but tagged scoutKind
@@ -10341,6 +10343,101 @@
     Array.prototype.forEach.call(card.querySelectorAll('.cam-sug-drop'), function(b){
       b.addEventListener('click', function(){ var sg = suggestions[parseInt(b.getAttribute('data-i'), 10)]; if (!sg) return; dropSuggestedCameraMark(sg.lat, sg.lng, prop, sg.reason + (sg.sub ? (' — ' + sg.sub) : '')); close(); flyTo(sg.lat, sg.lng); });
     });
+    back.appendChild(card); document.body.appendChild(back);
+  }
+  // ---------- 🗺 Terrain Read — a companion's read of your map (the "second set of eyes" intent) ----------
+  // Points out cover features worth a look — timber points, inside corners, pinches/necks — straight from the
+  // Field-vs-woods land-cover scan. HONEST: a second set of eyes, candidates to VERIFY, never gospel. (Terrain
+  // features that need LiDAR — saddles, benches, draws — are a later phase.)
+  var TERRAIN_KINDS = {
+    point:  { icon: '📌', color: '#E7B45A', label: 'Timber point',  why: 'A point of timber juts into the open — deer hit the tip to scent-check before stepping out. Good approach/staging spot.' },
+    corner: { icon: '📐', color: '#7FB3FF', label: 'Inside corner', why: 'An inside corner of the field — deer skirting the edge cut across here instead of walking the whole perimeter.' },
+    pinch:  { icon: '⏳', color: '#9ED17A', label: 'Pinch / neck',   why: 'A narrow neck of cover connects two open areas — a natural funnel that squeezes travel.' }
+  };
+  function detectTerrainFeatures(prop){
+    var lc = prop && prop.landcover; if (!lc || !lc.grid) return { needScan: true, feats: [] };
+    var cols = lc.cols, rows = lc.rows, bb = lc.bbox, types = ensureTypes(lc);
+    function cls(x, y){ if (x < 0 || y < 0 || x >= cols || y >= rows) return '?'; var c = _coverClass(types.charAt(y * cols + x)); return c === 'woods' ? 'W' : (c === 'open' ? 'O' : (c === 'wet' ? 'A' : '?')); }
+    var midLat = (bb.n + bb.s) / 2, cellM = ((bb.e - bb.w) / cols) * 111320 * Math.cos(midLat * Math.PI / 180);
+    var NECK = Math.max(2, Math.round(80 / Math.max(1, cellM)));   // ~80 m woods span = a neck
+    function openWithin(x, y, dx, dy){ for (var k = 1; k <= NECK; k++){ var cc = cls(x + dx * k, y + dy * k); if (cc === 'O') return true; if (cc === 'W') continue; return false; } return false; }
+    var raw = [];
+    for (var y = 1; y < rows - 1; y++){
+      for (var x = 1; x < cols - 1; x++){
+        var c = cls(x, y); if (c === '?') continue;
+        var n = cls(x, y - 1), s = cls(x, y + 1), e = cls(x + 1, y), w = cls(x - 1, y);
+        if (c === 'W'){
+          var opens = (n === 'O') + (s === 'O') + (e === 'O') + (w === 'O');
+          if (opens >= 3){ raw.push({ t: 'point', x: x, y: y }); continue; }
+          var horiz = openWithin(x, y, 1, 0) && openWithin(x, y, -1, 0);
+          var vert = openWithin(x, y, 0, 1) && openWithin(x, y, 0, -1);
+          if (horiz && !vert && n === 'W' && s === 'W') raw.push({ t: 'pinch', x: x, y: y });
+          else if (vert && !horiz && e === 'W' && w === 'W') raw.push({ t: 'pinch', x: x, y: y });
+        } else if (c === 'O'){
+          var L = ((n === 'W' && e === 'W' && s !== 'W' && w !== 'W') || (n === 'W' && w === 'W' && s !== 'W' && e !== 'W') || (s === 'W' && e === 'W' && n !== 'W' && w !== 'W') || (s === 'W' && w === 'W' && n !== 'W' && e !== 'W'));
+          if (L) raw.push({ t: 'corner', x: x, y: y });
+        }
+      }
+    }
+    var used = {}, feats = [];
+    function key(f){ return f.t + ':' + f.x + ':' + f.y; }
+    for (var i = 0; i < raw.length; i++){
+      if (used[key(raw[i])]) continue;
+      var stack = [raw[i]], cx = 0, cy = 0, cnt = 0; used[key(raw[i])] = 1;
+      while (stack.length){
+        var f = stack.pop(); cx += f.x; cy += f.y; cnt++;
+        for (var j = 0; j < raw.length; j++){ if (raw[j].t === f.t && !used[key(raw[j])] && Math.abs(raw[j].x - f.x) <= 3 && Math.abs(raw[j].y - f.y) <= 3){ used[key(raw[j])] = 1; stack.push(raw[j]); } }
+      }
+      if (cnt < 2) continue;   // ignore lone specks (noise)
+      var mx = cx / cnt, my = cy / cnt;
+      feats.push({ t: raw[i].t, size: cnt, lat: bb.n - ((my + 0.5) / rows) * (bb.n - bb.s), lng: bb.w + ((mx + 0.5) / cols) * (bb.e - bb.w) });
+    }
+    if (prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function') feats = feats.filter(function(f){ return pointInProperty(f.lat, f.lng, prop); });
+    feats.sort(function(a, b){ return b.size - a.size; });
+    return { needScan: false, feats: feats.slice(0, 8) };
+  }
+  var terrainLayer = null;
+  function clearTerrainPins(){ if (terrainLayer){ try { map.removeLayer(terrainLayer); } catch (e) {} terrainLayer = null; } }
+  function renderTerrainPins(feats){
+    clearTerrainPins(); if (!feats || !feats.length) return;
+    terrainLayer = L.layerGroup().addTo(map);
+    feats.forEach(function(f){
+      var k = TERRAIN_KINDS[f.t] || {};
+      var m = L.marker([f.lat, f.lng], { icon: L.divIcon({ className: '', iconSize: [28, 28], iconAnchor: [14, 14], html: '<div style="width:26px;height:26px;border-radius:6px;background:rgba(20,29,24,.85);border:2px solid ' + (k.color || '#E7B45A') + ';display:flex;align-items:center;justify-content:center;font-size:15px;">' + (k.icon || '📍') + '</div>' }) }).addTo(terrainLayer);
+      m.bindPopup('<div style="font-size:12px;max-width:210px;line-height:1.4;">' + (k.icon || '') + ' <b>' + (k.label || 'Feature') + '</b><br>' + (k.why || '') + '<br><span style="color:#9db0a3;">My read of the map — go verify on the ground.</span></div>');
+    });
+  }
+  function openTerrainRead(){
+    var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
+    var res = detectTerrainFeatures(prop || {});
+    var h = '<div style="font-size:13px;color:#dfeee4;line-height:1.5;">';
+    if (!prop){ h += '<div style="color:#E8B04B;">Pick a farm in the top dropdown — I read one property\'s map at a time.</div>'; }
+    else if (res.needScan){ h += '<div style="color:#E8B04B;">I need your land read first — run <b>Field vs woods</b> in Property Setup, then I can point out corners, points &amp; pinches.</div>'; }
+    else if (!res.feats.length){ h += '<div style="opacity:.85;">Nothing jumps out on the cover map here — the edges are pretty straight. Your eye on the ground will still beat the map.</div>'; }
+    else {
+      var byT = {}; res.feats.forEach(function(f){ (byT[f.t] = byT[f.t] || []).push(f); });
+      h += '<div style="color:#9db0a3;font-size:11.5px;margin-bottom:6px;">Here\'s what I notice on your map — candidates to go check, not gospel. Tap one to fly there; the 📌 pins are on the map.</div>';
+      ['point', 'corner', 'pinch'].forEach(function(t){
+        if (!byT[t]) return; var k = TERRAIN_KINDS[t];
+        byT[t].forEach(function(f, i){
+          h += '<div class="tr-row" data-lat="' + f.lat + '" data-lng="' + f.lng + '" style="border:1px solid #35443A;border-left:3px solid ' + k.color + ';border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
+            '<div style="font-weight:700;font-size:12.5px;">' + k.icon + ' ' + k.label + (byT[t].length > 1 ? (' ' + (i + 1)) : '') + '</div>' +
+            '<div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + k.why + '</div>' +
+          '</div>';
+        });
+      });
+    }
+    h += '<div style="color:#9db0a3;font-size:11.5px;margin-top:8px;">This is me pointing at the map like a hunting buddy would — sometimes fresh eyes catch the obvious. But you know the dirt. What do you see that I don\'t?</div></div>';
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:430px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearTerrainPins === 'function') clearTerrainPins(); }
+    card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;"><div style="font-weight:800;font-size:17px;">🗺 Terrain Read <span style="font-size:11px;color:#7f9488;font-weight:400;">· drag to move</span></div><button class="tr-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : '—') + '</div>' + h;
+    card.querySelector('.tr-x').addEventListener('click', close);
+    try { if (!scoutMode) setScoutMode(true); if (typeof renderTerrainPins === 'function') renderTerrainPins(res.feats); } catch (e) {}
+    Array.prototype.forEach.call(card.querySelectorAll('.tr-row'), function(el){ el.addEventListener('click', function(){ try { map.flyTo([parseFloat(el.getAttribute('data-lat')), parseFloat(el.getAttribute('data-lng'))], Math.max(map.getZoom(), 16)); } catch (e) {} }); });
     back.appendChild(card); document.body.appendChild(back);
   }
   // ---------- 📋 Field Card — the per-property hunt-day card, generated live from your data ----------
@@ -13687,6 +13784,8 @@
     if (reportBtn) reportBtn.addEventListener('click', function(){ if (typeof openScoutingReport === 'function') openScoutingReport(); });
     var camPlanBtn = document.getElementById('cameraPlanBtn');
     if (camPlanBtn) camPlanBtn.addEventListener('click', function(){ if (typeof openCameraPlan === 'function') openCameraPlan(); });
+    var terrainBtn = document.getElementById('terrainReadBtn');
+    if (terrainBtn) terrainBtn.addEventListener('click', function(){ if (typeof openTerrainRead === 'function') openTerrainRead(); });
     var modeBtn = document.getElementById('scoutModeBtn');
     if (modeBtn) modeBtn.addEventListener('click', function(){ setScoutMode(!scoutMode); showToast(scoutMode ? '🔍 Scout Mode ON — your conjecture marks & all sign are showing' : 'Scout Mode off — back to your clean hunt map'); });
     var drawBtn = document.getElementById('scoutDrawBtn');
