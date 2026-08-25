@@ -1952,7 +1952,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 460</div>
+    <div id="buildBadge">BUILD 461</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10444,26 +10444,47 @@
   function openStandProfileModal(siteId){
     var s = sites.filter(function(x){ return x.id === siteId; })[0];
     var back = document.createElement('div');
-    back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    // Non-dimming backdrop: transparent + pointer-events:none so the MAP underneath stays visible AND clickable
+    // while the profile floats over it. The card re-enables pointer events for itself. Close via × or Esc.
+    back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:transparent;pointer-events:none;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
     var card = document.createElement('div');
-    // Match the Site Context modal EXACTLY (which scrolls reliably in the field): the card just grows to
-    // fit its content and the BACKDROP (back, overflow:auto) scrolls when it's tall — no internal
-    // max-height/overflow, which produced a thin auto-hiding scrollbar the user couldn't see or grab.
-    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:480px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:480px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 14px 44px rgba(0,0,0,.6);margin:auto;pointer-events:auto;';
     function close(){ if (back.parentNode) document.body.removeChild(back); }
     var body;
     try { body = standProfileHtml(siteId); }
     catch(err){ console.error('Outdoor Companion: stand profile build failed', err); body = '<div style="color:#E8B04B;font-size:12px;">Couldn’t build this profile: ' + escapeHtml((err && err.message) ? err.message : String(err)) + '</div>'; }
     card.innerHTML =
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;">' +
-        '<div style="font-weight:800;font-size:17px;">📊 ' + (s ? escapeHtml(s.name) : 'Stand Profile') + '</div>' +
+      '<div class="sp-head" title="Drag to move — see the map underneath" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;">' +
+        '<div style="font-weight:800;font-size:17px;"><span style="color:#6f8377;font-weight:400;">⠿</span> 📊 ' + (s ? escapeHtml(s.name) : 'Stand Profile') + '</div>' +
         '<button class="sp-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button>' +
       '</div>' +
       '<div class="sp-body">' + body + '</div>';
     card.querySelector('.sp-x').addEventListener('click', close);
-    back.addEventListener('click', function(e){ if (e.target === back) close(); });
     document.addEventListener('keydown', function esc(e){ if (e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc); } });
     back.appendChild(card); document.body.appendChild(back);
+    // Draggable by the header so you can slide it aside and read the map it's describing.
+    (function makeDraggable(){
+      var head = card.querySelector('.sp-head'); if (!head) return;
+      var dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
+      function down(e){
+        if (e.target.closest && e.target.closest('.sp-x')) return;
+        var pt = e.touches ? e.touches[0] : e, r = card.getBoundingClientRect();
+        back.style.alignItems = 'flex-start'; back.style.justifyContent = 'flex-start';
+        card.style.position = 'fixed'; card.style.margin = '0'; card.style.width = r.width + 'px'; card.style.left = r.left + 'px'; card.style.top = r.top + 'px';
+        dragging = true; sx = pt.clientX; sy = pt.clientY; ox = r.left; oy = r.top;
+        document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
+        document.addEventListener('touchmove', move, { passive:false }); document.addEventListener('touchend', up);
+        if (e.cancelable) e.preventDefault();
+      }
+      function move(e){
+        if (!dragging) return; var pt = e.touches ? e.touches[0] : e;
+        card.style.left = Math.max(4, Math.min(window.innerWidth - 44, ox + pt.clientX - sx)) + 'px';
+        card.style.top = Math.max(4, Math.min(window.innerHeight - 44, oy + pt.clientY - sy)) + 'px';
+        if (e.cancelable) e.preventDefault();
+      }
+      function up(){ dragging = false; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('touchmove', move); document.removeEventListener('touchend', up); }
+      head.addEventListener('mousedown', down); head.addEventListener('touchstart', down, { passive:false });
+    })();
     // Fill the async terrain/wind/thermal line, and wire the tap-to-shoot photo tile. Both re-run whenever
     // the body is re-rendered (e.g. after a photo is added), so the profile stays live inside the modal.
     function refreshBody(){
