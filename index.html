@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 465</div>
+    <div id="buildBadge">BUILD 466</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12389,8 +12389,8 @@
     var _wind = (plannedHunt && plannedHunt.wind && plannedHunt.wind.deg != null) ? { deg: plannedHunt.wind.deg, mph: plannedHunt.wind.mph } : null;
     if (!_wind && lat != null){ try { var _wq = await scentWeather(lat, lng); if (_wq && _wq.windDirDeg != null) _wind = { deg: _wq.windDirDeg, mph: _wq.windMph }; } catch (e) {} }
     if (_wind && _wind.mph > 2){
-      hunt.forEach(function(x){ x.score += spotWindBonus(x, _wind); });
-      hunt.sort(function(a, b){ return (b.hasData ? b.score : -1000) - (a.hasData ? a.score : -1000); });
+      hunt.forEach(function(x){ x.windBonus = spotWindBonus(x, _wind); x.score += x.windBonus; });
+      hunt.sort(function(a, b){ if (a.hasData !== b.hasData) return a.hasData ? -1 : 1; return b.score - a.score; });
     }
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;gap:14px;flex-wrap:wrap;padding:18px;overflow:auto;font-family:inherit;';
@@ -12425,6 +12425,22 @@
         (x.huntable ? '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' : '') +
       '</div>';
     }
+    // Answer-first: lead with the single call (top-ranked hunt spot) + the honest reasons, THEN the list below.
+    function rankHeadline(){
+      var top = hunt[0]; if (!top) return '';
+      var when = (plannedHunt ? plannedHunt.label : 'Tonight');
+      var reasons = [];
+      if (top.rest){ if (top.rest.daysSince == null) reasons.push('never pressured'); else if (top.rest.daysSince >= 5) reasons.push('rested ' + top.rest.daysSince + 'd'); else if (top.rest.daysSince <= 1) reasons.push('⚠ sat recently'); }
+      if (top.hasData && top.read) reasons.push(top.read.base.pct + '% daylight' + (top.read.recent && top.read.recent.located ? ' · seen recently' : ''));
+      var windNote = (top.windBonus > 0) ? 'wind in your favor' : (top.windBonus < 0 ? '⚠ wind marginal — read the 💨 below' : 'confirm the 💨 read below');
+      reasons.push('<span id="ht-headwind">' + windNote + '</span>');
+      var conf = top.hasData ? (top.read && top.read.base.pct >= 25 ? 'STRONG' : 'WORTH A SIT') : 'BEST UNTRACKED SPOT';
+      return '<div style="background:#22331f;border:1px solid #3c6d42;border-radius:11px;padding:11px 13px;margin-bottom:13px;">' +
+        '<div style="font-size:10.5px;letter-spacing:.6px;color:#9ED17A;font-weight:800;">🎯 ' + escapeHtml(when.toUpperCase()) + '’S CALL · ' + conf + '</div>' +
+        '<div style="font-size:16px;font-weight:800;margin-top:2px;">Hunt <span style="color:#dff0e4;">' + escapeHtml(top.site.name) + '</span></div>' +
+        '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;line-height:1.5;">' + reasons.join(' &nbsp;·&nbsp; ') + '.</div>' +
+      '</div>';
+    }
     var html = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">' +
         '<button class="ht-back" title="Back to Plan a Hunt" style="background:transparent;border:1px solid #3c4d42;border-radius:7px;color:#cfe0d6;font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">← Back</button>' +
         '<div style="font-weight:800;font-size:16px;flex:1;min-width:0;">🎯 Where to hunt</div>' +
@@ -12434,6 +12450,7 @@
         '🌙 <b>' + (moon && moon.name ? moon.name : '') + '</b> (' + (moon ? moon.illumination : 0) + '% lit) &nbsp; 💨 <span id="ht-wind">wind…</span>' +
         (per ? ('<br>⭐ Feeding — major <b>' + fmtSolWin(per.major1) + '</b> & <b>' + fmtSolWin(per.major2) + '</b><br><span style="color:#9db0a3;">minor ' + fmtSolWin(per.minor1) + ' & ' + fmtSolWin(per.minor2) + '</span>') : '') +
       '</div>' +
+      (hunt.length ? rankHeadline() : '') +
       ((buckProfiles && buckProfiles.length) ? '<button class="ht-profile" style="width:100%;margin-bottom:12px;background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:8px;padding:8px;font-size:12px;cursor:pointer;">🦌 See a buck\'s Movement Profile — reference</button>' : '');
     if (!spots.length){
       html += '<div style="font-size:12px;color:#9db0a3;">No spots with deer photos yet. Once your cameras log deer, they\'ll rank here for tonight.</div>';
@@ -12520,6 +12537,7 @@
         var sc = combineScent(thBear, thMph, windFrom, windMph);
         var deerDir = (x.borrow && x.borrow.length && x.borrow[0].lat != null) ? bearingBetween(s.lat, s.lng, x.borrow[0].lat, x.borrow[0].lng) : null;
         var el = card.querySelector('.ht-scent[data-sid="' + s.id + '"]'); if (el) el.innerHTML = scentVerdict(sc, deerDir);
+        if (x === hunt[0]){ var hw = card.querySelector('#ht-headwind'); if (hw){ var to = scentCompass16(sc.bearing); hw.innerHTML = sc.calm ? 'dead calm — scent hangs' : (deerDir == null ? ('scent blows ' + to) : ((function(){ var d = Math.abs(sc.bearing - deerDir) % 360; if (d > 180) d = 360 - d; return d < 60 ? ('<span style="color:#e6857a;">⚠ scent toward your deer (' + to + ')</span>') : (d > 120 ? ('<span style="color:#a7d89a;">wind’s right — scent away (' + to + ')</span>') : ('crosswind (' + to + ')')); })())); } }
       });
     })();
   }
