@@ -1835,6 +1835,7 @@
       <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">➕ Add a Mark — pinch, rub, possible stand…</button>
       <button class="btn-ghost" id="scoutDrawBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">✏️ Draw a Line — rub line, corridor, route</button>
       <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
+      <button class="btn-ghost" id="cameraPlanBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">📸 Camera Plan — is each cam earning its spot?</button>
       <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
       <button class="btn-ghost" id="toolsToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
@@ -1960,7 +1961,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 478</div>
+    <div id="buildBadge">BUILD 479</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7831,6 +7832,7 @@
     var add = document.getElementById('scoutSpotBtn'); if (add) add.style.display = show;
     var draw = document.getElementById('scoutDrawBtn'); if (draw) draw.style.display = show;
     var rep = document.getElementById('scoutReportBtn'); if (rep) rep.style.display = show;
+    var camp = document.getElementById('cameraPlanBtn'); if (camp) camp.style.display = show;
   }
   // ---------- ✏️ Scout line pen — tap-to-place rub lines / corridors / routes on the markup board ----------
   // Dashed purple conjecture lines, saved via the trail store (so they persist + sync) but tagged scoutKind
@@ -10115,6 +10117,125 @@
     back.addEventListener('click', function(e){ if (e.target === back) close(); });
     var focus = card.querySelector('.sr-focus');
     if (focus) focus.addEventListener('click', function(){ close(); try { if (!scoutMode) setScoutMode(true); if (hot) map.flyTo([hot.lat, hot.lng], Math.max(map.getZoom(), 16)); } catch(e){} });
+    back.appendChild(card); document.body.appendChild(back);
+  }
+  // ---------- 📸 Camera Plan — is each camera earning its spot, and where are the data gaps? ----------
+  // Camera data is the founder's PRIMARY tool, so this reads (1) whether each camera has "learned" its spot —
+  // a move candidate once it stops turning up new bucks — and (2) where sign sits with NO camera on it. HONESTY
+  // (his #1 rule): it SUGGESTS with the evidence shown; you decide. Phase 1 = maturity + uncovered-sign gaps.
+  function _camPlanScope(prop, s){ if (!prop) return true; if (s.propertyId === prop.id) return true; return (typeof pointInProperty === 'function' && typeof s.lat === 'number') ? pointInProperty(s.lat, s.lng, prop) : false; }
+  function cameraPlanReads(prop){
+    var now = Date.now(), DAY = 86400000;
+    var photos = (typeof importedPhotos !== 'undefined' ? importedPhotos : []);
+    var camSites = (typeof sites !== 'undefined' ? sites : []).filter(function(s){
+      if (typeof s.lat !== 'number' || !_camPlanScope(prop, s)) return false;
+      if (s.type === 'camera') return true;
+      return photos.some(function(p){ return p.matchedSiteId === s.id; });   // any site a camera has shot from
+    });
+    return camSites.map(function(s){
+      var ph = photos.filter(function(p){ return p.matchedSiteId === s.id && p.timestamp; }).sort(function(a, b){ return a.timestamp - b.timestamp; });
+      var total = ph.length, placedMs = total ? ph[0].timestamp : null, lastMs = total ? ph[total - 1].timestamp : null;
+      var wks = placedMs ? ((now - placedMs) / (7 * DAY)) : 0;
+      var recent = ph.filter(function(p){ return p.timestamp >= now - 21 * DAY; }).length;
+      var firstByBuck = {};
+      ph.forEach(function(p){ if (!p.buckProfileId) return; if (firstByBuck[p.buckProfileId] == null || p.timestamp < firstByBuck[p.buckProfileId]) firstByBuck[p.buckProfileId] = p.timestamp; });
+      var namedBucks = Object.keys(firstByBuck).length, lastNewBuckMs = 0;
+      Object.keys(firstByBuck).forEach(function(k){ if (firstByBuck[k] > lastNewBuckMs) lastNewBuckMs = firstByBuck[k]; });
+      var dNewBuck = lastNewBuckMs ? Math.round((now - lastNewBuckMs) / DAY) : null;
+      var dLast = lastMs ? Math.round((now - lastMs) / DAY) : null;
+      var v, why, tone, rank;
+      if (!total){ v = 'CHECK IT'; tone = '#E8823F'; rank = 1; why = 'No captures yet — is it live and aimed right?'; }
+      else if (wks < 2){ v = 'NEW'; tone = '#9ED17A'; rank = 4; why = 'Just placed (' + Math.max(1, Math.round(wks * 7)) + 'd) — give it time to learn the spot.'; }
+      else if (recent === 0){ v = 'GONE QUIET'; tone = '#E8823F'; rank = 1; why = 'Nothing in ' + dLast + 'd (' + total + ' pics all-time). Dead spot? A move may do more good.'; }
+      else if (namedBucks >= 1 && dNewBuck != null && dNewBuck >= 21 && wks >= 4){ v = 'MATURED'; tone = '#E8B04B'; rank = 2; why = 'Learned this spot — knows ' + namedBucks + ' buck' + (namedBucks === 1 ? '' : 's') + ', no NEW buck in ' + dNewBuck + 'd. Move candidate — it\'s told you what it will.'; }
+      else { v = 'PRODUCING'; tone = '#9ED17A'; rank = 3; why = 'Still teaching you' + (dNewBuck != null ? (' — newest buck ' + dNewBuck + 'd ago') : '') + '. Keep it.'; }
+      // ANCHOR vs FLOAT (founder's call): an anchor is a strategic hold (e.g. a field cam that keeps catching NEW
+      // deer filtering in) — its job is inventory, so a lull is NOT a reason to move it. Only FLOATERS get nudged
+      // to relocate and fill the missing pieces. Never tell an anchor to move.
+      var role = (s.camRole === 'anchor') ? 'anchor' : 'float';
+      if (role === 'anchor'){
+        if (v === 'MATURED'){ v = 'ANCHOR'; tone = '#7FB39A'; rank = 3; why = 'Anchor — held for new deer that filter in. Its job is inventory, so a quiet stretch is fine. Leave it.'; }
+        else if (v === 'GONE QUIET'){ v = 'ANCHOR · QUIET'; tone = '#E8B04B'; rank = 3; why = 'Quiet ' + dLast + 'd, but it\'s your anchor — deer filter through over a season. Leave it (check batteries if it\'s been long).'; }
+      }
+      var moveable = (role === 'float' && (v === 'MATURED' || v === 'GONE QUIET' || v === 'CHECK IT'));
+      var ev = total ? ('Wk ' + Math.max(1, Math.round(wks)) + ' · ' + total + ' pics · ' + namedBucks + ' tagged buck' + (namedBucks === 1 ? '' : 's') + ' · ' + recent + ' in 21d') : 'no captures yet';
+      return { s: s, v: v, why: why, tone: tone, rank: rank, ev: ev, role: role, moveable: moveable };
+    }).sort(function(a, b){ return a.rank - b.rank; });   // actionable (check / gone quiet / matured floaters) first
+  }
+  function cameraGaps(prop){
+    var now = Date.now(), R = (cameraCoverageYd || 100) * 0.9144;
+    var covered = (typeof sites !== 'undefined' ? sites : []).filter(function(s){
+      if (typeof s.lat !== 'number' || !_camPlanScope(prop, s)) return false;
+      return (typeof importedPhotos !== 'undefined' ? importedPhotos : []).some(function(p){ return p.matchedSiteId === s.id && (p.timestamp || 0) >= now - 90 * 86400000; });
+    });
+    var items = (typeof _scoutingItems === 'function') ? _scoutingItems(prop) : [];
+    var uncovered = items.filter(function(it){ return !covered.some(function(c){ return distMeters(it.lat, it.lng, c.lat, c.lng) <= R; }); });
+    return { uncovered: uncovered, coveredCount: covered.length, total: items.length, R: R };
+  }
+  function openCameraPlan(){
+    var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
+    var reads = cameraPlanReads(prop), gaps = cameraGaps(prop);
+    var hot = _scoutHotCluster(gaps.uncovered);
+    var line = function(icon, txt){ return '<div style="margin:3px 0;">' + icon + ' ' + txt + '</div>'; };
+    var h = '<div style="font-size:13px;color:#dfeee4;line-height:1.5;">';
+    if (!prop) h += '<div style="color:#E8B04B;margin-bottom:6px;">Pick a farm in the top dropdown for a focused plan. Showing all ground.</div>';
+    // Section 1 — the cameras
+    h += '<div style="color:#9db0a3;font-size:11.5px;letter-spacing:.3px;margin-bottom:4px;">📷 YOUR CAMERAS — is each one earning its spot?</div>';
+    function roleChip(r, role, label){
+      var on = r.role === role;
+      return '<button class="cam-role" data-sid="' + escapeHtml(r.s.id) + '" data-role="' + role + '" style="flex:0 0 auto;padding:2px 8px;border-radius:7px;border:1px solid ' + (on ? '#7d5aa8' : '#3c4d42') + ';background:' + (on ? '#2c2438' : '#1a241f') + ';color:' + (on ? '#e9ddf5' : '#9db0a3') + ';font-size:10px;font-weight:' + (on ? '700' : '400') + ';cursor:pointer;">' + label + '</button>';
+    }
+    if (!reads.length){ h += line('📷', '<span style="opacity:.7;">No camera spots here yet. Once photos are matched to a site, they show up here.</span>'); }
+    else {
+      reads.forEach(function(r){
+        h += '<div class="cam-row" data-lat="' + r.s.lat + '" data-lng="' + r.s.lng + '" style="border:1px solid #35443A;border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
+          '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+            '<div style="font-weight:700;font-size:12.5px;">📷 ' + escapeHtml(r.s.name || 'Camera') + '</div>' +
+            '<div style="font-size:10.5px;font-weight:800;color:' + r.tone + ';">' + r.v + '</div>' +
+          '</div>' +
+          '<div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + r.why + '</div>' +
+          '<div style="font-size:10px;color:#8aa596;margin-top:2px;">' + r.ev + '</div>' +
+          '<div style="display:flex;gap:6px;align-items:center;margin-top:5px;"><span style="font-size:9.5px;color:#6f8579;">role:</span>' + roleChip(r, 'anchor', '📌 Anchor') + roleChip(r, 'float', '🎈 Float') + '</div>' +
+        '</div>';
+      });
+    }
+    // Section 2 — data gaps (uncovered sign)
+    h += '<div style="color:#9db0a3;font-size:11.5px;letter-spacing:.3px;margin:8px 0 4px;padding-top:6px;border-top:1px dashed #2c3a31;">🕳 DATA GAPS — sign with no camera on it</div>';
+    if (hot){
+      var kd = hot.kinds.slice(0, 3).map(function(k){ return (SCOUT_SIGN[k] ? SCOUT_SIGN[k].label : k); }).join(', ');
+      h += line('📍', 'You have sign toward the <b>' + hot.dir + '</b> — ' + hot.count + ' markers (' + escapeHtml(kd) + ') with <b>no camera within ' + Math.round(gaps.R * 1.09361) + ' yd</b>. A camera here could turn that sign into a pattern.');
+      var floater = reads.filter(function(r){ return r.moveable; })[0];   // a FLOATER that's earned a move → pair it to the gap
+      if (floater) h += '<div style="font-size:11px;color:#E7B45A;margin-top:3px;">🎈 Free up <b>' + escapeHtml(floater.s.name || 'a floater') + '</b> (' + floater.v.toLowerCase() + ') and float it here — leave your anchors put.</div>';
+      h += '<button class="cam-gap" data-lat="' + hot.lat + '" data-lng="' + hot.lng + '" style="margin-top:6px;width:100%;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;">📍 Take me there (fly + Scout Mode + coverage)</button>';
+    } else if (gaps.total === 0){
+      h += line('📍', '<span style="opacity:.7;">No sign logged here yet — log rubs/scrapes/beds as you find them and gaps will surface.</span>');
+    } else {
+      h += line('📍', '<span style="opacity:.7;">Your logged sign is already within camera range — no obvious blind spot on sign right now.</span>');
+    }
+    h += '<div style="color:#9db0a3;font-size:11.5px;margin-top:8px;">Suggestions from your data — not orders. You know the ground; move a camera when it earns the move.</div></div>';
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100062;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:480px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    card.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;"><div style="font-weight:800;font-size:17px;">📸 Camera Plan</div><button class="cp-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : 'All properties') + '</div>' + h;
+    card.querySelector('.cp-x').addEventListener('click', close);
+    back.addEventListener('click', function(e){ if (e.target === back) close(); });
+    function flyTo(la, ln){ close(); try { if (!scoutMode) setScoutMode(true); cameraCoverageOn = true; if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); map.flyTo([la, ln], Math.max(map.getZoom(), 16)); } catch (e) {} }
+    Array.prototype.forEach.call(card.querySelectorAll('.cam-row'), function(el){ el.addEventListener('click', function(){ flyTo(parseFloat(el.getAttribute('data-lat')), parseFloat(el.getAttribute('data-lng'))); }); });
+    // Anchor/Float toggle — persists on the site, re-ranks the plan. stopPropagation so it doesn't fire the row's fly.
+    Array.prototype.forEach.call(card.querySelectorAll('.cam-role'), function(b){
+      b.addEventListener('click', function(e){ e.stopPropagation();
+        var sid = b.getAttribute('data-sid'), role = b.getAttribute('data-role');
+        var st = (typeof sites !== 'undefined' ? sites : []).filter(function(x){ return x.id === sid; })[0];
+        if (st){ st.camRole = role; if (typeof saveSite === 'function') saveSite(st).catch(function(){}); }
+        close(); openCameraPlan();
+      });
+    });
+    var gapBtn = card.querySelector('.cam-gap');
+    if (gapBtn) gapBtn.addEventListener('click', function(){ flyTo(parseFloat(gapBtn.getAttribute('data-lat')), parseFloat(gapBtn.getAttribute('data-lng'))); });
     back.appendChild(card); document.body.appendChild(back);
   }
   // ---------- 📋 Field Card — the per-property hunt-day card, generated live from your data ----------
@@ -13416,6 +13537,8 @@
     });
     var reportBtn = document.getElementById('scoutReportBtn');
     if (reportBtn) reportBtn.addEventListener('click', function(){ if (typeof openScoutingReport === 'function') openScoutingReport(); });
+    var camPlanBtn = document.getElementById('cameraPlanBtn');
+    if (camPlanBtn) camPlanBtn.addEventListener('click', function(){ if (typeof openCameraPlan === 'function') openCameraPlan(); });
     var modeBtn = document.getElementById('scoutModeBtn');
     if (modeBtn) modeBtn.addEventListener('click', function(){ setScoutMode(!scoutMode); showToast(scoutMode ? '🔍 Scout Mode ON — your conjecture marks & all sign are showing' : 'Scout Mode off — back to your clean hunt map'); });
     var drawBtn = document.getElementById('scoutDrawBtn');
