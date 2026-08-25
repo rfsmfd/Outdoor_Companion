@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 485</div>
+    <div id="buildBadge">BUILD 486</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7802,6 +7802,11 @@
   // exactly on the way out — a transient view, not a permanent change.
   var scoutMode = false, _scoutPrev = null;
   var SCOUT_SITE_LAYERS = ['scout', 'trail', 'scrape', 'rub', 'bedding', 'feeding', 'water', 'access', 'custom'];
+  // Open scout-workbench panels (Camera Plan, Terrain Read) register their close() here so they behave as ONE
+  // panel — opening a new one closes the last, and leaving Scout Mode closes any that's open (they don't dim the
+  // map, so without this they'd quietly stack and each need a manual ✕).
+  var _scoutPanels = [];
+  function closeScoutPanels(){ var list = _scoutPanels.splice(0); list.forEach(function(fn){ try { fn(); } catch (e) {} }); }
   function setScoutMode(on){
     if (on && !scoutMode){
       _scoutPrev = { sites: new Set(activeFilters), obs: new Set(activeObsFilters) };
@@ -7813,6 +7818,7 @@
       scoutMode = false;
       cameraCoverageOn = false;   // the coverage circles live ON the Scout Mode board — leave the board, they clear
       if (typeof renderCameraCoverage === 'function') renderCameraCoverage();
+      if (typeof closeScoutPanels === 'function') closeScoutPanels();   // close any open Camera Plan / Terrain Read panel too
     }
     try { localStorage.setItem('oc_scout_mode', scoutMode ? '1' : '0'); } catch(e){}   // remember the mode across reloads so conjecture marks don't "vanish"
     updateScoutModeBtn();
@@ -10247,6 +10253,7 @@
     });
   }
   function openCameraPlan(){
+    if (typeof closeScoutPanels === 'function') closeScoutPanels();   // one panel at a time
     var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
     var data = cameraPlanData(prop), gaps = cameraGaps(prop);
     var suggestions = cameraSuggestions(prop, data, gaps);
@@ -10318,7 +10325,8 @@
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:440px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    _scoutPanels.push(close);
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;"><div style="font-weight:800;font-size:17px;">📸 Camera Plan <span style="font-size:11px;color:#7f9488;font-weight:400;">· drag to move</span></div><button class="cp-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
       '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : 'All properties') + '</div>' + h;
@@ -10404,12 +10412,42 @@
       var mx = cx / cnt, my = cy / cnt;
       feats.push({ t: raw[i].t, ctx: raw[i].ctx, size: cnt, lat: bb.n - ((my + 0.5) / rows) * (bb.n - bb.s), lng: bb.w + ((mx + 0.5) / cols) * (bb.e - bb.w) });
     }
+    // BEDDING — sizable blocks of thick cover (security) via flood-fill. Marks the pocket; hunt its downwind edge.
+    (function(){
+      var seen = new Uint8Array(cols * rows), cellH = ((bb.n - bb.s) / rows) * 111320, cellArea = Math.max(1, cellM * cellH);
+      var MINB = Math.max(6, Math.round(4047 * 1.5 / cellArea));   // ~1.5 acres of thick cover
+      function thick(x, y){ var c = code(x, y); return !!(c && 'CPS'.indexOf(c) >= 0); }
+      for (var yy = 0; yy < rows; yy++){
+        for (var xx = 0; xx < cols; xx++){
+          var idx = yy * cols + xx; if (seen[idx]) continue; if (!thick(xx, yy)){ seen[idx] = 1; continue; }
+          var st = [[xx, yy]], sx = 0, sy = 0, cnt = 0; seen[idx] = 1;
+          while (st.length){
+            var p = st.pop(), px = p[0], py = p[1]; cnt++; sx += px; sy += py;
+            if (px > 0 && !seen[py * cols + (px - 1)] && thick(px - 1, py)){ seen[py * cols + (px - 1)] = 1; st.push([px - 1, py]); }
+            if (px < cols - 1 && !seen[py * cols + (px + 1)] && thick(px + 1, py)){ seen[py * cols + (px + 1)] = 1; st.push([px + 1, py]); }
+            if (py > 0 && !seen[(py - 1) * cols + px] && thick(px, py - 1)){ seen[(py - 1) * cols + px] = 1; st.push([px, py - 1]); }
+            if (py < rows - 1 && !seen[(py + 1) * cols + px] && thick(px, py + 1)){ seen[(py + 1) * cols + px] = 1; st.push([px, py + 1]); }
+          }
+          if (cnt >= MINB){ var mx = sx / cnt, my = sy / cnt; feats.push({ t: 'bedding', ctx: 'bed', size: cnt, lat: bb.n - ((my + 0.5) / rows) * (bb.n - bb.s), lng: bb.w + ((mx + 0.5) / cols) * (bb.e - bb.w) }); }
+        }
+      }
+    })();
     if (prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function') feats = feats.filter(function(f){ return pointInProperty(f.lat, f.lng, prop); });
     feats.sort(function(a, b){ return b.size - a.size; });
-    return { needScan: false, feats: feats.slice(0, 12) };
+    return { needScan: false, feats: feats.slice(0, 14) };
   }
+  // LiDAR terrain features (from the lay of the land, not cover).
+  var LIDAR_KINDS = {
+    saddle: { icon: '⛰', color: '#C9832E', label: 'Saddle',       why: 'A low gap in a ridge — deer cross ridgelines at the saddle, the easiest path. A natural funnel.' },
+    knob:   { icon: '🗻', color: '#B87333', label: 'Knob / hilltop', why: 'A high point — deer skirt just below the crest; useful to orient off and to play the thermal.' },
+    spur:   { icon: '🪝', color: '#C98A3C', label: 'Ridge point / spur', why: 'A finger of high ground running out — a travel route; bucks work the leeward side.' },
+    draw:   { icon: '🥣', color: '#7FA36B', label: 'Draw / hollow', why: 'Low ground that gathers travel — deer follow draws; heads of draws hold bedding.' },
+    bench:  { icon: '🪜', color: '#9C8A5C', label: 'Bench / flat',  why: 'A flat shelf on a slope — deer bed and travel benches, wind at their back looking downhill.' }
+  };
   // Label a feature by kind + context (a point on a field edge reads differently than a thick-cover finger).
   function _terrainLabel(f){
+    if (LIDAR_KINDS[f.t]) return LIDAR_KINDS[f.t];
+    if (f.t === 'bedding') return { icon: '💤', color: '#5AA0C9', label: 'Likely bedding', why: 'A block of thick cover (security) — probable bedding. Hunt the DOWNWIND edge, never the middle.' };
     if (f.t === 'drain') return { icon: '🌊', color: '#4A7AA8', label: 'Drainage corridor', why: 'A drainage / creek bottom — a natural travel corridor deer follow through cover.' };
     if (f.ctx === 'cover'){
       if (f.t === 'point') return { icon: '📌', color: '#C88BE0', label: 'Cover point', why: 'A finger of thick cover pushes into the timber — a bedding edge deer stage off and travel.' };
@@ -10418,48 +10456,118 @@
     }
     return TERRAIN_KINDS[f.t] || TERRAIN_KINDS.point;
   }
+  function _propBBox(prop){
+    if (prop && prop.boundary && prop.boundary.length >= 3){
+      var la = prop.boundary.map(function(p){ return p[0]; }), ln = prop.boundary.map(function(p){ return p[1]; });
+      return { n: Math.max.apply(null, la), s: Math.min.apply(null, la), e: Math.max.apply(null, ln), w: Math.min.apply(null, ln) };
+    }
+    if (prop && prop.landcover && prop.landcover.bbox) return prop.landcover.bbox;
+    var pts = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return typeof s.lat === 'number' && (!prop || s.propertyId === prop.id); });
+    if (pts.length){ var a = pts.map(function(s){ return s.lat; }), b = pts.map(function(s){ return s.lng; }), pad = 0.003; return { n: Math.max.apply(null, a) + pad, s: Math.min.apply(null, a) - pad, e: Math.max.apply(null, b) + pad, w: Math.min.apply(null, b) - pad }; }
+    return null;
+  }
+  // LiDAR terrain read (USGS 3DEP) — samples an elevation grid over the property (same getSamples endpoint the
+  // scent engine uses) and flags saddles, knobs, ridge points/spurs, draws, and benches from local morphology.
+  // Prominence is ADAPTIVE to the farm's relief so flat ground doesn't over-flag. Async; returns [] gracefully.
+  async function detectLidarTerrain(prop){
+    if (typeof HILLSHADE_URL === 'undefined') return [];
+    var bb = _propBBox(prop); if (!bb) return [];
+    var G = 26, gpts = [];
+    for (var gy = 0; gy < G; gy++){ var lat = bb.n - (gy + 0.5) / G * (bb.n - bb.s); for (var gx = 0; gx < G; gx++){ gpts.push([bb.w + (gx + 0.5) / G * (bb.e - bb.w), lat]); } }
+    var z = new Array(G * G), CH = 480;
+    try {
+      for (var i = 0; i < gpts.length; i += CH){
+        var chunk = gpts.slice(i, i + CH);
+        var body = 'geometry=' + encodeURIComponent(JSON.stringify({ points: chunk, spatialReference: { wkid: 4326 } })) + '&geometryType=esriGeometryMultipoint&returnFirstValueOnly=true&interpolation=RSP_BilinearInterpolation&f=json';
+        var resp = await fetch(HILLSHADE_URL + '/getSamples', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body });
+        var data = await resp.json(), samp = (data && data.samples) ? data.samples : [];
+        for (var k = 0; k < chunk.length; k++){ var v = samp[k]; z[i + k] = (v && v.value != null) ? parseFloat(v.value) : NaN; }
+      }
+    } catch (e){ return []; }
+    function Z(gx, gy){ if (gx < 0 || gy < 0 || gx >= G || gy >= G) return NaN; return z[gy * G + gx]; }
+    var vals = z.filter(isFinite); if (vals.length < G * G * 0.5) return [];
+    var relief = Math.max.apply(null, vals) - Math.min.apply(null, vals);
+    if (relief < 3) return [];                       // <3 m across the whole farm → essentially flat
+    var PROM = Math.max(1.2, relief * 0.06);         // adaptive prominence
+    var raw = [];
+    for (var yy = 1; yy < G - 1; yy++){
+      for (var xx = 1; xx < G - 1; xx++){
+        var c = Z(xx, yy); if (!isFinite(c)) continue;
+        var n = Z(xx, yy - 1), s = Z(xx, yy + 1), e = Z(xx + 1, yy), w = Z(xx - 1, yy);
+        if (!([n, s, e, w].every(isFinite))) continue;
+        if (((c < n - PROM) && (c < s - PROM) && (c > e + PROM) && (c > w + PROM)) || ((c < e - PROM) && (c < w - PROM) && (c > n + PROM) && (c > s + PROM))){ raw.push({ t: 'saddle', gx: xx, gy: yy, score: relief }); continue; }
+        if (c > n + PROM && c > s + PROM && c > e + PROM && c > w + PROM){ raw.push({ t: 'knob', gx: xx, gy: yy, score: (c - Math.min(n, s, e, w)) }); continue; }
+        if (((c > n + PROM) + (c > s + PROM) + (c > e + PROM) + (c > w + PROM)) >= 3){ raw.push({ t: 'spur', gx: xx, gy: yy, score: 1 }); continue; }
+        if (((c < n - PROM) + (c < s - PROM) + (c < e - PROM) + (c < w - PROM)) >= 3){ raw.push({ t: 'draw', gx: xx, gy: yy, score: 1 }); continue; }
+        var lv = Math.max(Math.abs(c - n), Math.abs(c - s), Math.abs(c - e), Math.abs(c - w)), grad = Math.abs(n - s) + Math.abs(e - w);
+        if (lv < PROM * 0.5 && grad > PROM * 3) raw.push({ t: 'bench', gx: xx, gy: yy, score: grad });
+      }
+    }
+    var used = {}, feats = [];
+    function key(f){ return f.t + ':' + f.gx + ':' + f.gy; }
+    for (var a2 = 0; a2 < raw.length; a2++){
+      if (used[key(raw[a2])]) continue;
+      var stack = [raw[a2]], sx = 0, sy = 0, cnt = 0, sc = 0; used[key(raw[a2])] = 1;
+      while (stack.length){ var f = stack.pop(); sx += f.gx; sy += f.gy; cnt++; sc = Math.max(sc, f.score);
+        for (var b2 = 0; b2 < raw.length; b2++){ if (raw[b2].t === f.t && !used[key(raw[b2])] && Math.abs(raw[b2].gx - f.gx) <= 2 && Math.abs(raw[b2].gy - f.gy) <= 2){ used[key(raw[b2])] = 1; stack.push(raw[b2]); } }
+      }
+      var mgx = sx / cnt, mgy = sy / cnt;
+      feats.push({ t: raw[a2].t, score: sc, lat: bb.n - ((mgy + 0.5) / G) * (bb.n - bb.s), lng: bb.w + ((mgx + 0.5) / G) * (bb.e - bb.w) });
+    }
+    if (prop && prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function') feats = feats.filter(function(f){ return pointInProperty(f.lat, f.lng, prop); });
+    feats.sort(function(a, b){ return b.score - a.score; });
+    return feats.slice(0, 10);
+  }
   var terrainLayer = null;
   function clearTerrainPins(){ if (terrainLayer){ try { map.removeLayer(terrainLayer); } catch (e) {} terrainLayer = null; } }
-  function renderTerrainPins(feats){
-    clearTerrainPins(); if (!feats || !feats.length) return;
-    terrainLayer = L.layerGroup().addTo(map);
+  function addTerrainPins(feats){
+    if (!feats || !feats.length) return;
+    if (!terrainLayer) terrainLayer = L.layerGroup().addTo(map);
     feats.forEach(function(f){
       var k = _terrainLabel(f);
       var m = L.marker([f.lat, f.lng], { icon: L.divIcon({ className: '', iconSize: [28, 28], iconAnchor: [14, 14], html: '<div style="width:26px;height:26px;border-radius:6px;background:rgba(20,29,24,.85);border:2px solid ' + (k.color || '#E7B45A') + ';display:flex;align-items:center;justify-content:center;font-size:15px;">' + (k.icon || '📍') + '</div>' }) }).addTo(terrainLayer);
       m.bindPopup('<div style="font-size:12px;max-width:210px;line-height:1.4;">' + (k.icon || '') + ' <b>' + (k.label || 'Feature') + '</b><br>' + (k.why || '') + '<br><span style="color:#9db0a3;">My read of the map — go verify on the ground.</span></div>');
     });
   }
+  function renderTerrainPins(feats){ clearTerrainPins(); addTerrainPins(feats); }
   function openTerrainRead(){
+    if (typeof closeScoutPanels === 'function') closeScoutPanels();   // one panel at a time
     var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
     var res = detectTerrainFeatures(prop || {});
+    function trRow(f){ var k = _terrainLabel(f); return '<div class="tr-row" data-lat="' + f.lat + '" data-lng="' + f.lng + '" style="border:1px solid #35443A;border-left:3px solid ' + k.color + ';border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;"><div style="font-weight:700;font-size:12.5px;">' + k.icon + ' ' + k.label + '</div><div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + k.why + '</div></div>'; }
     var h = '<div style="font-size:13px;color:#dfeee4;line-height:1.5;">';
     if (!prop){ h += '<div style="color:#E8B04B;">Pick a farm in the top dropdown — I read one property\'s map at a time.</div>'; }
-    else if (res.needScan){ h += '<div style="color:#E8B04B;">I need your land read first — run <b>Field vs woods</b> in Property Setup, then I can point out corners, points &amp; pinches.</div>'; }
-    else if (!res.feats.length){ h += '<div style="opacity:.85;">Nothing jumps out on the cover map here — the edges are pretty straight. Your eye on the ground will still beat the map.</div>'; }
     else {
       h += '<div style="color:#9db0a3;font-size:11.5px;margin-bottom:6px;">Here\'s what I notice on your map — candidates to go check, not gospel. Tap one to fly there; the pins are on the map.</div>';
-      var seen = {};
-      res.feats.forEach(function(f){
-        var k = _terrainLabel(f); var n = (seen[k.label] = (seen[k.label] || 0) + 1);
-        h += '<div class="tr-row" data-lat="' + f.lat + '" data-lng="' + f.lng + '" style="border:1px solid #35443A;border-left:3px solid ' + k.color + ';border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;cursor:pointer;">' +
-          '<div style="font-weight:700;font-size:12.5px;">' + k.icon + ' ' + k.label + ' ' + n + '</div>' +
-          '<div style="font-size:11px;color:#cfe0d6;margin-top:2px;">' + k.why + '</div>' +
-        '</div>';
-      });
+      if (res.needScan) h += '<div style="color:#E8B04B;font-size:11.5px;margin-bottom:6px;">Run <b>Field vs woods</b> in Property Setup for the COVER read (corners, points, pinches, bedding). I\'ll still read the land\'s shape below.</div>';
+      else if (!res.feats.length) h += '<div style="opacity:.8;font-size:11.5px;margin-bottom:6px;">No cover features jump out — the edges look straight.</div>';
+      else { h += '<div style="color:#9db0a3;font-size:11px;letter-spacing:.3px;margin:4px 0 4px;">🌲 FROM THE COVER</div>'; res.feats.forEach(function(f){ h += trRow(f); }); }
+      h += '<div id="tr-lidar" style="margin-top:6px;padding-top:6px;border-top:1px dashed #2c3a31;color:#9db0a3;font-size:11.5px;">🗻 Reading the lay of the land (LiDAR — ridges, saddles, draws, benches)…</div>';
     }
-    if (prop && !res.needScan) h += '<div style="color:#9db0a3;font-size:11px;margin-top:8px;padding-top:6px;border-top:1px dashed #2c3a31;">🗻 Ground that reads as <b>unbroken timber</b> won\'t show here — its features are pure <b>terrain</b> (ridges, saddles, draws, benches). That\'s the <b>LiDAR read</b> coming next; this pass is cover only.</div>';
     h += '<div style="color:#9db0a3;font-size:11.5px;margin-top:8px;">This is me pointing at the map like a hunting buddy would — sometimes fresh eyes catch the obvious. But you know the dirt. What do you see that I don\'t?</div></div>';
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:430px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearTerrainPins === 'function') clearTerrainPins(); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearTerrainPins === 'function') clearTerrainPins(); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    _scoutPanels.push(close);
     card.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;"><div style="font-weight:800;font-size:17px;">🗺 Terrain Read <span style="font-size:11px;color:#7f9488;font-weight:400;">· drag to move</span></div><button class="tr-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
       '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : '—') + '</div>' + h;
     card.querySelector('.tr-x').addEventListener('click', close);
+    function bindTrRows(scope){ Array.prototype.forEach.call((scope || card).querySelectorAll('.tr-row'), function(el){ if (el._trb) return; el._trb = 1; el.addEventListener('click', function(){ try { map.flyTo([parseFloat(el.getAttribute('data-lat')), parseFloat(el.getAttribute('data-lng'))], Math.max(map.getZoom(), 16)); } catch (e) {} }); }); }
     try { if (!scoutMode) setScoutMode(true); if (typeof renderTerrainPins === 'function') renderTerrainPins(res.feats); } catch (e) {}
-    Array.prototype.forEach.call(card.querySelectorAll('.tr-row'), function(el){ el.addEventListener('click', function(){ try { map.flyTo([parseFloat(el.getAttribute('data-lat')), parseFloat(el.getAttribute('data-lng'))], Math.max(map.getZoom(), 16)); } catch (e) {} }); });
+    bindTrRows(card);
     back.appendChild(card); document.body.appendChild(back);
+    // Async LiDAR terrain — fill the placeholder + add pins when it returns (skip if the panel was closed).
+    if (prop && typeof detectLidarTerrain === 'function'){
+      detectLidarTerrain(prop).then(function(lf){
+        var el = document.getElementById('tr-lidar'); if (!el || !document.body.contains(card)) return;
+        if (!lf || !lf.length){ el.innerHTML = '🗻 The land reads mostly flat here — no strong terrain features to point out.'; return; }
+        var html = '<div style="color:#9db0a3;font-size:11px;letter-spacing:.3px;margin:0 0 4px;">🗻 FROM THE LAY OF THE LAND</div>';
+        lf.forEach(function(f){ html += trRow(f); });
+        el.innerHTML = html; bindTrRows(el); if (typeof addTerrainPins === 'function') addTerrainPins(lf);
+      }).catch(function(){ var el = document.getElementById('tr-lidar'); if (el) el.innerHTML = '🗻 Couldn\'t reach the elevation service for the land read (needs a connection).'; });
+    }
   }
   // ---------- 📋 Field Card — the per-property hunt-day card, generated live from your data ----------
   function _fcDist(m){ var yd = m * 1.0936; return yd < 880 ? (Math.round(yd) + ' yd') : ((m / 1609.34).toFixed(1) + ' mi'); }
