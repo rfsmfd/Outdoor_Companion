@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 468</div>
+    <div id="buildBadge">BUILD 469</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12164,7 +12164,9 @@
       out.push({ site: s, read: null, score: rest.bonus, huntable: true, solunarHit: null, hasData: false, borrow: null, rest: rest });
     });
     // Data spots (we have deer evidence) rank first, then no-data spots by rest — within each group, by score.
-    out.sort(function(a, b){ if (a.hasData !== b.hasData) return a.hasData ? -1 : 1; return b.score - a.score; });
+    // STABLE tiebreaker by name so equal-score stands don't flip order run-to-run (they were, and it looked like
+    // a broken/inconsistent recommendation — really a coin-flip between tied stands).
+    out.sort(function(a, b){ if (a.hasData !== b.hasData) return a.hasData ? -1 : 1; if (b.score !== a.score) return b.score - a.score; return (a.site.name || '').localeCompare(b.site.name || ''); });
     return out;
   }
   function propertyNameForSite(s){
@@ -12393,7 +12395,7 @@
     if (!_wind && lat != null){ try { var _wq = await scentWeather(lat, lng); if (_wq && _wq.windDirDeg != null) _wind = { deg: _wq.windDirDeg, mph: _wq.windMph }; } catch (e) {} }
     if (_wind && _wind.mph > 2){
       hunt.forEach(function(x){ x.windBonus = spotWindBonus(x, _wind); x.score += x.windBonus; });
-      hunt.sort(function(a, b){ if (a.hasData !== b.hasData) return a.hasData ? -1 : 1; return b.score - a.score; });
+      hunt.sort(function(a, b){ if (a.hasData !== b.hasData) return a.hasData ? -1 : 1; if (b.score !== a.score) return b.score - a.score; return (a.site.name || '').localeCompare(b.site.name || ''); });
     }
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;gap:14px;flex-wrap:wrap;padding:18px;overflow:auto;font-family:inherit;';
@@ -12438,10 +12440,15 @@
       var windNote = (top.windBonus > 0) ? 'wind in your favor' : (top.windBonus < 0 ? '⚠ wind marginal — read the 💨 below' : 'confirm the 💨 read below');
       reasons.push('<span id="ht-headwind">' + windNote + '</span>');
       var conf = top.hasData ? (top.read && top.read.base.pct >= 25 ? 'STRONG' : 'WORTH A SIT') : 'BEST UNTRACKED SPOT';
+      // Honesty: when the runner-up is dead even (same score — common with camera-less stands the wind can't
+      // separate), say so instead of presenting a coin-flip as a hard single call. This is what made the top pick
+      // look like it "changed its mind" between runs — they were tied, and the tie-break is your call, not the app's.
+      var tie = (hunt[1] && Math.abs((hunt[1].score || 0) - (top.score || 0)) < 0.5) ? hunt[1] : null;
+      var tieNote = tie ? '<div style="font-size:11px;color:#E8B04B;margin-top:5px;line-height:1.45;">≈ Dead even with <b>' + escapeHtml(tie.site.name) + '</b> — either sits the same on paper. Break the tie with your <b>wind</b> and <b>quiet way in</b>.</div>' : '';
       return '<div style="background:#22331f;border:1px solid #3c6d42;border-radius:11px;padding:11px 13px;margin-bottom:13px;">' +
         '<div style="font-size:10.5px;letter-spacing:.6px;color:#9ED17A;font-weight:800;">🎯 ' + escapeHtml(when.toUpperCase()) + '’S CALL · ' + conf + '</div>' +
         '<div style="font-size:16px;font-weight:800;margin-top:2px;">Hunt <span style="color:#dff0e4;">' + escapeHtml(top.site.name) + '</span></div>' +
-        '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;line-height:1.5;">' + reasons.join(' &nbsp;·&nbsp; ') + '.</div>' +
+        '<div style="font-size:11.5px;color:#cfe0d6;margin-top:3px;line-height:1.5;">' + reasons.join(' &nbsp;·&nbsp; ') + '.</div>' + tieNote +
       '</div>';
     }
     // "When are you hunting?" — pick the SIT SPAN you'll actually sit; the ranking + sit-check use that window.
@@ -12644,7 +12651,15 @@
     }
     var w = windowFor(0);
     if (w.end <= now){ w = windowFor(1); }   // this span already passed today → next day's
+    // Get the wind for the PRIME hour of this sit. This must be reliable: if the forecast fetch was slow/failed
+    // on the first read, forecastAt() returns nothing → plannedHunt.wind stays null → the ranker silently falls
+    // back to LIVE-now wind, so the SAME span gave a different top pick run-to-run (the bug the founder hit:
+    // "Now→dark" gave Michaels once, Buddy on Point the next time). Retry the forecast, then read the prime hour.
     var f = (typeof forecastAt === 'function') ? (forecastAt(w.prime) || {}) : {};
+    if (f.windDirDeg == null){ try { await ensureForecast(lat, lng); f = (typeof forecastAt === 'function') ? (forecastAt(w.prime) || {}) : {}; } catch(e){} }
+    // Last resort (truly offline / forecast unreachable): a live wind read, so the ranking still has a wind and is
+    // at least consistent within the session, instead of null → live-fallback happening invisibly inside the panel.
+    if (f.windDirDeg == null){ try { var _lw = await scentWeather(lat, lng); if (_lw && _lw.windDirDeg != null){ f = { windDirDeg: _lw.windDirDeg, windMph: _lw.windMph, windDir: _lw.windDir, cloudCoverPct: f.cloudCoverPct }; } } catch(e){} }
     var spanName = spanKey === 'morning' ? 'light → noon' : (spanKey === 'afternoon' ? 'noon → dark' : (spanKey === 'allday' ? 'all day' : 'now → dark'));
     plannedHunt = {
       kind: (spanKey === 'morning') ? 'am' : 'pm', ms: w.prime, startMs: w.start, endMs: w.end,
