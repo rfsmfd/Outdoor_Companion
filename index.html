@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 487</div>
+    <div id="buildBadge">BUILD 488</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10482,9 +10482,9 @@
     var mlat = (bb.n + bb.s) / 2;
     var widthM = (bb.e - bb.w) * 111320 * Math.cos(mlat * Math.PI / 180), heightM = (bb.n - bb.s) * 111320;
     // Finer grid (~45 m cells) so RAVINES & bottoms register — clamped, and total points capped so the fetch stays sane.
-    function clampG(m){ return Math.max(20, Math.min(48, Math.round(m / 45))); }
+    function clampG(m){ return Math.max(22, Math.min(56, Math.round(m / 40))); }
     var Gx = clampG(widthM), Gy = clampG(heightM);
-    if (Gx * Gy > 2300){ var scl = Math.sqrt(2300 / (Gx * Gy)); Gx = Math.max(18, Math.round(Gx * scl)); Gy = Math.max(18, Math.round(Gy * scl)); }
+    if (Gx * Gy > 3200){ var scl = Math.sqrt(3200 / (Gx * Gy)); Gx = Math.max(20, Math.round(Gx * scl)); Gy = Math.max(20, Math.round(Gy * scl)); }
     var gpts = [];
     for (var gy = 0; gy < Gy; gy++){ var lat = bb.n - (gy + 0.5) / Gy * (bb.n - bb.s); for (var gx = 0; gx < Gx; gx++){ gpts.push([bb.w + (gx + 0.5) / Gx * (bb.e - bb.w), lat]); } }
     var z = new Array(Gx * Gy), CH = 480;
@@ -10501,37 +10501,42 @@
     var vals = z.filter(isFinite); if (vals.length < Gx * Gy * 0.5) return [];
     var relief = Math.max.apply(null, vals) - Math.min.apply(null, vals);
     if (relief < 3) return [];                       // essentially flat
-    var PROM = Math.max(1.0, relief * 0.05);         // adaptive prominence (a touch finer for ravines)
+    var PROM = Math.max(0.8, relief * 0.04);         // adaptive; lower so subtler ravines/ridges still register
     var raw = [];
     for (var yy = 1; yy < Gy - 1; yy++){
       for (var xx = 1; xx < Gx - 1; xx++){
         var c = Z(xx, yy); if (!isFinite(c)) continue;
         var n = Z(xx, yy - 1), s = Z(xx, yy + 1), e = Z(xx + 1, yy), w = Z(xx - 1, yy);
         if (!([n, s, e, w].every(isFinite))) continue;
-        if (((c < n - PROM) && (c < s - PROM) && (c > e + PROM) && (c > w + PROM)) || ((c < e - PROM) && (c < w - PROM) && (c > n + PROM) && (c > s + PROM))){ raw.push({ t: 'saddle', gx: xx, gy: yy, score: relief }); continue; }
-        if (c > n + PROM && c > s + PROM && c > e + PROM && c > w + PROM){ raw.push({ t: 'knob', gx: xx, gy: yy, score: (c - Math.min(n, s, e, w)) }); continue; }
-        if (((c > n + PROM) + (c > s + PROM) + (c > e + PROM) + (c > w + PROM)) >= 3){ raw.push({ t: 'spur', gx: xx, gy: yy, score: 1 }); continue; }
-        if (((c < n - PROM) + (c < s - PROM) + (c < e - PROM) + (c < w - PROM)) >= 3){ raw.push({ t: 'draw', gx: xx, gy: yy, score: 1 }); continue; }
+        // Axis tests — THE FIX: ravines/ridges are LINEAR (low/high across ONE axis), so require only the two
+        // CROSS neighbors, not 3-of-4. That's why entire ravine & ridge systems were invisible before.
+        var lowEW = (c < e - PROM) && (c < w - PROM), highEW = (c > e + PROM) && (c > w + PROM);
+        var lowNS = (c < n - PROM) && (c < s - PROM), highNS = (c > n + PROM) && (c > s + PROM);
+        if (highEW && highNS){ raw.push({ t: 'knob', gx: xx, gy: yy, score: (c - Math.min(n, s, e, w)) }); continue; }              // hilltop
+        else if (lowEW && lowNS){ raw.push({ t: 'draw', gx: xx, gy: yy, score: ((e - c) + (w - c) + (n - c) + (s - c)) }); continue; }  // pocket / draw head
+        else if ((lowEW && highNS) || (lowNS && highEW)){ raw.push({ t: 'saddle', gx: xx, gy: yy, score: (Math.abs(e - c) + Math.abs(w - c) + Math.abs(n - c) + Math.abs(s - c)) }); continue; }   // pass / crossing
+        else if (highEW || highNS){ raw.push({ t: 'spur', gx: xx, gy: yy, score: Math.max((c - e) + (c - w), (c - n) + (c - s)) }); continue; }   // ridge line / spur
+        else if (lowEW || lowNS){ raw.push({ t: 'draw', gx: xx, gy: yy, score: Math.max((e - c) + (w - c), (n - c) + (s - c)) }); continue; }      // ravine / draw line
         var lv = Math.max(Math.abs(c - n), Math.abs(c - s), Math.abs(c - e), Math.abs(c - w)), grad = Math.abs(n - s) + Math.abs(e - w);
-        if (lv < PROM * 0.5 && grad > PROM * 3) raw.push({ t: 'bench', gx: xx, gy: yy, score: grad });
+        if (lv < PROM * 0.4 && grad > PROM * 2.5) raw.push({ t: 'bench', gx: xx, gy: yy, score: grad });   // flat shelf on a slope
       }
     }
-    var used = {}, feats = [];
-    function key(f){ return f.t + ':' + f.gx + ':' + f.gy; }
-    for (var a2 = 0; a2 < raw.length; a2++){
-      if (used[key(raw[a2])]) continue;
-      var stack = [raw[a2]], sx = 0, sy = 0, cnt = 0, sc = 0; used[key(raw[a2])] = 1;
-      while (stack.length){ var f = stack.pop(); sx += f.gx; sy += f.gy; cnt++; sc = Math.max(sc, f.score);
-        for (var b2 = 0; b2 < raw.length; b2++){ if (raw[b2].t === f.t && !used[key(raw[b2])] && Math.abs(raw[b2].gx - f.gx) <= 2 && Math.abs(raw[b2].gy - f.gy) <= 2){ used[key(raw[b2])] = 1; stack.push(raw[b2]); } }
-      }
-      var mgx = sx / cnt, mgy = sy / cnt;
-      feats.push({ t: raw[a2].t, score: sc, lat: bb.n - ((mgy + 0.5) / Gy) * (bb.n - bb.s), lng: bb.w + ((mgx + 0.5) / Gx) * (bb.e - bb.w) });
-    }
+    // Non-max suppression: strongest first, drop anything within MERGE cells — so a long ravine/ridge gets a
+    // marker every few cells (a readable line of pins) instead of one blob or nothing.
+    raw.sort(function(a, b){ return b.score - a.score; });
+    var MERGE = 2, feats = [];
+    raw.forEach(function(f){
+      for (var q = 0; q < feats.length; q++){ if (Math.abs(feats[q]._gx - f.gx) <= MERGE && Math.abs(feats[q]._gy - f.gy) <= MERGE) return; }
+      feats.push({ t: f.t, score: f.score, _gx: f.gx, _gy: f.gy, lat: bb.n - ((f.gy + 0.5) / Gy) * (bb.n - bb.s), lng: bb.w + ((f.gx + 0.5) / Gx) * (bb.e - bb.w) });
+    });
     // DON'T clip to the line — tag off-property instead (still within the perimeter), and rank on-property first.
     var hasBnd = !!(prop && prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function');
     feats.forEach(function(f){ f.off = hasBnd ? !pointInProperty(f.lat, f.lng, prop) : false; });
-    feats.sort(function(a, b){ if ((a.off ? 1 : 0) !== (b.off ? 1 : 0)) return a.off ? 1 : -1; return b.score - a.score; });
-    return feats.slice(0, 14);
+    // Reserve slots for OFF-property features so the perimeter read actually shows (not crowded out by on-property).
+    var byScore = function(a, b){ return b.score - a.score; };
+    var onp = feats.filter(function(f){ return !f.off; }).sort(byScore).slice(0, 16);
+    var offp = feats.filter(function(f){ return f.off; }).sort(byScore).slice(0, 8);
+    return onp.concat(offp);
   }
   var terrainLayer = null;
   function clearTerrainPins(){ if (terrainLayer){ try { map.removeLayer(terrainLayer); } catch (e) {} terrainLayer = null; } }
