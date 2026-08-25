@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 469</div>
+    <div id="buildBadge">BUILD 470</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12101,8 +12101,12 @@
   // How the (planned) wind sits at a hunt spot: does your scent blow AWAY from the deer it borrows (+), or TOWARD
   // them (−)? This is the "conditions" term folded into both the stand rank and the property rank.
   function spotWindBonus(x, wind){
-    if (!wind || wind.mph <= 2 || !x || !x.hasData) return 0;
-    var dd = (x.borrow && x.borrow.length && x.borrow[0].lat != null) ? bearingBetween(x.site.lat, x.site.lng, x.borrow[0].lat, x.borrow[0].lng) : null;
+    if (!wind || wind.mph <= 2 || !x) return 0;
+    // The "deer" to keep your scent off of: cameras within shooting range if this stand borrows them, otherwise
+    // the buck living in its home range (so a camera-less stand still gets a real wind read, aimed at the buck).
+    var dp = (x.borrow && x.borrow.length && x.borrow[0].lat != null) ? x.borrow[0] : (x.hr && x.hr.lat != null ? x.hr : null);
+    if (!dp) return 0;
+    var dd = bearingBetween(x.site.lat, x.site.lng, dp.lat, dp.lng);
     if (dd == null) return 0;
     var scentTo = (wind.deg + 180) % 360, df = Math.abs(scentTo - dd) % 360; if (df > 180) df = 360 - df;
     return df > 120 ? 16 : (df < 60 ? -28 : 2);
@@ -12139,16 +12143,86 @@
     else { bonus = 8; txt = '✅ Rested ' + daysSince + 'd'; tone = '#9ED17A'; }
     return { daysSince: daysSince, bonus: bonus, txt: txt, tone: tone, hunted: hunts.length > 0 };
   }
+  // ── Buck HOME-RANGE factor ──────────────────────────────────────────────────────────────────────────────
+  // The founder's real decision, made explicit: with 23 cameras over a huge property, most stands have NO camera,
+  // so the call is "is a target buck LIVING around this stand, is the wind right, and is it rested." Cameras only
+  // reach ~200 yds (the borrow above); a buck's home range is far bigger. This scores a stand by recent buck
+  // activity anywhere in its home-range footprint — buck sightings (they carry their own lat/lng + optional
+  // named-buck tag) and buck-tagged trail-cam photos — recency-weighted, counting DISTINCT bucks, with a
+  // NAMED/tagged buck weighing more than an anonymous "saw a buck." A camera-less stand in a shooter's core
+  // becomes a top pick, which is exactly how he hunts.
+  var HR_RANGE_M = 900;   // ~1000 yds / half a mile — a mature buck's core-to-home-range footprint (tunable)
+  function _isDayMs(ms, lat, lng){ try { var t = SunCalc.getTimes(new Date(ms), lat, lng); return ms >= t.sunrise.getTime() && ms <= t.sunset.getTime(); } catch(e){ return true; } }
+  function buckActivityPoints(){
+    var since = buckRingSinceMs(), pts = [];
+    (typeof observations !== 'undefined' ? observations : []).forEach(function(o){
+      if (!o || o.type !== 'buck' || (o.createdAt || 0) < since) return;
+      var la = (typeof o.lat === 'number') ? o.lat : null, ln = (typeof o.lng === 'number') ? o.lng : null;
+      if (la == null && o.siteId){ var s = (typeof sites !== 'undefined' ? sites : []).filter(function(x){ return x.id === o.siteId; })[0]; if (s && typeof s.lat === 'number'){ la = s.lat; ln = s.lng; } }
+      if (la == null) return;
+      pts.push({ lat: la, lng: ln, ms: o.createdAt || 0, buckId: o.buckProfileId || null, named: !!o.buckProfileId, kind: 'seen', day: _isDayMs(o.createdAt || 0, la, ln) });
+    });
+    (typeof importedPhotos !== 'undefined' ? importedPhotos : []).forEach(function(p){
+      if (!p || !p.matchedSiteId || (p.timestamp || 0) < since) return;
+      var isBuck = (p.ai && p.ai.isBuck) || p.buckProfileId || (Array.isArray(p.buckProfileIds) && p.buckProfileIds.length);
+      if (!isBuck) return;
+      var s2 = (typeof sites !== 'undefined' ? sites : []).filter(function(x){ return x.id === p.matchedSiteId; })[0];
+      if (!s2 || typeof s2.lat !== 'number') return;
+      pts.push({ lat: s2.lat, lng: s2.lng, ms: p.timestamp || 0, buckId: p.buckProfileId || null, named: !!p.buckProfileId, kind: 'pic', day: _isDayMs(p.timestamp || 0, s2.lat, s2.lng) });
+    });
+    return pts;
+  }
+  // Per-buck DAYLIGHT profile: what fraction of a buck's activity happens in shooting light. This is the Moose
+  // test — a buck who only shows on an edge camera after dark (bedding off-property, visiting the field at night)
+  // has a home range that barely overlaps your huntable daylight ground, so he should NOT lift a daylight sit the
+  // way an interior, daylight-moving resident does. Computed over ALL of a buck's points (his behavior), not just
+  // the ones near a given stand. Anonymous "saw a buck" points can't be aggregated, so they carry their own flag.
+  function buckDayProfiles(pts){
+    var agg = {}; (pts || []).forEach(function(p){ if (!p.buckId) return; var a = agg[p.buckId] || (agg[p.buckId] = { day: 0, total: 0 }); a.total++; if (p.day) a.day++; });
+    var out = {}; Object.keys(agg).forEach(function(k){ out[k] = agg[k].total ? agg[k].day / agg[k].total : 1; });
+    return out;
+  }
+  function buckNameById(id){ if (!id) return null; var b = (typeof buckProfiles !== 'undefined' ? buckProfiles : []).filter(function(x){ return x.id === id; })[0]; return b ? b.name : null; }
+  // Home-range read for one stand: distinct bucks with recent activity inside HR_RANGE_M, recency×distance
+  // weighted, named bucks bumped, and DAMPED by how nocturnal each buck is (the Moose test). Returns the score
+  // bonus + the closest/strongest buck point (so the wind factor can keep your scent off HIM) + a plain-language
+  // reason. null when nothing recent is nearby.
+  function spotHomeRange(s, pts, dayProf){
+    var now = Date.now(), best = {};
+    (pts || []).forEach(function(p){
+      var d = distMeters(s.lat, s.lng, p.lat, p.lng); if (d > HR_RANGE_M) return;
+      var days = Math.max(0, Math.round((now - p.ms) / 86400000));
+      var rw = days <= 7 ? 10 : (days <= 30 ? 6 : (days <= 120 ? 3 : 1.5));   // recency weight
+      var dfac = d <= 275 ? 1 : (d <= 550 ? 0.6 : 0.3);                        // distance falloff
+      if (p.named) rw *= 1.3;                                                   // a TAGGED buck counts for more
+      var frac = p.buckId ? (dayProf && dayProf[p.buckId] != null ? dayProf[p.buckId] : (p.day ? 1 : 0)) : (p.day ? 1 : 0.25);
+      var dayMult = 0.3 + 0.7 * frac;                                          // nocturnal buck → most of his weight bleeds off
+      var w = rw * dfac * dayMult, key = p.buckId || '__anon__', cur = best[key];
+      if (!cur || w > cur.w) best[key] = { w: w, d: d, days: days, buckId: p.buckId, named: p.named, kind: p.kind, lat: p.lat, lng: p.lng, frac: frac };
+    });
+    var keys = Object.keys(best); if (!keys.length) return null;
+    var raw = 0, top = null;
+    keys.forEach(function(k){ raw += best[k].w; if (!top || best[k].w > top.w) top = best[k]; });
+    var bonus = Math.min(24, Math.round(raw));   // capped ≈ a strong wind swing, so it lifts but never dominates
+    var who = top.named ? (buckNameById(top.buckId) || 'A named buck') : (keys.length > 1 ? (keys.length + ' bucks') : 'A buck');
+    var when = top.days <= 0 ? 'today' : (top.days === 1 ? 'yesterday' : (top.days <= 30 ? (top.days + 'd ago') : (top.days <= 120 ? 'this season' : 'last season')));
+    var nocturnal = top.frac != null && top.frac < 0.34;   // mostly-after-dark buck (Moose) — flag it honestly
+    var label = who + ' ' + (top.kind === 'pic' ? 'on cam' : 'seen') + ' ' + ydsLabel(top.d) + ' off · ' + when +
+      (keys.length > 1 ? (' · ' + keys.length + ' bucks in range') : '') + (nocturnal ? ' · mostly after dark' : '');
+    return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, bucks: keys.length, nocturnal: nocturnal, label: label };
+  }
   function huntTonightSpots(){
-    var out = [];
+    var out = [], _hrPts = buckActivityPoints(), _hrDay = buckDayProfiles(_hrPts);
     (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
       if (typeof s.lat !== 'number') return;
       if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type)) return;
       var huntable = siteIsHuntable(s), rest = restForStand(s);
+      var hr = siteIsHuntable(s) ? spotHomeRange(s, _hrPts, _hrDay) : null;   // buck-in-the-area lift (huntable stands only)
+      var hrB = hr ? hr.bonus : 0;
       var r = huntabilityRead(deerPhotosAtSite(s), huntRecentDays);
       if (r.has){
         var sc = scoreSpotRead(r, s);
-        out.push({ site: s, read: r, score: sc.score + rest.bonus, huntable: huntable, solunarHit: sc.solunarHit, hasData: true, borrow: null, rest: rest });
+        out.push({ site: s, read: r, score: sc.score + rest.bonus + hrB, huntable: huntable, solunarHit: sc.solunarHit, hasData: true, hasSignal: true, borrow: null, rest: rest, hr: hr });
         return;
       }
       if (!huntable) return; // observation cam with no data → skip
@@ -12157,16 +12231,17 @@
       var br = huntabilityRead(b.photos, huntRecentDays);
       if (br.has){
         var sc2 = scoreSpotRead(br, s);
-        out.push({ site: s, read: br, score: sc2.score + rest.bonus, huntable: true, solunarHit: sc2.solunarHit, hasData: true, borrow: b.sources, rest: rest });
+        out.push({ site: s, read: br, score: sc2.score + rest.bonus + hrB, huntable: true, solunarHit: sc2.solunarHit, hasData: true, hasSignal: true, borrow: b.sources, rest: rest, hr: hr });
         return;
       }
-      // No activity data anywhere near — still a real hunt spot: rank it on REST (+ its per-stand wind read below).
-      out.push({ site: s, read: null, score: rest.bonus, huntable: true, solunarHit: null, hasData: false, borrow: null, rest: rest });
+      // No camera anywhere near — but a buck may still LIVE here. If home-range activity is nearby, that's real
+      // signal (not "no data"); otherwise the stand ranks on REST alone (+ its per-stand wind read below).
+      out.push({ site: s, read: null, score: rest.bonus + hrB, huntable: true, solunarHit: null, hasData: false, hasSignal: !!hr, borrow: null, rest: rest, hr: hr });
     });
-    // Data spots (we have deer evidence) rank first, then no-data spots by rest — within each group, by score.
+    // Spots with real signal (camera evidence OR a buck living in range) rank first, then blank stands on rest.
     // STABLE tiebreaker by name so equal-score stands don't flip order run-to-run (they were, and it looked like
     // a broken/inconsistent recommendation — really a coin-flip between tied stands).
-    out.sort(function(a, b){ if (a.hasData !== b.hasData) return a.hasData ? -1 : 1; if (b.score !== a.score) return b.score - a.score; return (a.site.name || '').localeCompare(b.site.name || ''); });
+    out.sort(function(a, b){ if (a.hasSignal !== b.hasSignal) return a.hasSignal ? -1 : 1; if (b.score !== a.score) return b.score - a.score; return (a.site.name || '').localeCompare(b.site.name || ''); });
     return out;
   }
   function propertyNameForSite(s){
@@ -12395,7 +12470,7 @@
     if (!_wind && lat != null){ try { var _wq = await scentWeather(lat, lng); if (_wq && _wq.windDirDeg != null) _wind = { deg: _wq.windDirDeg, mph: _wq.windMph }; } catch (e) {} }
     if (_wind && _wind.mph > 2){
       hunt.forEach(function(x){ x.windBonus = spotWindBonus(x, _wind); x.score += x.windBonus; });
-      hunt.sort(function(a, b){ if (a.hasData !== b.hasData) return a.hasData ? -1 : 1; if (b.score !== a.score) return b.score - a.score; return (a.site.name || '').localeCompare(b.site.name || ''); });
+      hunt.sort(function(a, b){ if (a.hasSignal !== b.hasSignal) return a.hasSignal ? -1 : 1; if (b.score !== a.score) return b.score - a.score; return (a.site.name || '').localeCompare(b.site.name || ''); });
     }
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;gap:14px;flex-wrap:wrap;padding:18px;overflow:auto;font-family:inherit;';
@@ -12405,13 +12480,19 @@
     function spotCard(x, rank){
       var _pn = propertyNameForSite(x.site), _pnLine = _pn ? ('<div style="font-size:10px;color:#8aa596;margin-top:2px;">📍 ' + escapeHtml(_pn) + '</div>') : '';
       if (!x.hasData || !x.read){
-        return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid #3c4d42;border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
+        var hrTail = x.hr ? (x.hr.nocturnal ? ' — visits after dark; likely beds off this ground' : ' — no camera here, but a buck ranges through') : '';
+        var hrLine = x.hr ? ('<div style="font-size:10.5px;color:#E8B04B;margin-top:3px;">🦌 <b>' + escapeHtml(x.hr.label) + '</b>' + hrTail + '</div>') : '';
+        var noDataMsg = x.hr
+          ? 'Ranked on a buck in the area + rest &amp; tonight\'s wind — the camera-less way you actually hunt it.'
+          : 'No deer data here yet — ranked on rest &amp; tonight\'s wind. Hang a camera to learn its timing.';
+        return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid ' + (x.hr ? '#5c5326' : '#3c4d42') + ';border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
             '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' 🏹</div>' +
-            '<div style="font-size:11px;color:#9db0a3;">on rest &amp; wind</div>' +
+            '<div style="font-size:11px;color:#9db0a3;">' + (x.hr ? 'buck in range' : 'on rest &amp; wind') + '</div>' +
           '</div>' + _pnLine +
+          hrLine +
           (x.rest ? ('<div style="font-size:10.5px;margin-top:3px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
-          '<div style="font-size:11px;color:#9db0a3;margin-top:3px;">No deer data here yet — ranked on rest &amp; tonight\'s wind. Hang a camera to learn its timing.</div>' +
+          '<div style="font-size:11px;color:#9db0a3;margin-top:3px;">' + noDataMsg + '</div>' +
           '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' +
         '</div>';
       }
@@ -12427,6 +12508,7 @@
         '<div style="font-size:10px;color:#9db0a3;margin-top:2px;">Daylight ' + r.base.pct + '% all-time' + (r.recent.located ? (' · ' + r.recent.pct + '% recent') : '') + (r.daysSince != null ? (' · seen ' + r.daysSince + 'd ago') : '') + '</div>' +
         (x.rest ? ('<div style="font-size:10.5px;margin-top:2px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
         borrowLine +
+        (x.hr ? ('<div style="font-size:10px;color:#E8B04B;margin-top:2px;">🦌 ' + escapeHtml(x.hr.label) + '</div>') : '') +
         (x.huntable ? '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' : '') +
       '</div>';
     }
@@ -12437,9 +12519,10 @@
       var reasons = [];
       if (top.rest){ if (top.rest.daysSince == null) reasons.push('never pressured'); else if (top.rest.daysSince >= 5) reasons.push('rested ' + top.rest.daysSince + 'd'); else if (top.rest.daysSince <= 1) reasons.push('⚠ sat recently'); }
       if (top.hasData && top.read) reasons.push(top.read.base.pct + '% daylight' + (top.read.recent && top.read.recent.located ? ' · seen recently' : ''));
+      if (top.hr) reasons.push('🦌 ' + escapeHtml(top.hr.label));
       var windNote = (top.windBonus > 0) ? 'wind in your favor' : (top.windBonus < 0 ? '⚠ wind marginal — read the 💨 below' : 'confirm the 💨 read below');
       reasons.push('<span id="ht-headwind">' + windNote + '</span>');
-      var conf = top.hasData ? (top.read && top.read.base.pct >= 25 ? 'STRONG' : 'WORTH A SIT') : 'BEST UNTRACKED SPOT';
+      var conf = top.hasData ? (top.read && top.read.base.pct >= 25 ? 'STRONG' : 'WORTH A SIT') : (top.hr ? 'BUCK IN THE AREA' : 'BEST UNTRACKED SPOT');
       // Honesty: when the runner-up is dead even (same score — common with camera-less stands the wind can't
       // separate), say so instead of presenting a coin-flip as a hard single call. This is what made the top pick
       // look like it "changed its mind" between runs — they were tied, and the tie-break is your call, not the app's.
