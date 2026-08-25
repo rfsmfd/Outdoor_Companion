@@ -1952,7 +1952,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 461</div>
+    <div id="buildBadge">BUILD 462</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3321,6 +3321,47 @@
   // selected a trail — that bubbles up here a beat later, so the timestamp guard lets a fresh pick survive).
   map.on('click', function(){ if (selectedTrailId && !placing && (Date.now() - _trailClickAt > 350)) clearTrailSelection(); });
   map.on('click', function(e){ if (typeof scoutDrawing !== 'undefined' && scoutDrawing) scoutDrawAddPoint(e.latlng); });   // scout line pen: each tap drops a vertex
+
+  // ---------- Global: every modal panel is draggable ----------
+  // Any card that's the child of a fixed, ~full-screen overlay can be grabbed by its TOP (header) zone and
+  // slid anywhere, so a panel never permanently buries what's under it. Skips interactive controls, images/
+  // canvases, the map, and full-bleed content panels. One handler covers every modal — mouse + touch.
+  (function installGlobalPanelDrag(){
+    var drag = null;
+    function interactive(el){ return el && el.closest && el.closest('button, a, input, select, textarea, label, [contenteditable], .leaflet-container, .leaflet-marker-icon, .leaflet-popup'); }
+    function findCard(target){
+      var el = target;
+      while (el && el !== document.body && el.parentElement && el.parentElement !== document.body){
+        var p = el.parentElement, cs = getComputedStyle(p);
+        if (cs.position === 'fixed'){
+          var r = p.getBoundingClientRect();
+          if (r.width >= window.innerWidth * 0.85 && r.height >= window.innerHeight * 0.85 && r.top <= 4 && r.left <= 4) return el;
+        }
+        el = p;
+      }
+      return null;
+    }
+    document.addEventListener('pointerdown', function(e){
+      if (e.button && e.button !== 0) return;
+      if (interactive(e.target)) return;
+      var card = findCard(e.target); if (!card) return;
+      if (card.tagName === 'IMG' || card.tagName === 'CANVAS' || card.tagName === 'VIDEO') return;
+      var r = card.getBoundingClientRect();
+      if (r.width >= window.innerWidth * 0.96 && r.height >= window.innerHeight * 0.92) return;   // full-bleed content panel — leave it
+      if (e.clientY - r.top > 64) return;   // grab only near the top / header strip
+      var ov = card.parentElement; if (ov){ ov.style.alignItems = 'flex-start'; ov.style.justifyContent = 'flex-start'; }
+      card.style.position = 'fixed'; card.style.margin = '0'; card.style.left = r.left + 'px'; card.style.top = r.top + 'px'; card.style.width = r.width + 'px';
+      drag = { card: card, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top };
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    }, true);
+    document.addEventListener('pointermove', function(e){
+      if (!drag) return;
+      drag.card.style.left = Math.max(4, Math.min(window.innerWidth - 44, drag.ox + e.clientX - drag.sx)) + 'px';
+      drag.card.style.top  = Math.max(4, Math.min(window.innerHeight - 44, drag.oy + e.clientY - drag.sy)) + 'px';
+    });
+    document.addEventListener('pointerup', function(){ if (drag){ drag = null; document.body.style.userSelect = ''; } });
+  })();
 
   document.getElementById('confirmSaveTrailBtn').addEventListener('click', async function(){
     var name = document.getElementById('trailNameInput').value.trim();
@@ -10461,30 +10502,7 @@
       '<div class="sp-body">' + body + '</div>';
     card.querySelector('.sp-x').addEventListener('click', close);
     document.addEventListener('keydown', function esc(e){ if (e.key === 'Escape'){ close(); document.removeEventListener('keydown', esc); } });
-    back.appendChild(card); document.body.appendChild(back);
-    // Draggable by the header so you can slide it aside and read the map it's describing.
-    (function makeDraggable(){
-      var head = card.querySelector('.sp-head'); if (!head) return;
-      var dragging = false, sx = 0, sy = 0, ox = 0, oy = 0;
-      function down(e){
-        if (e.target.closest && e.target.closest('.sp-x')) return;
-        var pt = e.touches ? e.touches[0] : e, r = card.getBoundingClientRect();
-        back.style.alignItems = 'flex-start'; back.style.justifyContent = 'flex-start';
-        card.style.position = 'fixed'; card.style.margin = '0'; card.style.width = r.width + 'px'; card.style.left = r.left + 'px'; card.style.top = r.top + 'px';
-        dragging = true; sx = pt.clientX; sy = pt.clientY; ox = r.left; oy = r.top;
-        document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
-        document.addEventListener('touchmove', move, { passive:false }); document.addEventListener('touchend', up);
-        if (e.cancelable) e.preventDefault();
-      }
-      function move(e){
-        if (!dragging) return; var pt = e.touches ? e.touches[0] : e;
-        card.style.left = Math.max(4, Math.min(window.innerWidth - 44, ox + pt.clientX - sx)) + 'px';
-        card.style.top = Math.max(4, Math.min(window.innerHeight - 44, oy + pt.clientY - sy)) + 'px';
-        if (e.cancelable) e.preventDefault();
-      }
-      function up(){ dragging = false; document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.removeEventListener('touchmove', move); document.removeEventListener('touchend', up); }
-      head.addEventListener('mousedown', down); head.addEventListener('touchstart', down, { passive:false });
-    })();
+    back.appendChild(card); document.body.appendChild(back);   // draggable via the global panel-drag system (grab the header)
     // Fill the async terrain/wind/thermal line, and wire the tap-to-shoot photo tile. Both re-run whenever
     // the body is re-rendered (e.g. after a photo is added), so the profile stays live inside the modal.
     function refreshBody(){
