@@ -1961,7 +1961,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 482</div>
+    <div id="buildBadge">BUILD 483</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10191,10 +10191,63 @@
     var uncovered = items.filter(function(it){ return !covered.some(function(c){ return distMeters(it.lat, it.lng, c.lat, c.lng) <= R; }); });
     return { uncovered: uncovered, coveredCount: covered.length, total: items.length, R: R };
   }
+  function _propCenter(prop){
+    var pts = (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return typeof s.lat === 'number' && (!prop || s.propertyId === prop.id); });
+    if (!pts.length) return null;
+    return { lat: pts.reduce(function(a, s){ return a + s.lat; }, 0) / pts.length, lng: pts.reduce(function(a, s){ return a + s.lng; }, 0) / pts.length };
+  }
+  // Phase 2 — WHERE to hang a camera. Two honest sources: (1) sign concentrations with no camera on them, and
+  // (2) a TAGGED buck you can't pin yet (fewer than 3 located spots → no home-range ring) — a camera nudged
+  // toward the interior could show whether he lives here or just passes through, feeding the core-ring engine.
+  function cameraSuggestions(prop, data, gaps){
+    var out = [], covered = deployedCamSites(prop), R = gaps.R;
+    function inProp(la, ln){ if (!prop) return true; if (prop.boundary && prop.boundary.length >= 3 && typeof pointInProperty === 'function') return pointInProperty(la, ln, prop); return true; }
+    function tooClose(la, ln){ return out.some(function(o){ return distMeters(la, ln, o.lat, o.lng) <= Math.max(120, R * 0.6); }); }
+    var hot = _scoutHotCluster(gaps.uncovered);
+    if (hot){
+      var kd = hot.kinds.slice(0, 3).map(function(k){ return (SCOUT_SIGN[k] ? SCOUT_SIGN[k].label : k); }).join(', ');
+      out.push({ lat: hot.lat, lng: hot.lng, tone: '#9ED17A', kind: 'gap', reason: 'Sign concentrates here (' + escapeHtml(kd) + ') with no camera on it — a camera would turn that sign into a pattern.' });
+    }
+    var byBuck = {};
+    (buckActivityPoints() || []).forEach(function(p){ if (p.buckId) (byBuck[p.buckId] = byBuck[p.buckId] || []).push(p); });
+    var center = _propCenter(prop);
+    Object.keys(byBuck).forEach(function(id){
+      var ip = byBuck[id].filter(function(p){ return inProp(p.lat, p.lng); });
+      if (!ip.length) return;
+      var locs = {}; ip.forEach(function(p){ locs[p.lat.toFixed(3) + ',' + p.lng.toFixed(3)] = 1; });
+      var nLoc = Object.keys(locs).length; if (nLoc >= 3) return;   // enough spread to draw a range → already "pinnable"
+      var cLat = ip.reduce(function(a, p){ return a + p.lat; }, 0) / ip.length, cLng = ip.reduce(function(a, p){ return a + p.lng; }, 0) / ip.length;
+      var la = cLat, ln = cLng;
+      if (center){ var br = bearingBetween(cLat, cLng, center.lat, center.lng), d = 220, mLat = 111320, mLng = 111320 * Math.cos(cLat * Math.PI / 180); la = cLat + (Math.cos(br * Math.PI / 180) * d) / mLat; ln = cLng + (Math.sin(br * Math.PI / 180) * d) / mLng; }
+      if (tooClose(la, ln)) return;
+      var nm = buckNameById(id) || 'a tagged buck';
+      out.push({ lat: la, lng: ln, tone: '#E7B45A', kind: 'buck', reason: 'Pin <b>' + escapeHtml(nm) + '</b> — only on ' + nLoc + ' spot' + (nLoc === 1 ? '' : 's'), sub: 'not enough to draw his range. A camera here could show if he lives here or just passes through.' });
+    });
+    return out.slice(0, 4);
+  }
+  function dropSuggestedCameraMark(lat, lng, prop, reason){
+    var s = { id: uid(), name: 'Camera spot (suggested)', type: 'scout', scoutKind: 'camera', verified: false, lat: lat, lng: lng, notes: (reason || '').replace(/<[^>]+>/g, ''), createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: prop ? prop.id : ((typeof farmForPoint === 'function' ? (farmForPoint(lat, lng) || {}) : {}).id || null) };
+    (typeof sites !== 'undefined' ? sites : []).push(s);
+    if (typeof saveSite === 'function') saveSite(s).catch(function(){});
+    if (!scoutMode && typeof setScoutMode === 'function') setScoutMode(true);
+    if (typeof renderMarkers === 'function') renderMarkers();
+    if (typeof showToast === 'function') showToast('Dropped a possible-camera mark — open it and Verify → Camera once you hang one.');
+  }
+  var camSuggestLayer = null;
+  function clearCamSuggestPins(){ if (camSuggestLayer){ try { map.removeLayer(camSuggestLayer); } catch (e) {} camSuggestLayer = null; } }
+  function renderCamSuggestPins(suggestions){
+    clearCamSuggestPins();
+    if (!suggestions || !suggestions.length) return;
+    camSuggestLayer = L.layerGroup().addTo(map);
+    suggestions.forEach(function(sg){
+      var m = L.marker([sg.lat, sg.lng], { icon: L.divIcon({ className: '', iconSize: [28, 28], iconAnchor: [14, 14], html: '<div style="width:26px;height:26px;border-radius:50%;background:rgba(233,176,75,.22);border:2px dashed ' + (sg.tone || '#E7B45A') + ';display:flex;align-items:center;justify-content:center;font-size:14px;">📷</div>' }) }).addTo(camSuggestLayer);
+      m.bindPopup('<div style="font-size:12px;max-width:210px;line-height:1.4;">🎯 <b>Suggested camera</b><br>' + sg.reason + (sg.sub ? (' — ' + sg.sub) : '') + '</div>');
+    });
+  }
   function openCameraPlan(){
     var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
     var data = cameraPlanData(prop), gaps = cameraGaps(prop);
-    var hot = _scoutHotCluster(gaps.uncovered);
+    var suggestions = cameraSuggestions(prop, data, gaps);
     var line = function(icon, txt){ return '<div style="margin:3px 0;">' + icon + ' ' + txt + '</div>'; };
     var sec = function(txt){ return '<div style="color:#9db0a3;font-size:11.5px;letter-spacing:.3px;margin:10px 0 5px;padding-top:6px;border-top:1px dashed #2c3a31;">' + txt + '</div>'; };
     function roleChip(r, role, label){
@@ -10237,35 +10290,39 @@
           '<span style="font-size:11px;color:#9db0a3;">— on the shelf, ready to place on a gap below.</span></div>';
       });
     }
-    // SUGGESTED SPOTS (data gaps → where a camera would earn its keep)
-    h += sec('🎯 SUGGESTED SPOTS — where a camera would earn its keep');
-    if (hot){
-      var kd = hot.kinds.slice(0, 3).map(function(k){ return (SCOUT_SIGN[k] ? SCOUT_SIGN[k].label : k); }).join(', ');
-      h += line('📍', 'Sign toward the <b>' + hot.dir + '</b> — ' + hot.count + ' markers (' + escapeHtml(kd) + ') with <b>no camera within ' + Math.round(gaps.R * 1.09361) + ' yd</b>. A camera here could turn that sign into a pattern.');
-      var floater = data.mine.filter(function(r){ return r.moveable; })[0];
-      var freeMsg = floater
-        ? '🎈 Free up <b>' + escapeHtml(floater.s.name || 'a floater') + '</b> (' + floater.v.toLowerCase() + ') and float it here'
-        : (data.available.length ? ('📦 Drop <b>#' + escapeHtml(data.available[0].name || 'a spare') + '</b> (on the shelf) here') : '');
-      if (freeMsg) h += '<div style="font-size:11px;color:#E7B45A;margin-top:3px;">' + freeMsg + ' — leave your anchors put.</div>';
-      h += '<button class="cam-gap" data-lat="' + hot.lat + '" data-lng="' + hot.lng + '" style="margin-top:6px;width:100%;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:9px;font-size:12.5px;font-weight:700;cursor:pointer;">📍 Take me there (fly + drop a camera mark)</button>';
-    } else if (gaps.total === 0){
-      h += line('📍', '<span style="opacity:.7;">No sign logged here yet — log rubs/scrapes/beds as you find them and spots will surface.</span>');
+    // SUGGESTED SPOTS — the app proposing WHERE to hang a camera (gaps + bucks you can't pin yet). Pins on the map.
+    h += sec('🎯 SUGGESTED SPOTS — where to hang a camera (📷 pins on the map)');
+    var mover = data.mine.filter(function(r){ return r.moveable; })[0];
+    var freeHint = mover
+      ? '<div style="font-size:10.5px;color:#E7B45A;margin:2px 0 6px;">🎈 Have a spare? Free up <b>' + escapeHtml(mover.s.name || 'a floater') + '</b> (' + mover.v.toLowerCase() + ') for one of these — leave your anchors put.</div>'
+      : (data.available.length ? ('<div style="font-size:10.5px;color:#5FB6E6;margin:2px 0 6px;">📦 You have <b>#' + escapeHtml(data.available[0].name || 'a spare') + '</b> on the shelf for one of these.</div>') : '');
+    h += freeHint;
+    if (!suggestions.length){
+      h += line('📍', '<span style="opacity:.7;">' + (gaps.total === 0 ? 'No sign logged yet, and every tagged buck is well-pinned — nothing to suggest. Log sign as you find it.' : 'Your ground is well covered — no obvious spot to add a camera right now.') + '</span>');
     } else {
-      h += line('📍', '<span style="opacity:.7;">Your logged sign is already within camera range — no obvious hole right now.</span>');
+      suggestions.forEach(function(sg, i){
+        h += '<div style="border:1px dashed ' + sg.tone + ';border-radius:9px;padding:8px 9px;margin-bottom:7px;background:#1E2B23;">' +
+          '<div style="font-size:11.5px;color:#dfeee4;">📷 ' + sg.reason + (sg.sub ? ('<span style="color:#9db0a3;"> — ' + sg.sub + '</span>') : '') + '</div>' +
+          '<div style="display:flex;gap:6px;margin-top:6px;">' +
+            '<button class="cam-sug-go" data-i="' + i + '" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:8px;padding:6px;font-size:11.5px;font-weight:700;cursor:pointer;">📍 Show on map</button>' +
+            '<button class="cam-sug-drop" data-i="' + i + '" style="flex:1;background:#3a2f1e;border:1px solid #C9832E;color:#E7B45A;border-radius:8px;padding:6px;font-size:11.5px;font-weight:700;cursor:pointer;">📷 Drop a mark</button>' +
+          '</div>' +
+        '</div>';
+      });
     }
-    h += '<div style="color:#9db0a3;font-size:11.5px;margin-top:8px;">Suggestions from your data — not orders. You know the ground; move a camera when it earns the move.<br><span style="opacity:.7;">Coming: the app suggesting exactly where to hang one.</span></div></div>';
+    h += '<div style="color:#9db0a3;font-size:11.5px;margin-top:8px;">Suggestions from your data — not orders. You know the ground; a camera earns its spot when it earns the move.</div></div>';
     // NON-DIMMING, draggable panel — opens to the side so the map stays visible & clickable behind it.
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:440px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); }
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;cursor:move;"><div style="font-weight:800;font-size:17px;">📸 Camera Plan <span style="font-size:11px;color:#7f9488;font-weight:400;">· drag to move</span></div><button class="cp-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
       '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : 'All properties') + '</div>' + h;
     card.querySelector('.cp-x').addEventListener('click', close);
-    // Show the capture-range rings around every deployed camera while the plan is open.
-    try { if (!scoutMode) setScoutMode(true); cameraCoverageOn = true; if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); } catch (e) {}
+    // Show the capture-range rings around every deployed camera + the suggested-spot pins while the plan is open.
+    try { if (!scoutMode) setScoutMode(true); cameraCoverageOn = true; if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); if (typeof renderCamSuggestPins === 'function') renderCamSuggestPins(suggestions); } catch (e) {}
     function flyTo(la, ln){ try { map.flyTo([la, ln], Math.max(map.getZoom(), 16)); } catch (e) {} }
     Array.prototype.forEach.call(card.querySelectorAll('.cam-row'), function(el){ el.addEventListener('click', function(){ flyTo(parseFloat(el.getAttribute('data-lat')), parseFloat(el.getAttribute('data-lng'))); }); });
     // Anchor/Float toggle — persists on the CAMERA device, re-ranks. stopPropagation so it doesn't fire the row's fly.
@@ -10277,8 +10334,13 @@
         close(); openCameraPlan();
       });
     });
-    var gapBtn = card.querySelector('.cam-gap');
-    if (gapBtn) gapBtn.addEventListener('click', function(){ close(); try { if (!scoutMode) setScoutMode(true); } catch (e) {} flyTo(parseFloat(gapBtn.getAttribute('data-lat')), parseFloat(gapBtn.getAttribute('data-lng'))); });
+    // Suggested-spot buttons: "Show on map" flies to the pin; "Drop a mark" places a possible-camera scout mark.
+    Array.prototype.forEach.call(card.querySelectorAll('.cam-sug-go'), function(b){
+      b.addEventListener('click', function(){ var sg = suggestions[parseInt(b.getAttribute('data-i'), 10)]; if (sg) flyTo(sg.lat, sg.lng); });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll('.cam-sug-drop'), function(b){
+      b.addEventListener('click', function(){ var sg = suggestions[parseInt(b.getAttribute('data-i'), 10)]; if (!sg) return; dropSuggestedCameraMark(sg.lat, sg.lng, prop, sg.reason + (sg.sub ? (' — ' + sg.sub) : '')); close(); flyTo(sg.lat, sg.lng); });
+    });
     back.appendChild(card); document.body.appendChild(back);
   }
   // ---------- 📋 Field Card — the per-property hunt-day card, generated live from your data ----------
@@ -11198,10 +11260,46 @@
       if (typeof passesPropertyFilter === 'function' && !passesPropertyFilter(s)) return;
       var mineCam = !(myUid && ((c.__ownerUid && c.__ownerUid !== myUid) || (s.__ownerUid && s.__ownerUid !== myUid)));
       var col = mineCam ? '#4CC68A' : '#5FB6E6';
-      L.circle([s.lat, s.lng], { radius: R, color: col, weight: 1, opacity: 0.6, fillColor: col, fillOpacity: 0.12, interactive: false }).addTo(coverageLayer);
+      var prop = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === s.propertyId; })[0];
+      L.circle([s.lat, s.lng], { radius: cameraCatchmentR(prop, s, R), color: col, weight: 1, opacity: 0.6, fillColor: col, fillOpacity: 0.12, interactive: false }).addTo(coverageLayer);
     });
   }
   function clearCamPlanRings(){ cameraCoverageOn = false; if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); }
+  // The catchment ring is the AREA OF DEER MOVEMENT a camera is likely sampling (founder's model: "deer in here
+  // probably get caught; outside, maybe not") — NOT the lens field-of-view. It's bigger on ground that funnels
+  // deer from a wide area (a field EDGE, an open field, a scrape/food site, a trail junction) and tighter in dead
+  // timber. Scales the base radius by that context; capped so it never claims to blanket a whole home range.
+  function _coverKindAt(prop, lat, lng){
+    if (!prop || typeof coverTypeAt !== 'function') return null;
+    var c = coverTypeAt(prop, lat, lng); if (!c) return null;
+    if (/^[WHP]$/.test(c.code)) return 'woods';
+    if (/^[FRAC]$/.test(c.code)) return 'open';
+    if (/^[DSO]$/.test(c.code)) return 'wet';
+    return null;
+  }
+  function cameraCatchmentR(prop, s, baseR){
+    var f = 1.0;
+    // Cover context — sample the spot + a ring ~70m out. A field/woods EDGE pulls deer widest.
+    if (prop && prop.landcover){
+      var here = _coverKindAt(prop, s.lat, s.lng), kinds = {}, Rm = 70, mLat = 111320, mLng = 111320 * Math.cos(s.lat * Math.PI / 180);
+      if (here) kinds[here] = 1;
+      for (var a = 0; a < 360; a += 45){
+        var la = s.lat + (Math.sin(a * Math.PI / 180) * Rm) / mLat, ln = s.lng + (Math.cos(a * Math.PI / 180) * Rm) / mLng;
+        var k = _coverKindAt(prop, la, ln); if (k) kinds[k] = 1;
+      }
+      if (kinds.open && kinds.woods) f = 1.6;        // field/woods edge
+      else if (kinds.open) f = 1.3;                  // open field — deer cross it
+      else if (kinds.woods) f = 0.8;                 // thick timber — tighter
+    }
+    // Structure — a scrape/food site or a trail JUNCTION funnels deer from a wide area.
+    var struct = (s.type === 'feeding' || s.type === 'scrape') ? 1.3 : 1.0, nTr = 0;
+    (typeof trails !== 'undefined' ? trails : []).forEach(function(tr){
+      if (!tr || !tr.points || !tr.points.length) return;
+      if (tr.points.some(function(p){ return typeof p.lat === 'number' && distMeters(s.lat, s.lng, p.lat, p.lng) <= 45; })) nTr++;
+    });
+    if (nTr >= 2) struct = Math.max(struct, 1.35);
+    return Math.round(baseR * Math.min(1.7, Math.max(f, struct)));
+  }
 
   // ---------- observation rendering ----------
   // Distinguishes an actual fish species catch (needs weight/length/tag/photo) from
