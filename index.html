@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 476</div>
+    <div id="buildBadge">BUILD 477</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12193,25 +12193,65 @@
     return out;
   }
   function buckNameById(id){ if (!id) return null; var b = (typeof buckProfiles !== 'undefined' ? buckProfiles : []).filter(function(x){ return x.id === id; })[0]; return b ? b.name : null; }
-  // Home-range read for one stand: distinct bucks with recent activity inside HR_RANGE_M, recency×distance
-  // weighted, named bucks bumped, and DAMPED by how nocturnal each buck is (the Moose test). Returns the score
-  // bonus + the closest/strongest buck point (so the wind factor can keep your scent off HIM) + a plain-language
-  // reason. null when nothing recent is nearby.
-  function spotHomeRange(s, pts, dayProf){
+  // Point-in-polygon (ray cast) on a ring of [lat,lng] pairs — lat as y, lng as x.
+  function _pointInRing(lat, lng, ring){
+    var inside = false;
+    for (var i = 0, j = ring.length - 1; i < ring.length; j = i++){
+      var yi = ring[i][0], xi = ring[i][1], yj = ring[j][0], xj = ring[j][1];
+      if (((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+  // How DEEP a stand sits in a buck's home-range rings: his core (100%/50% density bands) = high, the outer 25%
+  // edge = low, OUTSIDE his range = 0 (he doesn't live here, no matter how close one stray dot is). This is the
+  // "core ring drives the score" model — the founder's ring instinct as math. Rings come from
+  // computeRangeRingPolys (each poly carries the 25/50/75/100% label + the ring coords).
+  var RING_DEPTH = { '100%': 1.0, '75%': 0.82, '50%': 0.62, '25%': 0.45 };
+  function ringDepthFactor(s, rings){
+    var order = ['100%', '75%', '50%', '25%'];   // test core-first, return the deepest band the stand falls inside
+    for (var oi = 0; oi < order.length; oi++){
+      for (var i = 0; i < rings.length; i++){
+        if (rings[i].label !== order[oi]) continue;
+        var pr = rings[i].latlngs;
+        if (pr && pr.length && _pointInRing(s.lat, s.lng, pr[0])) return RING_DEPTH[order[oi]];
+      }
+    }
+    return 0;
+  }
+  // Home-range read for one stand. Where a tagged buck has enough spread to draw a real home range (≥3 located
+  // sightings → rings, precomputed in ringsByBuck), the stand is scored by how DEEP it sits in his range
+  // (core > edge > outside=nothing) — the founder's ring instinct as math. Bucks without that spread fall back to
+  // a distance-from-detections proxy. Recency + the daylight (Moose) damp + the tagged-group framing then apply.
+  function spotHomeRange(s, pts, dayProf, ringsByBuck){
     var zone = huntStyleIsZone();
     var dayFloor = zone ? 0.12 : 0.35;   // zone: a nocturnal buck barely counts (his rule); target: softer
     var namedMult = zone ? 1.0 : 1.4;    // zone: a good buck is a good buck; target: privilege your named shooters
-    var now = Date.now(), best = {};
+    var now = Date.now();
+    // Group this stand's detections by buck: nearest point (for the wind aim + distance fallback), most recent, any daylight.
+    var groups = {};
     (pts || []).forEach(function(p){
-      var d = distMeters(s.lat, s.lng, p.lat, p.lng); if (d > HR_RANGE_M) return;
-      var days = Math.max(0, Math.round((now - p.ms) / 86400000));
-      var rw = days <= 7 ? 10 : (days <= 30 ? 6 : (days <= 120 ? 3 : 1.5));   // recency weight
-      var dfac = d <= 275 ? 1 : (d <= 550 ? 0.6 : 0.3);                        // distance falloff
-      if (p.named) rw *= namedMult;
-      var frac = p.buckId ? (dayProf && dayProf[p.buckId] != null ? dayProf[p.buckId] : (p.day ? 1 : 0)) : (p.day ? 1 : 0.25);
-      var dayMult = dayFloor + (1 - dayFloor) * frac;                          // DAYLIGHT is the lens — nocturnal weight bleeds off (hard in zone mode)
-      var w = rw * dfac * dayMult, key = p.buckId || '__anon__', cur = best[key];
-      if (!cur || w > cur.w) best[key] = { w: w, d: d, days: days, buckId: p.buckId, named: p.named, kind: p.kind, lat: p.lat, lng: p.lng, frac: frac, day: (cur && cur.day) || !!p.day };
+      var d = distMeters(s.lat, s.lng, p.lat, p.lng), key = p.buckId || '__anon__';
+      var g = groups[key] || (groups[key] = { key: key, buckId: p.buckId, named: false, minD: Infinity, lastMs: 0, nearLat: p.lat, nearLng: p.lng, day: false, kind: 'seen' });
+      if (p.named) g.named = true;
+      if (d < g.minD){ g.minD = d; g.nearLat = p.lat; g.nearLng = p.lng; g.kind = p.kind; }
+      if (p.ms > g.lastMs) g.lastMs = p.ms;
+      if (p.day) g.day = true;
+    });
+    var best = {};
+    Object.keys(groups).forEach(function(key){
+      var g = groups[key];
+      var rings = (g.buckId && ringsByBuck) ? ringsByBuck[g.buckId] : null;
+      var locFac, inCore = false, viaRing = false;
+      if (rings){ locFac = ringDepthFactor(s, rings); viaRing = true; inCore = locFac >= 0.8; }   // 0 if outside his range
+      else { locFac = (g.minD > HR_RANGE_M) ? 0 : (g.minD <= 275 ? 1 : (g.minD <= 550 ? 0.6 : 0.3)); }   // fallback distance proxy
+      if (locFac <= 0) return;                                                                            // stand not in this buck's range
+      var days = Math.max(0, Math.round((now - g.lastMs) / 86400000));
+      var rw = days <= 7 ? 10 : (days <= 30 ? 6 : (days <= 120 ? 3 : 1.5));
+      if (g.named) rw *= namedMult;
+      var frac = g.buckId ? (dayProf && dayProf[g.buckId] != null ? dayProf[g.buckId] : (g.day ? 1 : 0)) : (g.day ? 1 : 0.25);
+      var dayMult = dayFloor + (1 - dayFloor) * frac;   // DAYLIGHT is the lens — nocturnal weight bleeds off (hard in zone)
+      best[key] = { w: rw * locFac * dayMult, d: g.minD, days: days, buckId: g.buckId, named: g.named, kind: g.kind,
+                    lat: g.nearLat, lng: g.nearLng, frac: frac, day: g.day, inCore: inCore, viaRing: viaRing };
     });
     var keys = Object.keys(best); if (!keys.length) return null;
     // He hunts the group of his TAGGED bucks — so the group count is tagged-only (a buckId). Untagged buck
@@ -12222,21 +12262,22 @@
     var when = top.days <= 0 ? 'today' : (top.days === 1 ? 'yesterday' : (top.days <= 30 ? (top.days + 'd ago') : (top.days <= 120 ? 'this season' : 'last season')));
     var nocturnal = top.frac != null && top.frac < 0.34;   // mostly-after-dark buck (Moose) — flag it honestly
     var dayBucks = zone ? taggedDay : taggedTotal;   // zone method keys on tagged bucks moving in DAYLIGHT
+    var coreTag = top.inCore ? ' · in his core' : '';
     var label;
     if (zone){
       // Zone method: lead with DAYLIGHT concentration across the group of TAGGED bucks, not one deer.
       label = (taggedDay > 0)
-        ? ('🌞 ' + taggedDay + ' tagged buck' + (taggedDay === 1 ? '' : 's') + ' in daylight here' + (taggedTotal > taggedDay ? (' (of ' + taggedTotal + ')') : '') + ' · last ' + when)
+        ? ('🌞 ' + taggedDay + ' tagged buck' + (taggedDay === 1 ? '' : 's') + ' in daylight here' + (taggedTotal > taggedDay ? (' (of ' + taggedTotal + ')') : '') + ' · last ' + when + coreTag)
         : (taggedTotal > 0
             ? (taggedTotal + ' tagged buck' + (taggedTotal === 1 ? '' : 's') + ' here — but after dark · last ' + when)
             : ('buck activity here — not a tagged buck · last ' + when));
     } else {
-      // Target method: lead with the (named) buck himself.
+      // Target method: lead with the (named) buck himself, and say if the stand is in his CORE.
       var who = top.named ? (buckNameById(top.buckId) || 'A named buck') : (keys.length > 1 ? (keys.length + ' bucks') : 'A buck');
-      label = who + ' ' + (top.kind === 'pic' ? 'on cam' : 'seen') + ' ' + ydsLabel(top.d) + ' off · ' + when +
-        (keys.length > 1 ? (' · ' + keys.length + ' bucks in range') : '') + (nocturnal ? ' · mostly after dark' : '');
+      var where = top.inCore ? ' — in his CORE' : (top.viaRing ? ' — inside his range' : (' ' + (top.kind === 'pic' ? 'on cam' : 'seen') + ' ' + ydsLabel(top.d) + ' off'));
+      label = who + where + ' · ' + when + (keys.length > 1 ? (' · ' + keys.length + ' bucks in range') : '') + (nocturnal ? ' · mostly after dark' : '');
     }
-    return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, buckId: top.buckId || null, bucks: keys.length, dayBucks: dayBucks, nocturnal: nocturnal, zone: zone, label: label };
+    return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, buckId: top.buckId || null, bucks: keys.length, dayBucks: dayBucks, nocturnal: nocturnal, zone: zone, inCore: !!top.inCore, label: label };
   }
   // ── Buck SIGN factor ─────────────────────────────────────────────────────────────────────────────────────
   // The founder's Scout board is his home-range worksheet, and SIGN (rubs/scrapes/beds) is the most camera-
@@ -12312,11 +12353,19 @@
   }
   function huntTonightSpots(){
     var out = [], _hrPts = buckActivityPoints(), _hrDay = buckDayProfiles(_hrPts), _signPts = buckSignPoints();
+    // Precompute each tagged buck's home-range rings ONCE (KDE is expensive) — a buck with ≥3 located sightings
+    // gets a real range the ranker scores stands against (core > edge); fewer than 3 → no rings → distance fallback.
+    var _ringsByBuck = {};
+    (function(){
+      var byBuck = {};
+      _hrPts.forEach(function(p){ if (p.buckId) (byBuck[p.buckId] = byBuck[p.buckId] || []).push(p); });
+      Object.keys(byBuck).forEach(function(id){ if (byBuck[id].length < 3) return; var rr = computeRangeRingPolys(byBuck[id]); if (rr && rr.polys && rr.polys.length) _ringsByBuck[id] = rr.polys; });
+    })();
     (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
       if (typeof s.lat !== 'number') return;
       if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type)) return;
       var huntable = siteIsHuntable(s), rest = restForStand(s);
-      var hr = siteIsHuntable(s) ? spotHomeRange(s, _hrPts, _hrDay) : null;   // buck-in-the-area lift (huntable stands only)
+      var hr = siteIsHuntable(s) ? spotHomeRange(s, _hrPts, _hrDay, _ringsByBuck) : null;   // buck-in-the-area lift (huntable stands only)
       var hrB = hr ? hr.bonus : 0;
       var sign = siteIsHuntable(s) ? spotSignRead(s, _signPts) : null;        // fresh sign nearby (camera-optional)
       var signB = sign ? sign.bonus : 0;
@@ -12636,7 +12685,8 @@
       var windNote = (top.windBonus > 0) ? 'wind in your favor' : (top.windBonus < 0 ? '⚠ wind marginal — read the 💨 below' : 'confirm the 💨 read below');
       reasons.push('<span id="ht-headwind">' + windNote + '</span>');
       var conf = top.hasData ? (top.read && top.read.base.pct >= 25 ? 'STRONG' : 'WORTH A SIT')
-        : (top.hr ? (top.hr.zone ? (top.hr.dayBucks > 0 ? 'DAYLIGHT ZONE' : 'BUCKS HERE — AFTER DARK') : 'BUCK IN THE AREA')
+        : (top.hr ? (top.hr.zone ? (top.hr.dayBucks > 0 ? (top.hr.inCore ? 'DAYLIGHT — IN HIS CORE' : 'DAYLIGHT ZONE') : 'BUCKS HERE — AFTER DARK')
+                                 : (top.hr.inCore ? 'IN HIS CORE' : 'BUCK IN THE AREA'))
                   : (top.sign ? 'FRESH SIGN HERE' : 'BEST UNTRACKED SPOT'));
       // Honesty: when the runner-up is dead even (same score — common with camera-less stands the wind can't
       // separate), say so instead of presenting a coin-flip as a hard single call. This is what made the top pick
