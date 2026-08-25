@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 463</div>
+    <div id="buildBadge">BUILD 464</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3335,7 +3335,7 @@
   // slid anywhere, so a panel never permanently buries what's under it. Skips interactive controls, images/
   // canvases, the map, and full-bleed content panels. One handler covers every modal — mouse + touch.
   (function installGlobalPanelDrag(){
-    var drag = null;
+    var drag = null, pending = null;
     function interactive(el){ return el && el.closest && el.closest('button, a, input, select, textarea, label, [contenteditable], .leaflet-container, .leaflet-marker-icon, .leaflet-popup'); }
     function findCard(target){
       var el = target;
@@ -3356,19 +3356,30 @@
       if (card.tagName === 'IMG' || card.tagName === 'CANVAS' || card.tagName === 'VIDEO') return;
       var r = card.getBoundingClientRect();
       if (r.width >= window.innerWidth * 0.96 && r.height >= window.innerHeight * 0.92) return;   // full-bleed content panel — leave it
-      if (e.clientY - r.top > 64) return;   // grab only near the top / header strip
-      var ov = card.parentElement; if (ov){ ov.style.alignItems = 'flex-start'; ov.style.justifyContent = 'flex-start'; }
-      card.style.position = 'fixed'; card.style.margin = '0'; card.style.left = r.left + 'px'; card.style.top = r.top + 'px'; card.style.width = r.width + 'px';
-      drag = { card: card, sx: e.clientX, sy: e.clientY, ox: r.left, oy: r.top };
-      document.body.style.userSelect = 'none';
-      e.preventDefault();
+      // Grab the card's VISIBLE top strip. A panel taller than the window is centered with its header above
+      // the top of the screen — so measure from max(top,0), not the (off-screen) card top, or it's ungrabbable.
+      var topEdge = Math.max(r.top, 0);
+      if (e.clientY < topEdge - 2 || e.clientY > topEdge + 64) return;
+      // Arm a drag but DON'T start (or block the click) until the pointer actually moves — so taps still work.
+      pending = { card: card, sx: e.clientX, sy: e.clientY, r: r, ov: card.parentElement };
     }, true);
     document.addEventListener('pointermove', function(e){
-      if (!drag) return;
+      if (!drag){
+        if (!pending) return;
+        if (Math.abs(e.clientX - pending.sx) + Math.abs(e.clientY - pending.sy) < 5) return;   // below threshold — still a tap
+        var card = pending.card, r = pending.r, ov = pending.ov;
+        if (ov){ ov.style.alignItems = 'flex-start'; ov.style.justifyContent = 'flex-start'; }
+        card.style.position = 'fixed'; card.style.margin = '0'; card.style.left = r.left + 'px'; card.style.top = r.top + 'px'; card.style.width = r.width + 'px';
+        drag = { card: card, sx: pending.sx, sy: pending.sy, ox: r.left, oy: r.top };
+        document.body.style.userSelect = 'none';
+        pending = null;
+      }
       drag.card.style.left = Math.max(4, Math.min(window.innerWidth - 44, drag.ox + e.clientX - drag.sx)) + 'px';
       drag.card.style.top  = Math.max(4, Math.min(window.innerHeight - 44, drag.oy + e.clientY - drag.sy)) + 'px';
+      if (e.cancelable) e.preventDefault();
     });
-    document.addEventListener('pointerup', function(){ if (drag){ drag = null; document.body.style.userSelect = ''; } });
+    document.addEventListener('pointerup', function(){ pending = null; if (drag){ drag = null; document.body.style.userSelect = ''; } });
+    document.addEventListener('pointercancel', function(){ pending = null; if (drag){ drag = null; document.body.style.userSelect = ''; } });
   })();
 
   document.getElementById('confirmSaveTrailBtn').addEventListener('click', async function(){
