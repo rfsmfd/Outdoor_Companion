@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 472</div>
+    <div id="buildBadge">BUILD 473</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12509,7 +12509,10 @@
       if (!x.hasData || !x.read){
         var hrTail = x.hr ? (x.hr.nocturnal ? ' — visits after dark; likely beds off this ground' : ' — no camera here, but tagged bucks range through') : '';
         var hrLine = x.hr ? ('<div style="font-size:10.5px;color:#E8B04B;margin-top:3px;">🦌 <b>' + escapeHtml(x.hr.label) + '</b>' + hrTail + '</div>') : '';
-        var hrMove = (x.hr && x.hr.buckId) ? ('<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="margin-top:5px;background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>') : '';
+        var hrMove = (x.hr && x.hr.buckId) ? ('<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;">' +
+          '<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>' +
+          '<button class="ht-range" data-buck="' + escapeHtml(x.hr.buckId) + '" style="background:transparent;border:1px solid #6B8F5C;color:#9ED17A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">⭕ See his range</button>' +
+        '</div>') : '';
         var noDataMsg = x.hr
           ? 'Ranked on tagged-buck activity in this area + rest &amp; tonight\'s wind — the camera-less way you actually hunt it.'
           : 'No deer data here yet — ranked on rest &amp; tonight\'s wind. Hang a camera to learn its timing.';
@@ -12537,7 +12540,10 @@
         (x.rest ? ('<div style="font-size:10.5px;margin-top:2px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
         borrowLine +
         (x.hr ? ('<div style="font-size:10px;color:#E8B04B;margin-top:2px;">🦌 ' + escapeHtml(x.hr.label) + '</div>') : '') +
-        ((x.hr && x.hr.buckId) ? ('<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="margin-top:5px;background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>') : '') +
+        ((x.hr && x.hr.buckId) ? ('<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;">' +
+          '<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>' +
+          '<button class="ht-range" data-buck="' + escapeHtml(x.hr.buckId) + '" style="background:transparent;border:1px solid #6B8F5C;color:#9ED17A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">⭕ See his range</button>' +
+        '</div>') : '') +
         (x.huntable ? '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' : '') +
       '</div>';
     }
@@ -12654,6 +12660,14 @@
         var prof = (typeof buckProfiles !== 'undefined' ? buckProfiles : []).filter(function(p){ return p.id === bid; })[0];
         if (!prof){ if (typeof showToast === 'function') showToast('That buck\'s profile isn\'t available.'); return; }
         close(); if (typeof showBuckMovement === 'function') showBuckMovement(prof);
+      });
+    });
+    // "⭕ See his range" — draw this buck's home-range rings on the map (green edge → blaze core). stopPropagation
+    // so it doesn't also fire the card's go-to-stand click.
+    Array.prototype.forEach.call(card.querySelectorAll('.ht-range'), function(b){
+      b.addEventListener('click', function(e){ e.stopPropagation();
+        var bid = b.getAttribute('data-buck');
+        close(); if (typeof showBuckRangeRings === 'function') showBuckRangeRings(bid);
       });
     });
     if (plannedHunt && plannedHunt.wind){ var _hw = document.getElementById('ht-wind'); if (_hw) _hw.textContent = plannedHunt.wind.dir + ' ' + plannedHunt.wind.mph + ' mph'; }
@@ -18515,6 +18529,70 @@
       queryHomeRangeLayers = [];
       resultsEl.innerHTML = '';
     });
+  }
+  // Pure ring geometry — same KDE contour as the Analytics viz above, but returns drawable {label,color,latlngs}
+  // bands with no map/DOM, so the ranker's "See his range" link can reuse it. Returns {error} on the honest
+  // failure cases so each caller can phrase it (no d3 / <3 points / degenerate contour / no spatial spread).
+  function computeRangeRingPolys(source){
+    if (typeof d3 === 'undefined' || !d3.contourDensity) return { error: 'lib' };
+    if (!source || source.length < 3) return { error: 'few', n: source ? source.length : 0 };
+    var centerLat = source.reduce(function(s,o){ return s+o.lat; }, 0) / source.length;
+    var centerLng = source.reduce(function(s,o){ return s+o.lng; }, 0) / source.length;
+    var mPerLat = 111320, mPerLng = 111320 * Math.cos(centerLat * Math.PI/180);
+    var points = source.map(function(o){ return [(o.lng - centerLng) * mPerLng, (o.lat - centerLat) * mPerLat]; });
+    var xs = points.map(function(p){ return p[0]; }), ys = points.map(function(p){ return p[1]; });
+    var pad = 200;
+    var xMin = Math.min.apply(null, xs) - pad, xMax = Math.max.apply(null, xs) + pad;
+    var yMin = Math.min.apply(null, ys) - pad, yMax = Math.max.apply(null, ys) + pad;
+    var gen = d3.contourDensity().x(function(d){ return d[0]; }).y(function(d){ return d[1]; }).size([200, 200]).weight(function(){ return 1; }).bandwidth(20).thresholds(4);
+    var sX = function(x){ return (x - xMin) / (xMax - xMin) * 200; }, sY = function(y){ return (y - yMin) / (yMax - yMin) * 200; };
+    var grid = points.map(function(p){ return [sX(p[0]), sY(p[1])]; });
+    var contours;
+    try{ contours = gen(grid); }catch(e){ console.error('Outdoor Companion: buck range contour failed', e); return { error: 'gen' }; }
+    if (!contours || contours.length === 0) return { error: 'spread' };
+    contours.sort(function(a,b){ return a.value - b.value; });
+    var ringLabels = ['25%', '50%', '75%', '100%'], ringColors = ['#6B8F5C', '#8FA05C', '#D4B24C', '#FF6A13'];
+    var polys = [];
+    contours.forEach(function(contour, idx){
+      var label = ringLabels[idx] || ((idx+1) + ''), color = ringColors[idx] || '#FF6A13';
+      contour.coordinates.forEach(function(polygon){
+        var latlngs = polygon.map(function(ring){
+          return ring.map(function(pt){
+            var xM = (pt[0] / 200) * (xMax - xMin) + xMin, yM = (pt[1] / 200) * (yMax - yMin) + yMin;
+            return [centerLat + (yM / mPerLat), centerLng + (xM / mPerLng)];
+          });
+        });
+        polys.push({ label: label, color: color, latlngs: latlngs });
+      });
+    });
+    return { polys: polys, bounds: L.latLngBounds(source.map(function(o){ return [o.lat, o.lng]; })) };
+  }
+  // "⭕ See his range" from a ranker pick — draw a tagged buck's home-range rings (his trusted mental picture)
+  // straight on the map, no query builder. Uses the SAME located detections the ranker weighed. If he can't form
+  // a ring (<3 spread sightings), that inability IS the honest tell he's an edge/unknown-range buck — say so.
+  function showBuckRangeRings(buckId){
+    var prof = (typeof buckProfiles !== 'undefined' ? buckProfiles : []).filter(function(p){ return p.id === buckId; })[0];
+    var nm = prof ? prof.name : 'Buck';
+    var src = buckActivityPoints().filter(function(p){ return p.buckId === buckId; });
+    var rr = computeRangeRingPolys(src);
+    if (rr.error === 'lib'){ if (typeof showToast === 'function') showToast('Home-range rings need their map library — check your connection.'); return; }
+    if (rr.error === 'few'){ if (typeof showToast === 'function') showToast(nm + ' has only ' + (rr.n || src.length) + ' located sighting' + (((rr.n || src.length) === 1) ? '' : 's') + ' — not enough to draw a range. That itself says he ranges off your ground.'); return; }
+    if (rr.error){ if (typeof showToast === 'function') showToast('Couldn\'t draw ' + nm + '\'s range from this data.'); return; }
+    if (queryHomeRangeLayers.length){ queryHomeRangeLayers.forEach(function(l){ try{ map.removeLayer(l); }catch(e){} }); queryHomeRangeLayers = []; }
+    rr.polys.forEach(function(pl){
+      var poly = L.polygon(pl.latlngs, { color: pl.color, weight: 2, fillColor: pl.color, fillOpacity: 0.18, interactive: false }).addTo(map);
+      poly.bindTooltip(pl.label + ' band', { sticky: true });
+      queryHomeRangeLayers.push(poly);
+    });
+    try { map.fitBounds(rr.bounds, { padding: [50, 50] }); } catch (e) {}
+    var ex = document.getElementById('buckRingCtl'); if (ex && ex.parentNode) ex.parentNode.removeChild(ex);
+    var ctl = document.createElement('div'); ctl.id = 'buckRingCtl';
+    ctl.style.cssText = 'position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:1600;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 12px;box-shadow:0 6px 24px rgba(0,0,0,.5);color:var(--text);font-size:12.5px;display:flex;align-items:center;gap:10px;';
+    ctl.innerHTML = '<span>⭕ <b>' + escapeHtml(nm) + '</b>’s range · ' + src.length + ' sighting' + (src.length === 1 ? '' : 's') + ' · green edge → blaze core</span>' +
+      '<button id="buckRingClear" style="background:transparent;border:1px solid var(--line);border-radius:7px;color:var(--text);font-size:12px;cursor:pointer;padding:3px 9px;flex:0 0 auto;">✕ Clear</button>';
+    document.body.appendChild(ctl);
+    document.getElementById('buckRingClear').addEventListener('click', function(){ queryHomeRangeLayers.forEach(function(l){ try{ map.removeLayer(l); }catch(e){} }); queryHomeRangeLayers = []; if (ctl.parentNode) ctl.parentNode.removeChild(ctl); });
+    if (typeof showToast === 'function' && src.length < 6) showToast(nm + '’s range is rough — only ' + src.length + ' sightings so far.');
   }
 
   // ---------- Count Markers (Data-to-Map: readable, zoom-stable counts per location) ----------
