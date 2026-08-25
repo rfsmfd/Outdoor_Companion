@@ -1960,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 475</div>
+    <div id="buildBadge">BUILD 476</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12238,6 +12238,49 @@
     }
     return { bonus: bonus, lat: top.lat, lng: top.lng, dist: top.d, days: top.days, named: top.named, buckId: top.buckId || null, bucks: keys.length, dayBucks: dayBucks, nocturnal: nocturnal, zone: zone, label: label };
   }
+  // ── Buck SIGN factor ─────────────────────────────────────────────────────────────────────────────────────
+  // The founder's Scout board is his home-range worksheet, and SIGN (rubs/scrapes/beds) is the most camera-
+  // optional evidence there is — a fresh rub says a buck travels here with no photo and no sighting. So a
+  // camera-less, sighting-less stand sitting in fresh sign should still surface. Honesty rules: only PROVEN sign
+  // counts — real field-log sign observations + sign SITES (incl. graduated/verified scout marks, which become
+  // real bedding/rub/scrape types); UNVERIFIED scout conjecture (type:'scout') is walled out. And sign carries
+  // NO time-of-day, so it lifts a stand as area-presence but NEVER as DAYLIGHT evidence (that stays the domain of
+  // dated sightings/photos — the [[daylight-zone-hunting-method]] count).
+  var SIGN_RANGE_M = 400;   // sign is localized — "right here," tighter than a buck's whole home range
+  var SIGN_KINDS = { rub: 1.1, scrape: 1.1, bedding: 1.4, track: 0.6 };   // per-kind strength (bedding = core sign)
+  function buckSignPoints(){
+    var since = buckRingSinceMs(), pts = [];
+    (typeof observations !== 'undefined' ? observations : []).forEach(function(o){
+      if (!o || !SIGN_KINDS[o.type] || (o.createdAt || 0) < since) return;
+      var la = (typeof o.lat === 'number') ? o.lat : null, ln = (typeof o.lng === 'number') ? o.lng : null;
+      if (la == null && o.siteId){ var s = (typeof sites !== 'undefined' ? sites : []).filter(function(x){ return x.id === o.siteId; })[0]; if (s && typeof s.lat === 'number'){ la = s.lat; ln = s.lng; } }
+      if (la == null) return;
+      pts.push({ lat: la, lng: ln, ms: o.createdAt || 0, kind: o.type, persistent: false });
+    });
+    (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
+      if (!s || s.type === 'scout' || !SIGN_KINDS[s.type] || typeof s.lat !== 'number') return;   // scout conjecture walled out
+      pts.push({ lat: s.lat, lng: s.lng, ms: s.lastActivityAt || s.createdAt || 0, kind: s.type, persistent: true });
+    });
+    return pts;
+  }
+  // Sign concentration around a stand — recency×distance×kind weighted, distinct items counted. Persistent sign
+  // SITES (a marked bedding area) hold a steady weight; dated field-log sign fades as it ages (a fresh rub this
+  // week >> a rub from two months back). Returns a modest bonus (capped well under the daylight-buck lift — sign
+  // supports, it doesn't prove daylight) + a plain "what's here" line. null when nothing's close.
+  function spotSignRead(s, pts){
+    var now = Date.now(), n = 0, raw = 0, kinds = {};
+    (pts || []).forEach(function(p){
+      var d = distMeters(s.lat, s.lng, p.lat, p.lng); if (d > SIGN_RANGE_M) return;
+      var days = Math.max(0, Math.round((now - p.ms) / 86400000));
+      var rw = p.persistent ? 2 : (days <= 14 ? 4 : (days <= 45 ? 2.5 : (days <= 120 ? 1.2 : 0.5)));
+      var dfac = d <= 180 ? 1 : (d <= 300 ? 0.6 : 0.3);
+      raw += rw * dfac * (SIGN_KINDS[p.kind] || 0.6); n++; kinds[p.kind] = (kinds[p.kind] || 0) + 1;
+    });
+    if (!n) return null;
+    var bonus = Math.min(12, Math.round(raw));
+    var parts = Object.keys(kinds).map(function(k){ return kinds[k] + ' ' + (SCOUT_SIGN[k] ? SCOUT_SIGN[k].label : k); });
+    return { bonus: bonus, count: n, label: '🪵 sign nearby — ' + parts.join(' · ') };
+  }
   // RUT NUDGE — the founder's #1 rule made active ([[flexibility-first-principle]]): a normally-NOCTURNAL tagged
   // buck who suddenly starts showing DAYLIGHT hits is the classic rut tell — time to switch from daylight-zone
   // hunting to specifically TARGETING him before he beds down the pattern again. Returns the bucks "slipping up":
@@ -12268,17 +12311,19 @@
     return out;
   }
   function huntTonightSpots(){
-    var out = [], _hrPts = buckActivityPoints(), _hrDay = buckDayProfiles(_hrPts);
+    var out = [], _hrPts = buckActivityPoints(), _hrDay = buckDayProfiles(_hrPts), _signPts = buckSignPoints();
     (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
       if (typeof s.lat !== 'number') return;
       if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type)) return;
       var huntable = siteIsHuntable(s), rest = restForStand(s);
       var hr = siteIsHuntable(s) ? spotHomeRange(s, _hrPts, _hrDay) : null;   // buck-in-the-area lift (huntable stands only)
       var hrB = hr ? hr.bonus : 0;
+      var sign = siteIsHuntable(s) ? spotSignRead(s, _signPts) : null;        // fresh sign nearby (camera-optional)
+      var signB = sign ? sign.bonus : 0;
       var r = huntabilityRead(deerPhotosAtSite(s), huntRecentDays);
       if (r.has){
         var sc = scoreSpotRead(r, s);
-        out.push({ site: s, read: r, score: sc.score + rest.bonus + hrB, huntable: huntable, solunarHit: sc.solunarHit, hasData: true, hasSignal: true, borrow: null, rest: rest, hr: hr });
+        out.push({ site: s, read: r, score: sc.score + rest.bonus + hrB + signB, huntable: huntable, solunarHit: sc.solunarHit, hasData: true, hasSignal: true, borrow: null, rest: rest, hr: hr, sign: sign });
         return;
       }
       if (!huntable) return; // observation cam with no data → skip
@@ -12287,12 +12332,12 @@
       var br = huntabilityRead(b.photos, huntRecentDays);
       if (br.has){
         var sc2 = scoreSpotRead(br, s);
-        out.push({ site: s, read: br, score: sc2.score + rest.bonus + hrB, huntable: true, solunarHit: sc2.solunarHit, hasData: true, hasSignal: true, borrow: b.sources, rest: rest, hr: hr });
+        out.push({ site: s, read: br, score: sc2.score + rest.bonus + hrB + signB, huntable: true, solunarHit: sc2.solunarHit, hasData: true, hasSignal: true, borrow: b.sources, rest: rest, hr: hr, sign: sign });
         return;
       }
-      // No camera anywhere near — but a buck may still LIVE here. If home-range activity is nearby, that's real
-      // signal (not "no data"); otherwise the stand ranks on REST alone (+ its per-stand wind read below).
-      out.push({ site: s, read: null, score: rest.bonus + hrB, huntable: true, solunarHit: null, hasData: false, hasSignal: !!hr, borrow: null, rest: rest, hr: hr });
+      // No camera anywhere near — but a buck may still LIVE or travel here. Home-range activity OR fresh sign is
+      // real signal (not "no data"); otherwise the stand ranks on REST alone (+ its per-stand wind read below).
+      out.push({ site: s, read: null, score: rest.bonus + hrB + signB, huntable: true, solunarHit: null, hasData: false, hasSignal: !!(hr || sign), borrow: null, rest: rest, hr: hr, sign: sign });
     });
     // Spots with real signal (camera evidence OR a buck living in range) rank first, then blank stands on rest.
     // STABLE tiebreaker by name so equal-score stands don't flip order run-to-run (they were, and it looked like
@@ -12542,15 +12587,17 @@
           '<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>' +
           '<button class="ht-range" data-buck="' + escapeHtml(x.hr.buckId) + '" style="background:transparent;border:1px solid #6B8F5C;color:#9ED17A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">⭕ See his range</button>' +
         '</div>') : '';
+        var signLine = x.sign ? ('<div style="font-size:10.5px;color:#B9C96B;margin-top:3px;">' + escapeHtml(x.sign.label) + '</div>') : '';
         var noDataMsg = x.hr
           ? 'Ranked on tagged-buck activity in this area + rest &amp; tonight\'s wind — the camera-less way you actually hunt it.'
-          : 'No deer data here yet — ranked on rest &amp; tonight\'s wind. Hang a camera to learn its timing.';
-        return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid ' + (x.hr ? '#5c5326' : '#3c4d42') + ';border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
+          : (x.sign ? 'Ranked on fresh sign in this area + rest &amp; tonight\'s wind — the camera-less way you actually hunt it.'
+                    : 'No deer data here yet — ranked on rest &amp; tonight\'s wind. Hang a camera to learn its timing.');
+        return '<div class="ht-spot" data-sid="' + escapeHtml(x.site.id) + '" data-lat="' + x.site.lat + '" data-lng="' + x.site.lng + '" style="border:1px solid ' + (x.hr ? '#5c5326' : (x.sign ? '#49521f' : '#3c4d42')) + ';border-radius:9px;padding:10px;margin-bottom:8px;background:#1E2B23;cursor:pointer;">' +
           '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
             '<div style="font-weight:700;font-size:13px;">' + (rank ? ('#' + rank + ' ') : '') + escapeHtml(x.site.name) + ' 🏹</div>' +
-            '<div style="font-size:11px;color:#9db0a3;">' + (x.hr ? 'buck in range' : 'on rest &amp; wind') + '</div>' +
+            '<div style="font-size:11px;color:#9db0a3;">' + (x.hr ? 'buck in range' : (x.sign ? 'fresh sign' : 'on rest &amp; wind')) + '</div>' +
           '</div>' + _pnLine +
-          hrLine + hrMove +
+          hrLine + hrMove + signLine +
           (x.rest ? ('<div style="font-size:10.5px;margin-top:3px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
           '<div style="font-size:11px;color:#9db0a3;margin-top:3px;">' + noDataMsg + '</div>' +
           '<div class="ht-scent" data-sid="' + escapeHtml(x.site.id) + '" style="font-size:11px;color:#9db0a3;margin-top:5px;">💨 checking wind…</div>' +
@@ -12569,6 +12616,7 @@
         (x.rest ? ('<div style="font-size:10.5px;margin-top:2px;">🛌 <span style="color:' + x.rest.tone + ';">' + escapeHtml(x.rest.txt) + '</span></div>') : '') +
         borrowLine +
         (x.hr ? ('<div style="font-size:10px;color:#E8B04B;margin-top:2px;">🦌 ' + escapeHtml(x.hr.label) + '</div>') : '') +
+        (x.sign ? ('<div style="font-size:10px;color:#B9C96B;margin-top:2px;">' + escapeHtml(x.sign.label) + '</div>') : '') +
         ((x.hr && x.hr.buckId) ? ('<div style="margin-top:5px;display:flex;gap:6px;flex-wrap:wrap;">' +
           '<button class="ht-move" data-buck="' + escapeHtml(x.hr.buckId) + '" style="background:transparent;border:1px solid #C9832E;color:#E7B45A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">🎬 See his movement web</button>' +
           '<button class="ht-range" data-buck="' + escapeHtml(x.hr.buckId) + '" style="background:transparent;border:1px solid #6B8F5C;color:#9ED17A;border-radius:7px;padding:3px 9px;font-size:10.5px;cursor:pointer;">⭕ See his range</button>' +
@@ -12584,10 +12632,12 @@
       if (top.rest){ if (top.rest.daysSince == null) reasons.push('never pressured'); else if (top.rest.daysSince >= 5) reasons.push('rested ' + top.rest.daysSince + 'd'); else if (top.rest.daysSince <= 1) reasons.push('⚠ sat recently'); }
       if (top.hasData && top.read) reasons.push(top.read.base.pct + '% daylight' + (top.read.recent && top.read.recent.located ? ' · seen recently' : ''));
       if (top.hr) reasons.push((top.hr.zone ? '' : '🦌 ') + escapeHtml(top.hr.label));
+      if (top.sign) reasons.push(escapeHtml(top.sign.label));
       var windNote = (top.windBonus > 0) ? 'wind in your favor' : (top.windBonus < 0 ? '⚠ wind marginal — read the 💨 below' : 'confirm the 💨 read below');
       reasons.push('<span id="ht-headwind">' + windNote + '</span>');
       var conf = top.hasData ? (top.read && top.read.base.pct >= 25 ? 'STRONG' : 'WORTH A SIT')
-        : (top.hr ? (top.hr.zone ? (top.hr.dayBucks > 0 ? 'DAYLIGHT ZONE' : 'BUCKS HERE — AFTER DARK') : 'BUCK IN THE AREA') : 'BEST UNTRACKED SPOT');
+        : (top.hr ? (top.hr.zone ? (top.hr.dayBucks > 0 ? 'DAYLIGHT ZONE' : 'BUCKS HERE — AFTER DARK') : 'BUCK IN THE AREA')
+                  : (top.sign ? 'FRESH SIGN HERE' : 'BEST UNTRACKED SPOT'));
       // Honesty: when the runner-up is dead even (same score — common with camera-less stands the wind can't
       // separate), say so instead of presenting a coin-flip as a hard single call. This is what made the top pick
       // look like it "changed its mind" between runs — they were tied, and the tie-break is your call, not the app's.
