@@ -885,6 +885,14 @@
     border-radius:4px;
   }
   .leaflet-popup-tip{background:var(--panel);}
+  /* Pulsing ring on the stand whose profile is open — instantly picks it out of the crowd. */
+  .stand-pulse{width:44px;height:44px;border-radius:50%;border:3px solid #E8823F;box-sizing:border-box;animation:standPulse 1.35s ease-out infinite;}
+  @keyframes standPulse{
+    0%{transform:scale(.45);opacity:1;box-shadow:0 0 0 0 rgba(232,130,63,.55);}
+    70%{opacity:.45;}
+    100%{transform:scale(1.3);opacity:0;box-shadow:0 0 0 20px rgba(232,130,63,0);}
+  }
+  @media (prefers-reduced-motion: reduce){ .stand-pulse{animation:none;opacity:.9;box-shadow:0 0 14px 4px rgba(232,130,63,.5);} }
   .leaflet-popup-content{margin:14px 16px;font-family:'IBM Plex Sans',sans-serif;}
   .pop h3{font-family:'Oswald',sans-serif;font-size:14px;margin:0 0 6px 0;text-transform:uppercase;letter-spacing:0.4px;}
   .pop .ty{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;}
@@ -1952,7 +1960,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 462</div>
+    <div id="buildBadge">BUILD 463</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10482,15 +10490,29 @@
   // all proved unreliable inside the Leaflet popup in the field. The modal is a document-level overlay, so
   // it can't be swallowed by popup rebuild/close/propagation quirks — and it's the right home for the
   // two-level profile the spec calls for (answer first, evidence below). Bound in bindPopupActions.
+  // Pulsing ring on the stand whose profile is open, so you instantly pick it out. Pans to it if off-screen.
+  var _standHighlight = null;
+  function clearStandHighlight(){ if (_standHighlight){ try { map.removeLayer(_standHighlight); } catch(e){} _standHighlight = null; } }
+  function highlightStandMarker(siteId){
+    clearStandHighlight();
+    var s = sites.filter(function(x){ return x.id === siteId; })[0];
+    if (!s || typeof s.lat !== 'number') return;
+    if (!map.getBounds().pad(-0.12).contains([s.lat, s.lng])) map.panTo([s.lat, s.lng], { animate: true });
+    _standHighlight = L.marker([s.lat, s.lng], {
+      icon: L.divIcon({ className: '', html: '<div class="stand-pulse"></div>', iconSize: [44, 44], iconAnchor: [22, 22] }),
+      interactive: false, keyboard: false, zIndexOffset: 1200
+    }).addTo(map);
+  }
   function openStandProfileModal(siteId){
     var s = sites.filter(function(x){ return x.id === siteId; })[0];
+    highlightStandMarker(siteId);
     var back = document.createElement('div');
     // Non-dimming backdrop: transparent + pointer-events:none so the MAP underneath stays visible AND clickable
     // while the profile floats over it. The card re-enables pointer events for itself. Close via × or Esc.
     back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:transparent;pointer-events:none;display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:480px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 14px 44px rgba(0,0,0,.6);margin:auto;pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); clearStandHighlight(); }
     var body;
     try { body = standProfileHtml(siteId); }
     catch(err){ console.error('Outdoor Companion: stand profile build failed', err); body = '<div style="color:#E8B04B;font-size:12px;">Couldn’t build this profile: ' + escapeHtml((err && err.message) ? err.message : String(err)) + '</div>'; }
