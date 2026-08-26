@@ -1960,9 +1960,9 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
-    <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
+    <button id="parcelToggleBtn" title="Show property lines (VA + NC free state parcels — more states over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 492</div>
+    <div id="buildBadge">BUILD 493</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2959,43 +2959,46 @@
   // some individual counties' own GIS services). Public, free, no API key required, since
   // this queries VGIN's own server directly rather than an Esri-hosted service.
   // Lazily created on first toggle-on, then just shown/hidden after that.
-  var parcelLayer = null;
+  // STATE-AWARE property lines. Each state runs its own FREE parcel service (there is no free national
+  // one — see the 50-state parcel matrix), so we register a per-state adapter and auto-pick by where the
+  // map is. VA↔NC is the proof-of-concept: pan across the line and BOTH states' parcels render, seamlessly.
+  // Verified public FeatureServers only — never wire a state until its endpoint is confirmed live, or a
+  // tester gets a dead button. Boundaries only for now (the geometry everyone expects); owner/acreage
+  // attributes + more states come as each endpoint (and, for a paid launch, each license) is confirmed.
+  var PARCEL_SOURCES = [
+    { state: 'VA', name: 'VGIN (Virginia)', attr: 'Parcels: Virginia Geographic Information Network (VGIN)',
+      url: 'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0',
+      bbox: [-83.7, 36.5, -75.2, 39.5] },
+    { state: 'NC', name: 'NC OneMap', attr: 'Parcels: NC OneMap (NC CGIA)',
+      url: 'https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/FeatureServer/1',   // layer 1 = polygons (verified public)
+      bbox: [-84.4, 33.7, -75.4, 36.62] }
+  ];
+  var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
   var parcelLayerActive = false;
+  var _parcelDisclaimerShown = false;
+  var PARCEL_MIN_ZOOM = 14;       // gate on zoom directly — far out, "the current view" is too many parcels and stalls
 
-  function getParcelLayer(){
-    if (!parcelLayer){
-      parcelLayer = L.esri.featureLayer({
-        // NOTE: VGIN migrated their ArcGIS Server from gismaps.vdem.virginia.gov to
-        // vginmaps.vdem.virginia.gov in Sept 2024 — the old domain is being actively
-        // decommissioned. Confirmed directly against VGIN's own migration documentation.
-        url: 'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0',
-        style: function(){
-          return { color: '#D4B24C', weight: 1.5, fillOpacity: 0, opacity: 0.85 };
-        },
-        simplifyFactor: 0.35, // smoother/faster rendering, negligible visual difference at map scale
-        precision: 5,
-        attribution: 'Parcels: Virginia Geographic Information Network (VGIN)'
-      });
-      parcelLayer.on('requesterror', function(){
-        showToast('Property lines unavailable right now (VGIN server unreachable)');
-      });
-    }
-    return parcelLayer;
+  function _sourceFor(st){ for (var i = 0; i < PARCEL_SOURCES.length; i++) if (PARCEL_SOURCES[i].state === st) return PARCEL_SOURCES[i]; return null; }
+  function _bboxHitsView(bb, vb){ return !(bb[2] < vb.getWest() || bb[0] > vb.getEast() || bb[3] < vb.getSouth() || bb[1] > vb.getNorth()); }
+  function _parcelStatesInView(){ var vb = map.getBounds(); return PARCEL_SOURCES.filter(function(s){ return _bboxHitsView(s.bbox, vb); }).map(function(s){ return s.state; }); }
+  function _makeParcelLayer(src){
+    var lyr = L.esri.featureLayer({ url: src.url, style: function(){ return { color: '#D4B24C', weight: 1.5, fillOpacity: 0, opacity: 0.85 }; }, simplifyFactor: 0.35, precision: 5, attribution: src.attr });
+    lyr.on('requesterror', function(){ showToast('Property lines from ' + src.name + ' are unreachable right now.'); });
+    return lyr;
   }
-
-  // Parcels load in a grid of on-demand queries scoped to the current map view — real,
-  // confirmed behavior, not the whole state at once. But zoomed out far enough, "the
-  // current view" still covers enough parcels to bog down or silently stall, which is
-  // almost certainly the real cause of "doesn't always work." Gating on zoom level here
-  // directly, rather than relying on esri-leaflet's own minZoom option (documented as
-  // unreliable across versions), gives full, predictable control over this.
-  var PARCEL_MIN_ZOOM = 14;
+  // Show/hide the right state layers for the current view — pan across VA↔NC and both render at the seam.
+  function syncParcelLayers(){
+    if (!parcelLayerActive) return;
+    var want = _parcelStatesInView();
+    want.forEach(function(st){ if (!parcelLayers[st]) parcelLayers[st] = _makeParcelLayer(_sourceFor(st)); if (!map.hasLayer(parcelLayers[st])) parcelLayers[st].addTo(map); });
+    Object.keys(parcelLayers).forEach(function(st){ if (want.indexOf(st) < 0 && map.hasLayer(parcelLayers[st])) map.removeLayer(parcelLayers[st]); });
+  }
+  function _removeAllParcelLayers(){ Object.keys(parcelLayers).forEach(function(st){ if (map.hasLayer(parcelLayers[st])) map.removeLayer(parcelLayers[st]); }); }
 
   document.getElementById('parcelToggleBtn').addEventListener('click', function(){
     var btn = this;
-    var layer = getParcelLayer();
     if (parcelLayerActive){
-      map.removeLayer(layer);
+      _removeAllParcelLayers();
       parcelLayerActive = false;
       btn.classList.remove('active');
     } else {
@@ -3003,11 +3006,18 @@
         showToast('Zoom in closer to load property lines (helps them load reliably)');
         return;
       }
-      layer.addTo(map);
+      if (!_parcelStatesInView().length){
+        showToast('No free property-line source for this area yet — we add states over time.');
+        return;
+      }
       parcelLayerActive = true;
       btn.classList.add('active');
+      syncParcelLayers();
+      if (!_parcelDisclaimerShown){ _parcelDisclaimerShown = true; showToast('Property lines are approximate — for reference only, not a legal survey.'); }
     }
   });
+  // As the user pans, bring the right state's parcels in/out of view (the seamless cross-state behavior).
+  map.on('moveend', function(){ if (parcelLayerActive && map.getZoom() >= PARCEL_MIN_ZOOM) syncParcelLayers(); });
 
   // If the user zooms back out while parcels are active, turn them off automatically
   // rather than let the same slow/stalled-query problem recur silently.
@@ -3021,11 +3031,15 @@
 
   map.on('zoomend', function(){
     updateZoomLabels();
-    if (parcelLayerActive && map.getZoom() < PARCEL_MIN_ZOOM){
-      map.removeLayer(getParcelLayer());
-      parcelLayerActive = false;
-      document.getElementById('parcelToggleBtn').classList.remove('active');
-      showToast('Property lines turned off — zoomed out too far to load them reliably');
+    if (parcelLayerActive){
+      if (map.getZoom() < PARCEL_MIN_ZOOM){
+        _removeAllParcelLayers();
+        parcelLayerActive = false;
+        document.getElementById('parcelToggleBtn').classList.remove('active');
+        showToast('Property lines turned off — zoomed out too far to load them reliably');
+      } else {
+        syncParcelLayers();
+      }
     }
   });
 
@@ -9228,7 +9242,7 @@
   function drawPropertyBoundary(prop, onDone){
     var mp = document.getElementById('managePropertiesModalBackdrop'); if (mp) mp.classList.remove('show');
     if (typeof prop.centerLat === 'number') map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15));
-    try { if (typeof getParcelLayer === 'function' && !parcelLayerActive){ getParcelLayer().addTo(map); } } catch (e) {}
+    try { if (!parcelLayerActive && map.getZoom() >= PARCEL_MIN_ZOOM && _parcelStatesInView().length){ parcelLayerActive = true; var _pb = document.getElementById('parcelToggleBtn'); if (_pb) _pb.classList.add('active'); syncParcelLayers(); } } catch (e) {}
     showToast('Trace ' + prop.name + ' — click each corner, click the first point to close. Follow the parcel line where it\'s right, cut your own where it\'s wrong.');
     if (_boundaryDrawer){ try { _boundaryDrawer.disable(); } catch (e) {} }
     _boundaryDrawer = new L.Draw.Polygon(map, { allowIntersection: false, metric: false, feet: true, showArea: true, shapeOptions: { color: '#3F8CFF', weight: 3, fillOpacity: 0.08 } });
