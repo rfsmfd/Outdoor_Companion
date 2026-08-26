@@ -1969,7 +1969,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 516</div>
+    <div id="buildBadge">BUILD 517</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3046,6 +3046,11 @@
       // sibling MapServer as a gold overlay for consistency/reliability. Good rural coverage (even Salmon draws).
       url: 'https://gis.idwr.idaho.gov/hosting/rest/services/Reference/Parcels/MapServer',
       bbox: [-117.24, 41.99, -111.04, 49.00] },
+    { state: 'NV', name: 'Nevada Parcels', attr: 'Parcels: Nevada Div. of State Lands / NDOT (Statewide Parcels)', type: 'dynamic', dynLayers: [0],
+      // Statewide "All Parcels" (2018 compilation) on NDOT's host; single layer so the gold override applies. Good
+      // rural coverage (Elko draws ~85%). CORS-clean, MapServer export verified.
+      url: 'https://gis.dot.nv.gov/agsphs/rest/services/Reference/Statewide_Parcels/MapServer',
+      bbox: [-120.01, 35.00, -114.04, 42.00] },
     { state: 'IN', name: 'Indiana Parcels', attr: 'Parcels: IndianaMap / Indiana GIO',
       url: 'https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0',   // "Current" auto-tracks newest; CORS-clean, verified
       bbox: [-88.10, 37.77, -84.78, 41.76] },
