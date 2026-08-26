@@ -1960,9 +1960,9 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
-    <button id="parcelToggleBtn" title="Show property lines (VA + NC free state parcels — more states over time)">📐</button>
+    <button id="parcelToggleBtn" title="Show property lines (VA, NC, WI free-state parcels — more states over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 493</div>
+    <div id="buildBadge">BUILD 494</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2970,11 +2970,14 @@
       url: 'https://vginmaps.vdem.virginia.gov/arcgis/rest/services/VA_Base_Layers/VA_Parcels/FeatureServer/0',
       bbox: [-83.7, 36.5, -75.2, 39.5] },
     { state: 'NC', name: 'NC OneMap', attr: 'Parcels: NC OneMap (NC CGIA)',
-      url: 'https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/FeatureServer/1',   // layer 1 = polygons (verified public)
-      bbox: [-84.4, 33.7, -75.4, 36.62] }
+      url: 'https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/FeatureServer/1',   // layer 1 = polygons (verified public + browser-tested)
+      bbox: [-84.4, 33.7, -75.4, 36.62] },
+    { state: 'WI', name: 'WI Statewide Parcels', attr: 'Parcels: Wisconsin Statewide Parcel Map Initiative (SCO)',
+      url: 'https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels/FeatureServer/0',   // ArcGIS Online (CORS-clean); explicitly free
+      bbox: [-92.95, 42.45, -86.8, 47.12] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
-  var parcelLayerActive = false;
+  var parcelWanted = false;       // user INTENT (button state) — layers auto hide/show with zoom without losing this
   var _parcelDisclaimerShown = false;
   var PARCEL_MIN_ZOOM = 14;       // gate on zoom directly — far out, "the current view" is too many parcels and stalls
 
@@ -2987,8 +2990,11 @@
     return lyr;
   }
   // Show/hide the right state layers for the current view — pan across VA↔NC and both render at the seam.
+  // Draw the right state layers for the current view — but ONLY when the intent is on AND we're zoomed in enough.
+  // Zooming out just hides them (too many parcels to load); it does NOT forget the intent, so zooming back in
+  // brings them right back with no re-tap. Pan across VA↔NC and both render at the seam.
   function syncParcelLayers(){
-    if (!parcelLayerActive) return;
+    if (!parcelWanted || map.getZoom() < PARCEL_MIN_ZOOM){ _removeAllParcelLayers(); return; }
     var want = _parcelStatesInView();
     want.forEach(function(st){ if (!parcelLayers[st]) parcelLayers[st] = _makeParcelLayer(_sourceFor(st)); if (!map.hasLayer(parcelLayers[st])) parcelLayers[st].addTo(map); });
     Object.keys(parcelLayers).forEach(function(st){ if (want.indexOf(st) < 0 && map.hasLayer(parcelLayers[st])) map.removeLayer(parcelLayers[st]); });
@@ -2997,27 +3003,21 @@
 
   document.getElementById('parcelToggleBtn').addEventListener('click', function(){
     var btn = this;
-    if (parcelLayerActive){
-      _removeAllParcelLayers();
-      parcelLayerActive = false;
+    if (parcelWanted){
+      parcelWanted = false;
       btn.classList.remove('active');
+      _removeAllParcelLayers();
     } else {
-      if (map.getZoom() < PARCEL_MIN_ZOOM){
-        showToast('Zoom in closer to load property lines (helps them load reliably)');
-        return;
-      }
-      if (!_parcelStatesInView().length){
-        showToast('No free property-line source for this area yet — we add states over time.');
-        return;
-      }
-      parcelLayerActive = true;
+      parcelWanted = true;
       btn.classList.add('active');
-      syncParcelLayers();
       if (!_parcelDisclaimerShown){ _parcelDisclaimerShown = true; showToast('Property lines are approximate — for reference only, not a legal survey.'); }
+      if (map.getZoom() < PARCEL_MIN_ZOOM) showToast('Property lines will appear as you zoom in.');
+      else if (!_parcelStatesInView().length) showToast('No free property-line source for this area yet — we add states over time.');
+      syncParcelLayers();
     }
   });
   // As the user pans, bring the right state's parcels in/out of view (the seamless cross-state behavior).
-  map.on('moveend', function(){ if (parcelLayerActive && map.getZoom() >= PARCEL_MIN_ZOOM) syncParcelLayers(); });
+  map.on('moveend', function(){ syncParcelLayers(); });
 
   // If the user zooms back out while parcels are active, turn them off automatically
   // rather than let the same slow/stalled-query problem recur silently.
@@ -3029,19 +3029,9 @@
   }
   updateZoomLabels();
 
-  map.on('zoomend', function(){
-    updateZoomLabels();
-    if (parcelLayerActive){
-      if (map.getZoom() < PARCEL_MIN_ZOOM){
-        _removeAllParcelLayers();
-        parcelLayerActive = false;
-        document.getElementById('parcelToggleBtn').classList.remove('active');
-        showToast('Property lines turned off — zoomed out too far to load them reliably');
-      } else {
-        syncParcelLayers();
-      }
-    }
-  });
+  // Zoom just hides/shows the parcels (syncParcelLayers gates on zoom) — the button stays ON so zooming back in
+  // restores them automatically, no re-tap. (Previously zoom-out turned the intent off, forcing a re-launch.)
+  map.on('zoomend', function(){ updateZoomLabels(); syncParcelLayers(); });
 
   // ---------- Trail Recording (breadcrumbs) ----------
   // Works completely standalone — no Hunt/Trip session required — for scouting, marking
@@ -9242,7 +9232,7 @@
   function drawPropertyBoundary(prop, onDone){
     var mp = document.getElementById('managePropertiesModalBackdrop'); if (mp) mp.classList.remove('show');
     if (typeof prop.centerLat === 'number') map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15));
-    try { if (!parcelLayerActive && map.getZoom() >= PARCEL_MIN_ZOOM && _parcelStatesInView().length){ parcelLayerActive = true; var _pb = document.getElementById('parcelToggleBtn'); if (_pb) _pb.classList.add('active'); syncParcelLayers(); } } catch (e) {}
+    try { if (!parcelWanted && map.getZoom() >= PARCEL_MIN_ZOOM && _parcelStatesInView().length){ parcelWanted = true; var _pb = document.getElementById('parcelToggleBtn'); if (_pb) _pb.classList.add('active'); syncParcelLayers(); } } catch (e) {}
     showToast('Trace ' + prop.name + ' — click each corner, click the first point to close. Follow the parcel line where it\'s right, cut your own where it\'s wrong.');
     if (_boundaryDrawer){ try { _boundaryDrawer.disable(); } catch (e) {} }
     _boundaryDrawer = new L.Draw.Polygon(map, { allowIntersection: false, metric: false, feet: true, showArea: true, shapeOptions: { color: '#3F8CFF', weight: 3, fillOpacity: 0.08 } });
