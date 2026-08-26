@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 504</div>
+    <div id="buildBadge">BUILD 505</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3021,7 +3021,16 @@
       // geometry queries, so we use CTECO's public map service as a server-side image overlay instead. Grouped by
       // COG/town, so NO dynLayers (render all). Public + CORS-clean, export verified from app origin.
       url: 'https://cteco.uconn.edu/ctmaps/rest/services/Parcels/Parcels_tiled/MapServer',
-      bbox: [-73.73, 40.95, -71.78, 42.06] }
+      bbox: [-73.73, 40.95, -71.78, 42.06] },
+    { state: 'MT', name: 'Montana Parcels', attr: 'Parcels: Montana State Library / MT Dept. of Revenue (MSDI Cadastral)',
+      url: 'https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1',   // layer 1 = "Montana Parcels" (statewide); CORS-clean, verified
+      bbox: [-116.05, 44.36, -104.04, 49.00] },
+    { state: 'MN', name: 'Minnesota Parcels', attr: 'Parcels: Minnesota MnGeo (statewide open parcels)',
+      url: 'https://enterprise.gisdata.mn.gov/aghost/rest/services/us_mn_state_mngeo/plan_parcels_open/FeatureServer/0',   // MnGeo open statewide; CORS-clean, verified
+      bbox: [-97.24, 43.50, -89.49, 49.38] },
+    { state: 'IN', name: 'Indiana Parcels', attr: 'Parcels: IndianaMap / Indiana GIO',
+      url: 'https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0',   // "Current" auto-tracks newest; CORS-clean, verified
+      bbox: [-88.10, 37.77, -84.78, 41.76] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
   var parcelWanted = false;       // user INTENT (button state) — layers auto hide/show with zoom without losing this
