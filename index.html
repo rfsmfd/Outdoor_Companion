@@ -1805,6 +1805,13 @@
     opacity:1;
     transform:translateX(-50%) translateY(0);
   }
+  /* Multi-sublayer parcel image overlays (OR = 36 counties, CT = towns) render in the state's own faint line color
+     and can't take a server-side gold override (the per-layer URL is too long). A dual dark+light halo makes those
+     lines readable on any background. Targeted by service host so it never touches other overlays. */
+  .leaflet-overlay-pane img[src*="cteco.uconn.edu"],
+  .leaflet-overlay-pane img[src*="gis.odf.oregon.gov"]{
+    filter:contrast(1.55) drop-shadow(0 0 0.7px #000) drop-shadow(0 0 0.7px #000) drop-shadow(0 0 1.1px #fff);
+  }
 </style>
 </head>
 <body>
@@ -1962,7 +1969,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 511</div>
+    <div id="buildBadge">BUILD 512</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3031,8 +3038,12 @@
     { state: 'IN', name: 'Indiana Parcels', attr: 'Parcels: IndianaMap / Indiana GIO',
       url: 'https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0',   // "Current" auto-tracks newest; CORS-clean, verified
       bbox: [-88.10, 37.77, -84.78, 41.76] },
-    { state: 'NY', name: 'New York Tax Parcels', attr: 'Parcels: NYS ITS GIS (Tax Parcels Public) — opted-in counties',
-      url: 'https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/0',   // AGOL hosted (CORS *); only counties that opted in to public sharing (partial statewide)
+    { state: 'NY', name: 'New York Tax Parcels', attr: 'Parcels: NYS ITS GIS (Tax Parcels Public) — opted-in counties', type: 'dynamic', dynLayers: [1],
+      // The AGOL FeatureServer's parcels layer carries maxScale ~1:37k, which esri featureLayer honors → it blanks
+      // exactly when you zoom in to hunt. The state ITS MapServer serves the SAME parcels as layer 1 with maxScale 0,
+      // so render it as a gold image overlay instead (verified draws in Albany/Buffalo). NOTE: only the ~38 opted-in
+      // counties have data — rural/unopted counties are blank by NY's own policy, not a bug.
+      url: 'https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer',
       bbox: [-79.77, 40.48, -71.85, 45.02] },
     { state: 'PA', name: 'Pennsylvania Parcels', attr: 'Parcels: PASDA / Penn State (PA Parcels)', type: 'dynamic', dynLayers: [1],
       // layer 0 is COUNTY boundaries, layer 1 is the actual parcels — AND layer 1 has no OBJECTID (breaks esri
@@ -3073,17 +3084,21 @@
       // so it scales to any size. Trade-off: not individually clickable, and it wears the service's own line symbology.
       // dynLayers pins which sub-layers to draw: a single-layer service (TX) sets [0]; a service split by county/town
       // (OR = 36 counties, CT = towns by COG) must omit it so ALL sub-layers render, not just the first one.
+      // Each service draws parcels in its OWN line color (white, black, orange, purple…), often unreadable on the
+      // aerial. Where we target just a layer or two (src.dynLayers), override the renderer server-side to our GOLD
+      // (verified: the returned PNG comes back exactly [212,178,76]) so every state matches and reads well.
       var dynOpts = { url: src.url, opacity: 0.95, format: 'png32', transparent: true, attribution: src.attr };
-      if (src.dynLayers) dynOpts.layers = src.dynLayers;
+      if (src.dynLayers) {
+        dynOpts.dynamicLayers = src.dynLayers.map(function(id){
+          return { id: id, source: { type: 'mapLayer', mapLayerId: id },
+            drawingInfo: { renderer: { type: 'simple', symbol: { type: 'esriSFS', style: 'esriSFSNull',
+              outline: { type: 'esriSLS', style: 'esriSLSSolid', color: [212, 178, 76, 255], width: 1.5 } } } } };
+        });
+      }
+      // Services split into 30–40 county/town sub-layers (OR, CT) omit dynLayers so ALL sub-layers render — the
+      // per-layer override URL would blow past length limits there — so those keep their source color, made readable
+      // instead by a CSS halo filter (see the `.leaflet-overlay-pane img[src*=...]` rules in the stylesheet).
       lyr = L.esri.dynamicMapLayer(dynOpts);
-      // These are server-rendered images, so they wear the service's OWN line color — which ranges from near-white
-      // (CT) to black (PA) and can be hard to read on the aerial. We can't restyle the pixels, but a dual dark+light
-      // halo via CSS filter makes the lines pop on ANY background regardless of their source color. Re-applied on
-      // every image refresh (esri swaps _currentImage on each export).
-      lyr.on('load', function(){
-        try { var im = lyr._currentImage && lyr._currentImage._image;
-          if (im) im.style.filter = 'contrast(1.5) drop-shadow(0 0 0.7px #000) drop-shadow(0 0 0.7px #000) drop-shadow(0 0 1.1px #fff)'; } catch (e) {}
-      });
     } else {
       // minZoom:0/maxZoom:24 forced wide so a service's own maxScale can't blank the layer at parcel zooms — NY's
       // layer carries maxScale ~1:37k, which otherwise hides it exactly when you zoom in to hunt (every WORKING
