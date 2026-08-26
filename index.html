@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 502</div>
+    <div id="buildBadge">BUILD 503</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3005,7 +3005,7 @@
     { state: 'HI', name: 'Hawaii TMK Parcels', attr: 'Parcels: Hawaii Statewide GIS Program (TMK)',
       url: 'https://geodata.hawaii.gov/arcgis/rest/services/ParcelsZoning/MapServer/25',   // layer 25 = Statewide TMKs (polygon); CORS-clean, verified from app origin
       bbox: [-160.3, 18.86, -154.75, 22.25] },
-    { state: 'TX', name: 'Texas StratMap Parcels', attr: 'Parcels: Texas Geographic Information Office (TxGIO StratMap)', type: 'dynamic',
+    { state: 'TX', name: 'Texas StratMap Parcels', attr: 'Parcels: Texas Geographic Information Office (TxGIO StratMap)', type: 'dynamic', dynLayers: [0],
       // 10M+ parcels — the public service is DISPLAY-ONLY (no feature query), so we render it as a server-side image
       // overlay (dynamicMapLayer) instead of pulling vectors. The "most_recent" alias is public/no-token & CORS-clean;
       // the year-specific stratmapNN services are token-gated. URL is the MapServer ROOT (dynamicMapLayer needs that).
@@ -3015,7 +3015,13 @@
       // Statewide taxlots are display-only (no feature query), so same server-side image-overlay approach as TX.
       // ODF hosts a public, CORS-clean dynamic map service (capabilities=Map, export verified from app origin).
       url: 'https://gis.odf.oregon.gov/ags1/rest/services/WebMercator/TaxlotsDisplay/MapServer',
-      bbox: [-124.57, 41.99, -116.46, 46.29] }
+      bbox: [-124.57, 41.99, -116.46, 46.29] },   // no dynLayers: service is split into 36 county sub-layers — render ALL
+    { state: 'CT', name: 'Connecticut Parcels', attr: 'Parcels: CT OPM / COGs / Municipalities (CTECO/UConn)', type: 'dynamic',
+      // Statewide parcels "by town" (CT OPM). The authoritative CT_State_Parcel_Layer_2023 FeatureServer times out on
+      // geometry queries, so we use CTECO's public map service as a server-side image overlay instead. Grouped by
+      // COG/town, so NO dynLayers (render all). Public + CORS-clean, export verified from app origin.
+      url: 'https://cteco.uconn.edu/ctmaps/rest/services/Parcels/Parcels_tiled/MapServer',
+      bbox: [-73.73, 40.95, -71.78, 42.06] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
   var parcelWanted = false;       // user INTENT (button state) — layers auto hide/show with zoom without losing this
@@ -3031,7 +3037,11 @@
       // Display-only map service (e.g. TX StratMap, 10M+ parcels, no feature query) — render as a server-side image
       // overlay: the state's own service draws the parcels and hands us a PNG for the current view. No vectors pulled,
       // so it scales to any size. Trade-off: not individually clickable, and it wears the service's own line symbology.
-      lyr = L.esri.dynamicMapLayer({ url: src.url, layers: [0], opacity: 0.9, format: 'png32', transparent: true, attribution: src.attr });
+      // dynLayers pins which sub-layers to draw: a single-layer service (TX) sets [0]; a service split by county/town
+      // (OR = 36 counties, CT = towns by COG) must omit it so ALL sub-layers render, not just the first one.
+      var dynOpts = { url: src.url, opacity: 0.9, format: 'png32', transparent: true, attribution: src.attr };
+      if (src.dynLayers) dynOpts.layers = src.dynLayers;
+      lyr = L.esri.dynamicMapLayer(dynOpts);
     } else {
       lyr = L.esri.featureLayer({ url: src.url, style: function(){ return { color: '#D4B24C', weight: 1.5, fillOpacity: 0, opacity: 0.85 }; }, simplifyFactor: 0.35, precision: 5, attribution: src.attr });
     }
