@@ -1969,7 +1969,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 518</div>
+    <div id="buildBadge">BUILD 519</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3087,7 +3087,12 @@
       bbox: [-111.06, 40.99, -104.05, 45.01] },
     { state: 'NH', name: 'New Hampshire Parcels', attr: 'Parcels: NH GRANIT / NH DRA (Parcel Mosaic)',
       url: 'https://nhgeodata.unh.edu/hosting/rest/services/Hosted/CAD_ParcelMosaic/FeatureServer/1',   // PUBLIC /hosting endpoint (the /nhgeodata MapServer needs a token — decoy). layer 1. CORS-clean, verified
-      bbox: [-72.56, 42.70, -70.70, 45.31] }
+      bbox: [-72.56, 42.70, -70.70, 45.31] },
+    // ---- Canada (bucket-list hunting provinces) — 2-letter codes don't collide with US states ----
+    { state: 'BC', name: 'British Columbia Parcels', attr: 'Parcels: ParcelMap BC (BC Land Title & Survey Authority, Open Gov Licence)', type: 'dynamic', dynLayers: [0],
+      // ParcelMap BC parcel fabric (2M+ parcels), Open Government Licence. layer 0 = full cadastre. CORS-clean, gold verified.
+      url: 'https://geoweb-ags.bc-er.ca/arcgis/rest/services/REFERENCE/PMBC/MapServer',
+      bbox: [-139.06, 48.30, -114.03, 60.00] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
   var parcelWanted = false;       // user INTENT (button state) — layers auto hide/show with zoom without losing this
