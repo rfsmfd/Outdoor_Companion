@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 490</div>
+    <div id="buildBadge">BUILD 491</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10496,9 +10496,9 @@
     var mlat = (bb.n + bb.s) / 2;
     var widthM = (bb.e - bb.w) * 111320 * Math.cos(mlat * Math.PI / 180), heightM = (bb.n - bb.s) * 111320;
     // Finer grid (~45 m cells) so RAVINES & bottoms register — clamped, and total points capped so the fetch stays sane.
-    function clampG(m){ return Math.max(22, Math.min(56, Math.round(m / 40))); }
+    function clampG(m){ return Math.max(26, Math.min(66, Math.round(m / 32))); }   // ~32 m cells to resolve islands/ravines
     var Gx = clampG(widthM), Gy = clampG(heightM);
-    if (Gx * Gy > 3200){ var scl = Math.sqrt(3200 / (Gx * Gy)); Gx = Math.max(20, Math.round(Gx * scl)); Gy = Math.max(20, Math.round(Gy * scl)); }
+    if (Gx * Gy > 4600){ var scl = Math.sqrt(4600 / (Gx * Gy)); Gx = Math.max(24, Math.round(Gx * scl)); Gy = Math.max(24, Math.round(Gy * scl)); }
     var gpts = [];
     for (var gy = 0; gy < Gy; gy++){ var lat = bb.n - (gy + 0.5) / Gy * (bb.n - bb.s); for (var gx = 0; gx < Gx; gx++){ gpts.push([bb.w + (gx + 0.5) / Gx * (bb.e - bb.w), lat]); } }
     var z = new Array(Gx * Gy), CH = 480;
@@ -10515,25 +10515,27 @@
     var vals = z.filter(isFinite); if (vals.length < Gx * Gy * 0.5) return [];
     var relief = Math.max.apply(null, vals) - Math.min.apply(null, vals);
     if (relief < 3) return [];                       // essentially flat
-    var _sv = vals.slice().sort(function(a, b){ return a - b; }), p25 = _sv[Math.floor(_sv.length * 0.25)];   // low-ground threshold (swamp/bottom)
-    var PROM = Math.max(0.8, relief * 0.04);         // adaptive; lower so subtler ravines/ridges still register
+    var _sv = vals.slice().sort(function(a, b){ return a - b; }), p25 = _sv[Math.floor(_sv.length * 0.25)], p40 = _sv[Math.floor(_sv.length * 0.40)];
+    var PROM = Math.max(0.5, relief * 0.025);        // normal ground
+    var LPROM = Math.max(0.3, relief * 0.012);       // LOW/wet ground — far more sensitive so swamp ISLANDS & NARROWS register (only 1–3 ft of rise)
     var raw = [];
     for (var yy = 1; yy < Gy - 1; yy++){
       for (var xx = 1; xx < Gx - 1; xx++){
         var c = Z(xx, yy); if (!isFinite(c)) continue;
         var n = Z(xx, yy - 1), s = Z(xx, yy + 1), e = Z(xx + 1, yy), w = Z(xx - 1, yy);
         if (!([n, s, e, w].every(isFinite))) continue;
-        // Axis tests — THE FIX: ravines/ridges are LINEAR (low/high across ONE axis), so require only the two
-        // CROSS neighbors, not 3-of-4. That's why entire ravine & ridge systems were invisible before.
-        var lowEW = (c < e - PROM) && (c < w - PROM), highEW = (c > e + PROM) && (c > w + PROM);
-        var lowNS = (c < n - PROM) && (c < s - PROM), highNS = (c > n + PROM) && (c > s + PROM);
-        if (highEW && highNS){ var lowNbr = Math.min(n, s, e, w); raw.push({ t: (lowNbr < p25 ? 'island' : 'knob'), gx: xx, gy: yy, score: (c - lowNbr) }); continue; }   // hilltop, or a DRY ISLAND if it rises out of low/wet ground
+        // Axis tests — ravines/ridges are LINEAR (low/high across ONE axis). In LOW/wet ground use a much finer
+        // threshold (LPROM) so subtle swamp islands & narrows — only a foot or two of relief — still register.
+        var isLow = c < p40, P = isLow ? LPROM : PROM;
+        var lowEW = (c < e - P) && (c < w - P), highEW = (c > e + P) && (c > w + P);
+        var lowNS = (c < n - P) && (c < s - P), highNS = (c > n + P) && (c > s + P);
+        if (highEW && highNS){ raw.push({ t: (isLow ? 'island' : 'knob'), gx: xx, gy: yy, score: (c - Math.min(n, s, e, w)) + (isLow ? 4 : 0) }); continue; }   // hilltop, or DRY ISLAND rising out of the wet
         else if (lowEW && lowNS){ raw.push({ t: 'draw', gx: xx, gy: yy, score: ((e - c) + (w - c) + (n - c) + (s - c)) }); continue; }  // pocket / draw head
-        else if ((lowEW && highNS) || (lowNS && highEW)){ raw.push({ t: (c < p25 ? 'lowcross' : 'saddle'), gx: xx, gy: yy, score: (Math.abs(e - c) + Math.abs(w - c) + Math.abs(n - c) + Math.abs(s - c)) }); continue; }   // pass; a LOW pass = swamp/creek crossing
+        else if ((lowEW && highNS) || (lowNS && highEW)){ raw.push({ t: (isLow ? 'lowcross' : 'saddle'), gx: xx, gy: yy, score: (Math.abs(e - c) + Math.abs(w - c) + Math.abs(n - c) + Math.abs(s - c)) + (isLow ? 4 : 0) }); continue; }   // pass; a LOW pass = swamp/creek NARROWS
         else if (highEW || highNS){ raw.push({ t: 'spur', gx: xx, gy: yy, score: Math.max((c - e) + (c - w), (c - n) + (c - s)) }); continue; }   // ridge line / spur
         else if (lowEW || lowNS){ raw.push({ t: 'draw', gx: xx, gy: yy, score: Math.max((e - c) + (w - c), (n - c) + (s - c)) }); continue; }      // ravine / draw line
         var lv = Math.max(Math.abs(c - n), Math.abs(c - s), Math.abs(c - e), Math.abs(c - w)), grad = Math.abs(n - s) + Math.abs(e - w);
-        if (lv < PROM * 0.5 && c < p25){ raw.push({ t: 'bottom', gx: xx, gy: yy, score: (p25 - c + 1) }); continue; }   // flat + LOW = wet bottom / swamp
+        if (lv < LPROM && c < p25){ raw.push({ t: 'bottom', gx: xx, gy: yy, score: (p25 - c + 1) }); continue; }   // flat + LOW = wet bottom / swamp
         if (lv < PROM * 0.4 && grad > PROM * 2.5) raw.push({ t: 'bench', gx: xx, gy: yy, score: grad });   // flat shelf on a slope
       }
     }
@@ -10649,7 +10651,7 @@
         var el = document.getElementById('tr-lidar'); if (!el || !document.body.contains(card)) return;
         var lf = (rr[0] || []).concat(rr[1] || []);
         lf.sort(function(a, b){ if ((a.off ? 1 : 0) !== (b.off ? 1 : 0)) return a.off ? 1 : -1; return (b.score || 0) - (a.score || 0); });
-        lf = lf.slice(0, 28);
+        lf = lf.slice(0, 34);
         if (!lf.length){ el.innerHTML = '🗻 The land reads mostly flat & dry here — no strong terrain or water features.'; return; }
         var html = '<div style="color:#9db0a3;font-size:11px;letter-spacing:.3px;margin:0 0 4px;">🗻 FROM THE LAND &amp; WATER (incl. ½-mi around you)</div>';
         lf.forEach(function(f){ html += trRow(f); });
