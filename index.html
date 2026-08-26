@@ -1969,7 +1969,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 513</div>
+    <div id="buildBadge">BUILD 514</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3032,8 +3032,11 @@
     { state: 'MT', name: 'Montana Parcels', attr: 'Parcels: Montana State Library / MT Dept. of Revenue (MSDI Cadastral)',
       url: 'https://gisservice.mt.gov/arcgis/rest/services/msdi_cadastral_map_v1/MapServer/1',   // layer 1 = "Montana Parcels" (statewide); CORS-clean, verified
       bbox: [-116.05, 44.36, -104.04, 49.00] },
-    { state: 'MN', name: 'Minnesota Parcels', attr: 'Parcels: Minnesota MnGeo (statewide open parcels)',
-      url: 'https://enterprise.gisdata.mn.gov/aghost/rest/services/us_mn_state_mngeo/plan_parcels_open/FeatureServer/1',   // layer 1 = "Plan Parcels Open" (layer 0 is a coverage-Metadata layer!); MnGeo statewide, CORS-clean, verified
+    { state: 'MN', name: 'Minnesota Parcels', attr: 'Parcels: Minnesota MnGeo (statewide open parcels)', type: 'dynamic', dynLayers: [1],
+      // The FeatureServer/1 geometry query is slow (~3.6s per block) so the vector featureLayer never draws — render
+      // layer 1 ("Plan Parcels Open"; layer 0 is a coverage-Metadata index) from the sibling MapServer as a gold image
+      // overlay instead. Only opted-in counties have data (rural counties may be blank). CORS-clean, gold verified.
+      url: 'https://enterprise.gisdata.mn.gov/aghost/rest/services/us_mn_state_mngeo/plan_parcels_open/MapServer',
       bbox: [-97.24, 43.50, -89.49, 49.38] },
     { state: 'CO', name: 'Colorado Parcels', attr: 'Parcels: Colorado Governor\'s OIT (Public Parcels)',
       url: 'https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0',   // statewide composite (all 64 counties), maxScale 0, OBJECTID; CORS-clean, verified
