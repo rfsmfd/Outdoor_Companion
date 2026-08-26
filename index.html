@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 505</div>
+    <div id="buildBadge">BUILD 506</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3030,7 +3030,16 @@
       bbox: [-97.24, 43.50, -89.49, 49.38] },
     { state: 'IN', name: 'Indiana Parcels', attr: 'Parcels: IndianaMap / Indiana GIO',
       url: 'https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0',   // "Current" auto-tracks newest; CORS-clean, verified
-      bbox: [-88.10, 37.77, -84.78, 41.76] }
+      bbox: [-88.10, 37.77, -84.78, 41.76] },
+    { state: 'NY', name: 'New York Tax Parcels', attr: 'Parcels: NYS ITS GIS (Tax Parcels Public) — opted-in counties',
+      url: 'https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/0',   // AGOL hosted (CORS *); only counties that opted in to public sharing (partial statewide)
+      bbox: [-79.77, 40.48, -71.85, 45.02] },
+    { state: 'PA', name: 'Pennsylvania Parcels', attr: 'Parcels: PASDA / Penn State (PA Parcels)',
+      url: 'https://maps.pasda.psu.edu/ArcGIS/rest/services/PA_Parcels/MapServer/0',   // maps.pasda host queryable+CORS-clean (apps.pasda FeatureServer errored); verified
+      bbox: [-80.52, 39.72, -74.69, 42.27] },
+    { state: 'WV', name: 'West Virginia Parcels', attr: 'Parcels: WV GIS Technical Center / WV Tax (WV Parcels)',
+      url: 'https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer/0',   // layer 0 = parcels polygons; CORS-clean, verified
+      bbox: [-82.65, 37.20, -77.72, 40.64] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
   var parcelWanted = false;       // user INTENT (button state) — layers auto hide/show with zoom without losing this
