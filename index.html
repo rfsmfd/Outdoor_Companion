@@ -1969,7 +1969,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 515</div>
+    <div id="buildBadge">BUILD 516</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3041,6 +3041,11 @@
     { state: 'CO', name: 'Colorado Parcels', attr: 'Parcels: Colorado Governor\'s OIT (Public Parcels)',
       url: 'https://gis.colorado.gov/public/rest/services/Address_and_Parcel/Colorado_Public_Parcels/FeatureServer/0',   // statewide composite (all 64 counties), maxScale 0, OBJECTID; CORS-clean, verified
       bbox: [-109.06, 36.99, -102.04, 41.00] },
+    { state: 'ID', name: 'Idaho Parcels', attr: 'Parcels: Idaho Dept. of Water Resources (statewide compilation)', type: 'dynamic', dynLayers: [0],
+      // Statewide county-compiled parcels on IDWR's enterprise host. FeatureServer is fast here, but render via the
+      // sibling MapServer as a gold overlay for consistency/reliability. Good rural coverage (even Salmon draws).
+      url: 'https://gis.idwr.idaho.gov/hosting/rest/services/Reference/Parcels/MapServer',
+      bbox: [-117.24, 41.99, -111.04, 49.00] },
     { state: 'IN', name: 'Indiana Parcels', attr: 'Parcels: IndianaMap / Indiana GIO',
       url: 'https://gisdata.in.gov/server/rest/services/Hosted/Parcel_Boundaries_of_Indiana_Current/FeatureServer/0',   // "Current" auto-tracks newest; CORS-clean, verified
       bbox: [-88.10, 37.77, -84.78, 41.76] },
