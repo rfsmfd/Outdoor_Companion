@@ -1960,9 +1960,9 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
-    <button id="parcelToggleBtn" title="Show property lines (VA, NC, WI free-state parcels — more states over time)">📐</button>
+    <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 494</div>
+    <div id="buildBadge">BUILD 495</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3001,18 +3001,41 @@
   }
   function _removeAllParcelLayers(){ Object.keys(parcelLayers).forEach(function(st){ if (map.hasLayer(parcelLayers[st])) map.removeLayer(parcelLayers[st]); }); }
 
+  // State boundaries — shown WITH the parcel toggle (at all zooms, unlike parcels) so you can see which state
+  // you're in and whether it's covered. Covered states (in PARCEL_SOURCES) are outlined + faintly filled GREEN,
+  // everything else a thin neutral line. Answers "am I in a state we have lines for?" at a glance.
+  var stateLinesLayer = null;
+  function getStateLinesLayer(){
+    if (!stateLinesLayer){
+      stateLinesLayer = L.esri.featureLayer({
+        url: 'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_States_Generalized/FeatureServer/0',
+        simplifyFactor: 0.5, precision: 4, attribution: 'State boundaries: Esri',
+        style: function(f){
+          var ab = (f && f.properties) ? (f.properties.STATE_ABBR || f.properties.STUSPS) : null;
+          return (ab && _sourceFor(ab))
+            ? { color: '#4CC68A', weight: 2, opacity: 0.9, fillColor: '#4CC68A', fillOpacity: 0.07 }   // covered = green
+            : { color: '#cbd6ce', weight: 1, opacity: 0.45, fill: false };                             // others = thin neutral line
+        }
+      });
+      stateLinesLayer.on('requesterror', function(){ showToast('State lines unreachable right now.'); });
+    }
+    return stateLinesLayer;
+  }
+
   document.getElementById('parcelToggleBtn').addEventListener('click', function(){
     var btn = this;
     if (parcelWanted){
       parcelWanted = false;
       btn.classList.remove('active');
       _removeAllParcelLayers();
+      if (stateLinesLayer && map.hasLayer(stateLinesLayer)) map.removeLayer(stateLinesLayer);
     } else {
       parcelWanted = true;
       btn.classList.add('active');
+      getStateLinesLayer().addTo(map);   // state lines show at all zooms; covered states tinted green
       if (!_parcelDisclaimerShown){ _parcelDisclaimerShown = true; showToast('Property lines are approximate — for reference only, not a legal survey.'); }
-      if (map.getZoom() < PARCEL_MIN_ZOOM) showToast('Property lines will appear as you zoom in.');
-      else if (!_parcelStatesInView().length) showToast('No free property-line source for this area yet — we add states over time.');
+      if (map.getZoom() < PARCEL_MIN_ZOOM) showToast('State lines on — green states have property lines. Zoom into one to see the parcels.');
+      else if (!_parcelStatesInView().length) showToast('No free property-line source for this area yet — green states are covered.');
       syncParcelLayers();
     }
   });
@@ -9232,7 +9255,7 @@
   function drawPropertyBoundary(prop, onDone){
     var mp = document.getElementById('managePropertiesModalBackdrop'); if (mp) mp.classList.remove('show');
     if (typeof prop.centerLat === 'number') map.setView([prop.centerLat, prop.centerLng], Math.max(prop.zoom || 15, 15));
-    try { if (!parcelWanted && map.getZoom() >= PARCEL_MIN_ZOOM && _parcelStatesInView().length){ parcelWanted = true; var _pb = document.getElementById('parcelToggleBtn'); if (_pb) _pb.classList.add('active'); syncParcelLayers(); } } catch (e) {}
+    try { if (!parcelWanted && map.getZoom() >= PARCEL_MIN_ZOOM && _parcelStatesInView().length){ parcelWanted = true; var _pb = document.getElementById('parcelToggleBtn'); if (_pb) _pb.classList.add('active'); getStateLinesLayer().addTo(map); syncParcelLayers(); } } catch (e) {}
     showToast('Trace ' + prop.name + ' — click each corner, click the first point to close. Follow the parcel line where it\'s right, cut your own where it\'s wrong.');
     if (_boundaryDrawer){ try { _boundaryDrawer.disable(); } catch (e) {} }
     _boundaryDrawer = new L.Draw.Polygon(map, { allowIntersection: false, metric: false, feet: true, showArea: true, shapeOptions: { color: '#3F8CFF', weight: 3, fillOpacity: 0.08 } });
