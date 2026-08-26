@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 506</div>
+    <div id="buildBadge">BUILD 507</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3039,7 +3039,15 @@
       bbox: [-80.52, 39.72, -74.69, 42.27] },
     { state: 'WV', name: 'West Virginia Parcels', attr: 'Parcels: WV GIS Technical Center / WV Tax (WV Parcels)',
       url: 'https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer/0',   // layer 0 = parcels polygons; CORS-clean, verified
-      bbox: [-82.65, 37.20, -77.72, 40.64] }
+      bbox: [-82.65, 37.20, -77.72, 40.64] },
+    { state: 'FL', name: 'Florida Parcels', attr: 'Parcels: Florida GIO / FL Dept. of Revenue (FDACS optimized)', type: 'dynamic', dynLayers: [0],
+      // 10.8M parcels — the statewide FeatureServer times out on spatial queries, so use the FDACS "optimized" map
+      // service as a server-side image overlay. Public, CORS-clean, export verified (~13% drawn over Orlando).
+      url: 'https://gis.fdacs.gov/mapping/rest/services/GIO_Parcels_for_OAWP_Optimized/MapServer',
+      bbox: [-87.63, 24.40, -79.97, 31.00] },
+    { state: 'AR', name: 'Arkansas Parcels', attr: 'Parcels: Arkansas GIS Office / GeoStor (Planning Cadastre)',
+      url: 'https://gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6',   // layer 6 = PARCEL_POLYGON_CAMP (layer 0 is centroids!); CORS-clean, verified
+      bbox: [-94.62, 33.00, -89.64, 36.50] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
   var parcelWanted = false;       // user INTENT (button state) — layers auto hide/show with zoom without losing this
