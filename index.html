@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 501</div>
+    <div id="buildBadge">BUILD 502</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3010,7 +3010,12 @@
       // overlay (dynamicMapLayer) instead of pulling vectors. The "most_recent" alias is public/no-token & CORS-clean;
       // the year-specific stratmapNN services are token-gated. URL is the MapServer ROOT (dynamicMapLayer needs that).
       url: 'https://feature.geographic.texas.gov/arcgis/rest/services/Parcels/stratmap_land_parcels_48_most_recent/MapServer',
-      bbox: [-106.65, 25.84, -93.51, 36.50] }
+      bbox: [-106.65, 25.84, -93.51, 36.50] },
+    { state: 'OR', name: 'Oregon Taxlots', attr: 'Taxlots: Oregon Dept. of Forestry (statewide taxlots)', type: 'dynamic',
+      // Statewide taxlots are display-only (no feature query), so same server-side image-overlay approach as TX.
+      // ODF hosts a public, CORS-clean dynamic map service (capabilities=Map, export verified from app origin).
+      url: 'https://gis.odf.oregon.gov/ags1/rest/services/WebMercator/TaxlotsDisplay/MapServer',
+      bbox: [-124.57, 41.99, -116.46, 46.29] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
   var parcelWanted = false;       // user INTENT (button state) — layers auto hide/show with zoom without losing this
