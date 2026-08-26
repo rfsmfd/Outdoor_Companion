@@ -1969,7 +1969,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 517</div>
+    <div id="buildBadge">BUILD 518</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3077,6 +3077,11 @@
     { state: 'AR', name: 'Arkansas Parcels', attr: 'Parcels: Arkansas GIS Office / GeoStor (Planning Cadastre)',
       url: 'https://gis.arkansas.gov/arcgis/rest/services/FEATURESERVICES/Planning_Cadastre/FeatureServer/6',   // layer 6 = PARCEL_POLYGON_CAMP (layer 0 is centroids!); CORS-clean, verified
       bbox: [-94.62, 33.00, -89.64, 36.50] },
+    { state: 'MS', name: 'Mississippi Parcels', attr: 'Parcels: Mississippi MARIS / MDEQ Cadastral Framework 2024', type: 'dynamic', dynLayers: [1, 2],
+      // Statewide parcels split WEST (layer 1) + EAST (layer 2) — layer 0 is just the E/W divider line. Render both
+      // in gold. Correct service name has the month ("August"); MS_Parcels_2023 alone 499s. CORS-clean, gold verified.
+      url: 'https://gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer',
+      bbox: [-91.66, 30.17, -88.10, 35.00] },
     { state: 'WY', name: 'Wyoming Parcels', attr: 'Parcels: Wyoming ETS / County Assessors (Statewide Parcels)',
       url: 'https://services3.arcgis.com/r0iJ85SKZ4zAzz3P/arcgis/rest/services/Wyoming_Parcels_for_2026/FeatureServer/0',   // current 2026 statewide (from the WY Parcel Viewer org); CORS-clean, verified. The DEQ WY_PRIVATE_PARCELS service is empty — don't use it.
       bbox: [-111.06, 40.99, -104.05, 45.01] },
