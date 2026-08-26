@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 498</div>
+    <div id="buildBadge">BUILD 499</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2974,7 +2974,25 @@
       bbox: [-84.4, 33.7, -75.4, 36.62] },
     { state: 'WI', name: 'WI Statewide Parcels', attr: 'Parcels: Wisconsin Statewide Parcel Map Initiative (SCO)',
       url: 'https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels_DB/FeatureServer/0',   // V12 (3.56M parcels, layer=V1200_WisconsinParcels_2026); ArcGIS Online CORS-clean, free. Old name w/o _DB 404'd.
-      bbox: [-92.95, 42.45, -86.8, 47.12] }
+      bbox: [-92.95, 42.45, -86.8, 47.12] },
+    { state: 'MD', name: 'MD Parcel Boundaries', attr: 'Parcels: Maryland MD iMAP (MDP / SDAT)',
+      url: 'https://mdgeodata.md.gov/imap/rest/services/PlanningCadastre/MD_ParcelBoundaries/MapServer/0',   // statewide polygons; CORS-clean, verified from app origin (main host geodata.md.gov mirrors this)
+      bbox: [-79.49, 37.89, -75.05, 39.72] },
+    { state: 'DE', name: 'DE State Parcels', attr: 'Parcels: Delaware FirstMap (DE FirstMap)',
+      url: 'https://enterprise.firstmap.delaware.gov/arcgis/rest/services/PlanningCadastre/DE_StateParcels/MapServer/0',   // layer 0 = State Parcels (polygon); CORS-clean, verified
+      bbox: [-75.79, 38.45, -74.98, 39.84] },
+    { state: 'MA', name: 'MassGIS L3 Parcels', attr: 'Parcels: MassGIS Level 3 Assessors Parcels',
+      url: 'https://services1.arcgis.com/hGdibHYSPO59RG1h/arcgis/rest/services/Massachusetts_Property_Tax_Parcels/FeatureServer/0',   // AGOL hosted (CORS *); MassGIS license = "anyone for any purpose"
+      bbox: [-73.51, 41.24, -69.86, 42.89] },
+    { state: 'NJ', name: 'NJ Parcels Composite', attr: 'Parcels: NJGIN / NJ OGIS Parcels Composite',
+      url: 'https://services2.arcgis.com/XVOqAjTOJ5P6ngMu/arcgis/rest/services/Parcels_Composite_NJ_WM/FeatureServer/0',   // AGOL hosted (CORS *); owner names redacted per Daniel's Law (lines only anyway)
+      bbox: [-75.56, 38.93, -73.89, 41.36] },
+    { state: 'OH', name: 'Ohio Statewide Parcels', attr: 'Parcels: Ohio OGRIP Statewide Parcels',
+      url: 'https://services2.arcgis.com/MlJ0G8iWUyC7jAmu/arcgis/rest/services/OhioStatewidePacels_full_view/FeatureServer/0',   // AGOL hosted (CORS *); OGRIP 2023 statewide build (service name is spelled "Pacels")
+      bbox: [-84.82, 38.40, -80.52, 41.98] },
+    { state: 'WA', name: 'WA State Parcels', attr: 'Parcels: Washington State Parcels (WA Geospatial Portal)',
+      url: 'https://services.arcgis.com/jsIt88o09Q0r1j8h/arcgis/rest/services/Current_Parcels/FeatureServer/0',   // AGOL hosted (CORS *); Parcels_2026 layer, covers counties with digital parcels
+      bbox: [-124.85, 45.54, -116.92, 49.00] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
   var parcelWanted = false;       // user INTENT (button state) — layers auto hide/show with zoom without losing this
