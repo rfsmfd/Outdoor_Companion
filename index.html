@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Show property lines (VGIN, Virginia)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 491</div>
+    <div id="buildBadge">BUILD 492</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8289,7 +8289,10 @@
     if (n === 'water') return 'O';
     if (a === 'w') return n === 'evergreen' ? 'P' : (n === 'decid' || n === 'mixed') ? 'H' : (n === 'wetwood' || n === 'wetherb') ? 'S' : (n === 'shrub') ? 'C' : 'W';
     if (a === 'f') return n === 'crop' ? 'R' : (n === 'pasture' || n === 'grass') ? 'A' : (n === 'wetwood' || n === 'wetherb') ? 'S' : 'F';
-    return n === 'evergreen' ? 'P' : (n === 'decid' || n === 'mixed') ? 'H' : (n === 'wetwood' || n === 'wetherb') ? 'S' : 'C';
+    // a === 'c' (aerial sees CUTOVER): the aerial catches a RECENT cut that NLCD (2021, pre-cut) still calls
+    // forest — so cutover WINS. Only refine to pine (evergreen replant) or swamp (wet); NEVER relabel a fresh
+    // cut back into mature hardwood/mixed. This was the big "very wrong" bug: recent cutovers became 'H'.
+    return n === 'evergreen' ? 'P' : (n === 'wetwood' || n === 'wetherb') ? 'S' : 'C';
   }
   // Burn DRAINAGES from USGS NHD (surveyed stream/drain centrelines) into the type grid as 'D', a ~3-cell corridor
   // down each. This is the right source on flat coastal-plain ground — LiDAR flow-accumulation just draws noise
@@ -8337,9 +8340,16 @@
     var ctx = cv.getContext('2d'); ctx.drawImage(bm, 0, 0);
     var img = ctx.getImageData(0, 0, bm.width, bm.height).data, W = bm.width, H = bm.height;
     if (onStatus) onStatus('Reading imagery…');
-    // per-pixel aerial class: bright + not-strongly-green = open; dark = timber; between = cutover
+    // per-pixel aerial class using BRIGHTNESS + TEXTURE (the read the eye uses): a bright SMOOTH patch is open
+    // field; CUTOVER/scrub is PATCHY (high local contrast — brush, slash, skidder trails, bare spots); mature
+    // closed canopy is darker & comparatively smoother. Texture is the difference brightness alone couldn't see.
+    var Lg = new Float32Array(W * H);
+    for (var yl = 0; yl < H; yl++){ for (var xl = 0; xl < W; xl++){ var il = (yl * W + xl) * 4; Lg[yl * W + xl] = 0.3 * img[il] + 0.59 * img[il + 1] + 0.11 * img[il + 2]; } }
+    function texAt(x, y){ var s = 0, s2 = 0, c2 = 0; for (var dyy = -2; dyy <= 2; dyy++){ for (var dxx = -2; dxx <= 2; dxx++){ var y2 = y + dyy, x2 = x + dxx; if (y2 < 0 || x2 < 0 || y2 >= H || x2 >= W) continue; var vv = Lg[y2 * W + x2]; s += vv; s2 += vv * vv; c2++; } } if (c2 < 2) return 0; var me = s / c2; return Math.sqrt(Math.max(0, s2 / c2 - me * me)); }
     var raw = new Array(H);
-    for (var y = 0; y < H; y++){ raw[y] = new Array(W); for (var x = 0; x < W; x++){ var i = (y * W + x) * 4, R = img[i], G = img[i+1], B = img[i+2]; var L = 0.3 * R + 0.59 * G + 0.11 * B, gd = G - (R + B) / 2; raw[y][x] = (L > 112 && gd < 38) ? 'f' : (L < 95 ? 'w' : 'c'); } }
+    for (var y = 0; y < H; y++){ raw[y] = new Array(W); for (var x = 0; x < W; x++){ var i = (y * W + x) * 4, R = img[i], G = img[i + 1], B = img[i + 2]; var L = 0.3 * R + 0.59 * G + 0.11 * B, gd = G - (R + B) / 2, T = texAt(x, y);
+      // field = bright, low-green, SMOOTH; cutover = not-dark AND TEXTURED (patchy brush/slash); woods = dark canopy.
+      raw[y][x] = (L > 112 && gd < 38 && T < 12) ? 'f' : ((L >= 100 && T > 10) ? 'c' : 'w'); } }
     // NLCD forest type / crop-pasture / wetland — fused with the aerial for the finer TYPE (degrades to aerial-only if it fails)
     var nlcdArr = null, nW = 0, nH = 0;
     try {
