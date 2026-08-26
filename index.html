@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 509</div>
+    <div id="buildBadge">BUILD 510</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3034,8 +3034,10 @@
     { state: 'NY', name: 'New York Tax Parcels', attr: 'Parcels: NYS ITS GIS (Tax Parcels Public) — opted-in counties',
       url: 'https://services6.arcgis.com/EbVsqZ18sv1kVJ3k/arcgis/rest/services/NYS_Tax_Parcels_Public/FeatureServer/0',   // AGOL hosted (CORS *); only counties that opted in to public sharing (partial statewide)
       bbox: [-79.77, 40.48, -71.85, 45.02] },
-    { state: 'PA', name: 'Pennsylvania Parcels', attr: 'Parcels: PASDA / Penn State (PA Parcels)',
-      url: 'https://maps.pasda.psu.edu/ArcGIS/rest/services/PA_Parcels/MapServer/0',   // maps.pasda host queryable+CORS-clean (apps.pasda FeatureServer errored); verified
+    { state: 'PA', name: 'Pennsylvania Parcels', attr: 'Parcels: PASDA / Penn State (PA Parcels)', type: 'dynamic', dynLayers: [1],
+      // layer 0 is COUNTY boundaries, layer 1 is the actual parcels — AND layer 1 has no OBJECTID (breaks esri
+      // featureLayer indexing), so render layer 1 server-side as an image overlay. maps.pasda host, CORS-clean, export verified.
+      url: 'https://maps.pasda.psu.edu/ArcGIS/rest/services/PA_Parcels/MapServer',
       bbox: [-80.52, 39.72, -74.69, 42.27] },
     { state: 'WV', name: 'West Virginia Parcels', attr: 'Parcels: WV GIS Technical Center / WV Tax (WV Parcels)',
       url: 'https://services.wvgis.wvu.edu/arcgis/rest/services/Planning_Cadastre/WV_Parcels/MapServer/0',   // layer 0 = parcels polygons; CORS-clean, verified
