@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 510</div>
+    <div id="buildBadge">BUILD 511</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3073,11 +3073,22 @@
       // so it scales to any size. Trade-off: not individually clickable, and it wears the service's own line symbology.
       // dynLayers pins which sub-layers to draw: a single-layer service (TX) sets [0]; a service split by county/town
       // (OR = 36 counties, CT = towns by COG) must omit it so ALL sub-layers render, not just the first one.
-      var dynOpts = { url: src.url, opacity: 0.9, format: 'png32', transparent: true, attribution: src.attr };
+      var dynOpts = { url: src.url, opacity: 0.95, format: 'png32', transparent: true, attribution: src.attr };
       if (src.dynLayers) dynOpts.layers = src.dynLayers;
       lyr = L.esri.dynamicMapLayer(dynOpts);
+      // These are server-rendered images, so they wear the service's OWN line color — which ranges from near-white
+      // (CT) to black (PA) and can be hard to read on the aerial. We can't restyle the pixels, but a dual dark+light
+      // halo via CSS filter makes the lines pop on ANY background regardless of their source color. Re-applied on
+      // every image refresh (esri swaps _currentImage on each export).
+      lyr.on('load', function(){
+        try { var im = lyr._currentImage && lyr._currentImage._image;
+          if (im) im.style.filter = 'contrast(1.5) drop-shadow(0 0 0.7px #000) drop-shadow(0 0 0.7px #000) drop-shadow(0 0 1.1px #fff)'; } catch (e) {}
+      });
     } else {
-      lyr = L.esri.featureLayer({ url: src.url, style: function(){ return { color: '#D4B24C', weight: 1.5, fillOpacity: 0, opacity: 0.85 }; }, simplifyFactor: 0.35, precision: 5, attribution: src.attr });
+      // minZoom:0/maxZoom:24 forced wide so a service's own maxScale can't blank the layer at parcel zooms — NY's
+      // layer carries maxScale ~1:37k, which otherwise hides it exactly when you zoom in to hunt (every WORKING
+      // state's layer has maxScale 0). Harmless for the others.
+      lyr = L.esri.featureLayer({ url: src.url, minZoom: 0, maxZoom: 24, style: function(){ return { color: '#D4B24C', weight: 1.5, fillOpacity: 0, opacity: 0.85 }; }, simplifyFactor: 0.35, precision: 5, attribution: src.attr });
     }
     lyr.on('requesterror', function(){ showToast('Property lines from ' + src.name + ' are unreachable right now.'); });
     return lyr;
