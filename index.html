@@ -1962,7 +1962,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 496</div>
+    <div id="buildBadge">BUILD 497</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2973,7 +2973,7 @@
       url: 'https://services.nconemap.gov/secure/rest/services/NC1Map_Parcels/FeatureServer/1',   // layer 1 = polygons (verified public + browser-tested)
       bbox: [-84.4, 33.7, -75.4, 36.62] },
     { state: 'WI', name: 'WI Statewide Parcels', attr: 'Parcels: Wisconsin Statewide Parcel Map Initiative (SCO)',
-      url: 'https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels/FeatureServer/0',   // ArcGIS Online (CORS-clean); explicitly free
+      url: 'https://services3.arcgis.com/n6uYoouQZW75n5WI/arcgis/rest/services/Wisconsin_Statewide_Parcels_DB/FeatureServer/0',   // V12 (3.56M parcels, layer=V1200_WisconsinParcels_2026); ArcGIS Online CORS-clean, free. Old name w/o _DB 404'd.
       bbox: [-92.95, 42.45, -86.8, 47.12] }
   ];
   var parcelLayers = {};          // state code -> esri featureLayer (built lazily, reused)
