@@ -1810,7 +1810,7 @@
      lines readable on any background. Targeted by service host so it never touches other overlays. */
   .leaflet-overlay-pane img[src*="cteco.uconn.edu"],
   .leaflet-overlay-pane img[src*="gis.odf.oregon.gov"]{
-    filter:contrast(1.55) drop-shadow(0 0 0.7px #000) drop-shadow(0 0 0.7px #000) drop-shadow(0 0 1.1px #fff);
+    filter:brightness(2.2) contrast(1.5) drop-shadow(0 0 1.3px #000) drop-shadow(0 0 0.7px #000);
   }
 </style>
 </head>
@@ -1969,7 +1969,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 514</div>
+    <div id="buildBadge">BUILD 515</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3102,9 +3102,14 @@
         });
       }
       // Services split into 30–40 county/town sub-layers (OR, CT) omit dynLayers so ALL sub-layers render — the
-      // per-layer override URL would blow past length limits there — so those keep their source color, made readable
-      // instead by a CSS halo filter (see the `.leaflet-overlay-pane img[src*=...]` rules in the stylesheet).
+      // per-layer override URL would blow past length limits there — so those keep their source color (CT draws a
+      // low-contrast gray), made readable instead by BRIGHTENING + a dark halo. Applied two ways so one always lands:
+      // a JS hook per image refresh here, AND a CSS rule by host in the stylesheet.
       lyr = L.esri.dynamicMapLayer(dynOpts);
+      if (!src.dynLayers) {
+        var _parcelFilter = 'brightness(2.2) contrast(1.5) drop-shadow(0 0 1.3px #000) drop-shadow(0 0 0.7px #000)';
+        lyr.on('load', function(){ try { var im = lyr._currentImage && lyr._currentImage._image; if (im) im.style.filter = _parcelFilter; } catch (e) {} });
+      }
     } else {
       // minZoom:0/maxZoom:24 forced wide so a service's own maxScale can't blank the layer at parcel zooms — NY's
       // layer carries maxScale ~1:37k, which otherwise hides it exactly when you zoom in to hunt (every WORKING
