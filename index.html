@@ -2041,7 +2041,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 535</div>
+    <div id="buildBadge">BUILD 536</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3464,17 +3464,27 @@
     var gusMic = document.getElementById('gusMic');
     var gusVoiceOn = false, gusVoices = [], gusVoice = null;
     try { gusVoiceOn = localStorage.getItem('oc_gus_voice') === '1'; } catch(e){}
+    // Pick the most "Ol' Gus" voice available: an AMERICAN male. Score each voice so we strongly
+    // prefer en-US, favor known male names, and avoid British/Aussie + known female voices (iOS
+    // otherwise hands us British "Daniel"). Works across Windows/Chrome (David/Mark) and iOS (Aaron).
+    var GUS_MALE = ['aaron','nathan','tom','fred','david','mark','ralph','junior','reed','rocko','eddy','guy','evan','matthew','james','john','mike','aaron','paul','alex','arthur','daniel','oliver','george'];
+    var GUS_FEMALE = ['samantha','karen','moira','tessa','fiona','veena','victoria','zira','susan','catherine','serena','martha','nicky','kate','allison','ava','joana','luciana','paulina','amelie','anna','ellen','kathy','vicki','zoe','shelley','sandy','flo','grandma','princess','nora','hazel'];
+    function gusScoreVoice(v){
+      var name = (v.name || '').toLowerCase(), lang = (v.lang || '').replace('_', '-').toLowerCase();
+      if (!/^en/.test(lang)) return -1000;                 // English only
+      var s = 0;
+      if (lang.indexOf('en-us') === 0) s += 100; else s -= 45;   // strongly prefer American English
+      for (var i = 0; i < GUS_MALE.length; i++){ if (name.indexOf(GUS_MALE[i]) >= 0){ s += 55; break; } }
+      for (var j = 0; j < GUS_FEMALE.length; j++){ if (name.indexOf(GUS_FEMALE[j]) >= 0){ s -= 75; break; } }
+      if (name.indexOf('enhanced') >= 0 || name.indexOf('premium') >= 0) s += 8; // nicer iOS voices
+      return s;
+    }
     function gusPickVoice(){
       if (!window.speechSynthesis) return;
       gusVoices = window.speechSynthesis.getVoices() || [];
-      var en = gusVoices.filter(function(v){ return /^en/i.test(v.lang || ''); });
-      // Prefer a deep/older male voice for the woodsman feel; fall back to any English voice.
-      var prefer = ['grandpa','arthur','daniel','david','fred','george','male','alex','uk english male','reed','rocko'];
-      gusVoice = null;
-      for (var p = 0; p < prefer.length && !gusVoice; p++){
-        for (var i = 0; i < en.length; i++){ if ((en[i].name || '').toLowerCase().indexOf(prefer[p]) >= 0){ gusVoice = en[i]; break; } }
-      }
-      if (!gusVoice) gusVoice = en[0] || gusVoices[0] || null;
+      var best = null, bestS = -1e9;
+      for (var i = 0; i < gusVoices.length; i++){ var sc = gusScoreVoice(gusVoices[i]); if (sc > bestS){ bestS = sc; best = gusVoices[i]; } }
+      gusVoice = (bestS > -1000) ? best : (gusVoices[0] || null);
     }
     if (window.speechSynthesis){ gusPickVoice(); window.speechSynthesis.onvoiceschanged = gusPickVoice; }
     function gusSpeak(text){
