@@ -1994,7 +1994,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 525</div>
+    <div id="buildBadge">BUILD 526</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3166,7 +3166,7 @@
       lyr = L.esri.featureLayer({ url: src.url, minZoom: 0, maxZoom: 24, fields: ['*'], style: function(){ return { color: '#D4B24C', weight: 1.5, fillOpacity: 0, opacity: 0.85 }; }, simplifyFactor: 0.35, precision: 5, attribution: src.attr });
       // Tap a vector parcel → owner / acreage / parcel-ID card, read straight from the clicked feature (no extra request).
       // esri-leaflet hands the popup fn the FEATURE (l.properties); guard for a layer wrapper (l.feature.properties) too.
-      lyr.bindPopup(function(l){ var p = (l && l.properties) || (l && l.feature && l.feature.properties) || {}; return parcelCard(src.state, p); }, { maxWidth: 300, minWidth: 190, className: 'oc-parcel-popup', autoPan: true });
+      lyr.bindPopup(function(l){ var p = (l && l.properties) || (l && l.feature && l.feature.properties) || {}; var g = (l && l.geometry) || (l && l.feature && l.feature.geometry) || null; return parcelCard(src.state, p, _geoAcres(g)); }, { maxWidth: 300, minWidth: 190, className: 'oc-parcel-popup', autoPan: true });
     }
     lyr.on('requesterror', function(){ showToast('Property lines from ' + src.name + ' are unreachable right now.'); });
     return lyr;
@@ -3221,8 +3221,26 @@
     var tail = [_pdVal(attrs, f[ck]), _pdVal(attrs, f[stk]), _pdVal(attrs, f[zk])].filter(Boolean).join(' ');
     return tail ? (street + ', ' + tail) : street;
   }
-  function _pdMoney(v){ var n = parseFloat(v); if (isNaN(n) || n <= 0) return null; return '$' + Math.round(n).toLocaleString(); }
-  function parcelCard(st, attrs){
+  // Fallback acreage straight from the polygon when a state publishes no acreage field — every parcel is a shape,
+  // so no parcel should ever read blank. Uses leaflet.draw's geodesicArea (m²); shown as "≈ N ac" to flag it's map-measured.
+  function _acresFromRing(ring){
+    if (!ring || ring.length < 3 || typeof L === 'undefined' || !L.GeometryUtil || !L.GeometryUtil.geodesicArea) return 0;
+    var ll = []; for (var j = 0; j < ring.length; j++){ var p = ring[j]; if (p && p.length >= 2) ll.push(L.latLng(p[1], p[0])); }
+    if (ll.length < 3) return 0; var m2 = L.GeometryUtil.geodesicArea(ll); return m2 > 0 ? m2 : 0;
+  }
+  function _geoAcres(geom){
+    if (!geom || !geom.coordinates) return null;
+    var polys = geom.type === 'Polygon' ? [geom.coordinates] : (geom.type === 'MultiPolygon' ? geom.coordinates : null);
+    if (!polys) return null; var m2 = 0;
+    for (var i = 0; i < polys.length; i++){ if (polys[i] && polys[i][0]) m2 += _acresFromRing(polys[i][0]); }
+    return m2 > 0 ? m2 / 4046.8564224 : null;
+  }
+  function _esriAcres(g){
+    if (!g || !g.rings || !g.rings.length) return null; var best = 0;
+    for (var i = 0; i < g.rings.length; i++){ var a = _acresFromRing(g.rings[i]); if (a > best) best = a; }
+    return best > 0 ? best / 4046.8564224 : null;
+  }
+  function parcelCard(st, attrs, compAcres){
     var src = _sourceFor(st), cfg = PARCEL_DATA[st] || {}, f = cfg.f || {};
     var rows = [];
     var owner = _pdVal(attrs, f.owner), o2 = _pdVal(attrs, f.owner2);
@@ -3231,6 +3249,7 @@
     var site = _pdAddr(attrs, f, 'site'); if (site) rows.push(['Site', _pdEsc(site)]);
     var ag = _pdAcre(_pdVal(attrs, f.acreGis)), ad = _pdAcre(_pdVal(attrs, f.acreDeed));
     if (ag || ad) { var a = []; if (ag) a.push('GIS ' + ag + ' ac'); if (ad && ad !== ag) a.push('Deed ' + ad + ' ac'); rows.push(['Acreage', a.join(' &middot; ')]); }
+    else if (compAcres) { var ca = _pdAcre(compAcres); if (ca) rows.push(['Acreage', '&asymp; ' + ca + ' ac']); }
     var pid = _pdVal(attrs, f.pid); if (pid) rows.push(['Map ID', _pdEsc(pid)]);
     if (!owner) { var ot = _pdVal(attrs, f.ownerType); if (ot) rows.push(['Ownership', _pdEsc(ot)]); }
     var h = '<div class="oc-pcard"><div class="oc-pc-hd">' + _pdEsc(src ? src.name : st) + '</div>';
@@ -3241,14 +3260,14 @@
     return h;
   }
   function _pdQueryAt(url, latlng, cb){
-    var d = 0.0004, u = url + '/query?where=1%3D1&geometry=' + encodeURIComponent((latlng.lng - d) + ',' + (latlng.lat - d) + ',' + (latlng.lng + d) + ',' + (latlng.lat + d)) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false&outFields=*&f=json';
+    var d = 0.0004, u = url + '/query?where=1%3D1&geometry=' + encodeURIComponent((latlng.lng - d) + ',' + (latlng.lat - d) + ',' + (latlng.lng + d) + ',' + (latlng.lat + d)) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=true&outSR=4326&outFields=*&f=json';
     var ctl = new AbortController(), to = setTimeout(function(){ ctl.abort(); }, 8000);
-    fetch(u, { signal: ctl.signal }).then(function(r){ return r.json(); }).then(function(j){ clearTimeout(to); cb((j.features && j.features[0] && j.features[0].attributes) || null); }).catch(function(){ clearTimeout(to); cb(null); });
+    fetch(u, { signal: ctl.signal }).then(function(r){ return r.json(); }).then(function(j){ clearTimeout(to); var ft = j.features && j.features[0]; cb(ft ? (ft.attributes || {}) : null, ft ? ft.geometry : null); }).catch(function(){ clearTimeout(to); cb(null, null); });
   }
   function queryParcelData(st, latlng, cb){
-    var cfg = PARCEL_DATA[st] || {}, urls = cfg.dataUrl; if (!urls) { cb(null); return; }
+    var cfg = PARCEL_DATA[st] || {}, urls = cfg.dataUrl; if (!urls) { cb(null, null); return; }
     if (typeof urls === 'string') urls = [urls];
-    var i = 0; (function next(){ if (i >= urls.length) { cb(null); return; } _pdQueryAt(urls[i++], latlng, function(a){ if (a) cb(a); else next(); }); })();
+    var i = 0; (function next(){ if (i >= urls.length) { cb(null, null); return; } _pdQueryAt(urls[i++], latlng, function(a, g){ if (a) cb(a, g); else next(); }); })();
   }
   // Overlay (image) states aren't clickable vectors, so a guarded map-tap does the identify. Vector states use their
   // own bindPopup (above). Skip when another map mode owns the tap (adding a site, drawing, cover-edit, scout pen).
@@ -3271,7 +3290,7 @@
     _parcelPop = pop;
     if (!cfg.dataUrl) { pop.setContent(parcelCard(st, {})).openOn(map); return; }
     pop.setContent('<div class="oc-pcard"><div class="oc-pc-hd">' + _pdEsc(src ? src.name : st) + '</div><div class="oc-pc-empty">Looking up parcel…</div></div>').openOn(map);
-    queryParcelData(st, e.latlng, function(attrs){ if (_parcelPop === pop) pop.setContent(parcelCard(st, attrs || {})); });
+    queryParcelData(st, e.latlng, function(attrs, geom){ if (_parcelPop === pop) pop.setContent(parcelCard(st, attrs || {}, _esriAcres(geom))); });
   });
   // Show/hide the right state layers for the current view — pan across VA↔NC and both render at the seam.
   // Draw the right state layers for the current view — but ONLY when the intent is on AND we're zoomed in enough.
