@@ -477,7 +477,7 @@ exports.askGus = onCall(
     const req = {
       model: MODEL_CHEAP, // help desk — cheapest model
       max_tokens: 800,
-      output_config: { effort: "low", format: { type: "json_schema", schema: GUS_SCHEMA } },
+      output_config: { format: { type: "json_schema", schema: GUS_SCHEMA } }, // NOTE: Haiku rejects `effort`
       system: [{ type: "text", text: GUS_SYSTEM, cache_control: { type: "ephemeral" } }],
       messages: messages,
     };
