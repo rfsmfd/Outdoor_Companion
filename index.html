@@ -1814,8 +1814,22 @@
   }
   /* Parcel "tap → owner" card (Project 1). Sits in a standard white Leaflet popup. */
   .oc-parcel-popup .leaflet-popup-content{ margin:11px 13px; }
-  .oc-parcel-popup .leaflet-popup-content-wrapper{ border-radius:11px; }
-  .oc-pcard{ font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#1b231c; }
+  /* Frosted-glass card: see the aerial through it, but a blur keeps the text crisp. */
+  .oc-parcel-popup .leaflet-popup-content-wrapper{
+    border-radius:12px;
+    background:rgba(251,249,242,0.72);
+    -webkit-backdrop-filter:blur(6px) saturate(1.15);
+    backdrop-filter:blur(6px) saturate(1.15);
+    box-shadow:0 3px 14px rgba(0,0,0,.30);
+    border:1px solid rgba(255,255,255,.35);
+  }
+  .oc-parcel-popup .leaflet-popup-tip{
+    background:rgba(251,249,242,0.72);
+    -webkit-backdrop-filter:blur(6px) saturate(1.15);
+    backdrop-filter:blur(6px) saturate(1.15);
+  }
+  .oc-parcel-popup a.leaflet-popup-close-button{ color:#6b5a2a; }
+  .oc-pcard{ font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#141a15; }
   .oc-pc-hd{ font-weight:800; font-size:11.5px; letter-spacing:.04em; color:#8a6a12; text-transform:uppercase; padding-bottom:6px; margin-bottom:7px; border-bottom:2px solid #D4B24C; }
   .oc-pc-t{ border-collapse:collapse; width:100%; }
   .oc-pc-t th{ text-align:left; vertical-align:top; color:#6b7a6e; font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; padding:3px 12px 3px 0; white-space:nowrap; }
@@ -1980,7 +1994,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 522</div>
+    <div id="buildBadge">BUILD 523</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
