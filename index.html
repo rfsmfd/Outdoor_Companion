@@ -1994,7 +1994,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 527</div>
+    <div id="buildBadge">BUILD 528</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3179,14 +3179,14 @@
   // hunter at the county (owner isn't in the free statewide layer, or the service is too slow/blocked to tap).
   var PARCEL_DATA = {
     // vector states — owner comes from the clicked feature
-    AR:{ f:{ owner:'ownername' } },
-    CO:{ f:{ owner:'owner', owner2:'owner2', addr:'ownerAdd', acreGis:'landAcres', pid:'parcel_id' } },
-    MA:{ f:{ owner:'OWNER1', owner2:'OWN_CO', addr:'OWN_ADDR', pid:'LOC_ID' } },
+    AR:{ f:{ owner:'ownername', addr:['adrnum','adrlabel'], city:'adrcity', zip:'adrzip5', pid:'parcelid' } },
+    CO:{ f:{ owner:'owner', owner2:'owner2', mail:'ownerAdd', mailCity:'ownAddCty', mailState:'ownAddStt', mailZip:'ownAddZip', addr:'situsAdd', city:'sitAddCty', zip:'sitAddZip', acreGis:'landAcres', pid:'parcel_id' } },
+    MA:{ f:{ owner:'OWNER1', owner2:'OWN_CO', mail:'OWN_ADDR', mailCity:'OWN_CITY', mailState:'OWN_STATE', mailZip:'OWN_ZIP', addr:'SITE_ADDR', city:'CITY', zip:'ZIP', pid:'MAP_PAR_ID' } },
     MT:{ f:{ owner:'OwnerName', owner2:'CareOfTaxpayer', mail:['OwnerAddress1','OwnerAddress2','OwnerAddress3'], mailCity:'OwnerCity', mailState:'OwnerState', mailZip:'OwnerZipCode', addr:'AddressLine1', city:'CityStateZip', acreGis:'GISAcres', acreDeed:'TotalAcres', pid:'PARCELID' } },
     NC:{ f:{ owner:'ownname', owner2:'ownname2', addr:'siteadd', city:'scity', st:'sstate', zip:'szip', mail:'mailadd', mailCity:'mcity', mailState:'mstate', mailZip:'mzip', acreGis:'gisacres', pid:'parno' } },
-    VT:{ f:{ owner:'OWNER1', acreGis:'ACRESGL', pid:'SPAN' } },
-    WI:{ f:{ owner:'OWNERNME1', owner2:'OWNERNME2', acreGis:'ASSDACRES', acreDeed:'DEEDACRES', pid:'PARCELID' } },
-    WY:{ f:{ owner:'ownername1', owner2:'ownername2' } },
+    VT:{ f:{ owner:'OWNER1', owner2:'OWNER2', mail:['ADDRGL1','ADDRGL2'], mailCity:'CITYGL', mailState:'STGL', mailZip:'ZIPGL', addr:'E911ADDR', acreGis:'ACRESGL', pid:'SPAN' } },
+    WI:{ f:{ owner:'OWNERNME1', owner2:'OWNERNME2', mail:'PSTLADRESS', addr:'SITEADRESS', city:'PLACENAME', st:'STATE', zip:'ZIPCODE', acreGis:'GISACRES', acreDeed:'DEEDACRES', pid:'PARCELID' } },
+    WY:{ f:{ owner:'ownername1', owner2:'ownername2', mail:'mailaddres', mailCity:'mailcity', mailState:'mailstate', mailZip:'mailzipcod', addr:'locationad', acreGis:'landgrossa', pid:'parcelnb' } },
     MD:{ f:{ acreGis:'ACRES', acreDeed:'POLYACRES' }, ownerNote:'Owner is in Maryland SDAT records (by account #).' },
     DE:{ f:{ acreGis:'ACRES' }, ownerNote:'Owner is in Delaware assessment records.' },
     NJ:{ f:{ addr:'ST_ADDRESS', acreGis:'CALC_ACRE', pid:'PAMS_PIN' }, ownerNote:'Owner name is withheld statewide (Daniel’s Law).' },
@@ -3200,10 +3200,10 @@
     WV:{ f:{}, ownerNote:'Owner is via WV State Tax / the county.' },
     MB:{ f:{}, ownerNote:'Owner is via Manitoba Assessment.' },
     // image-overlay states — owner queried on tap from dataUrl
-    NY:{ dataUrl:'https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer/1', f:{ owner:'PRIMARY_OWNER', owner2:'ADD_OWNER', addr:'PARCEL_ADDR', acreGis:'CALC_ACRES' }, ownerNote:'Only participating counties publish owner.' },
-    NV:{ dataUrl:'https://gis.dot.nv.gov/agsphs/rest/services/Reference/Statewide_Parcels/MapServer/0', f:{ owner:'OwnerName', acreGis:'Acres' } },
-    MN:{ dataUrl:'https://enterprise.gisdata.mn.gov/aghost/rest/services/us_mn_state_mngeo/plan_parcels_open/FeatureServer/1', f:{ owner:'owner_name', addr:'own_add_l1', acreGis:'acres_poly', acreDeed:'acres_deed', pid:'state_pin' } },
-    MS:{ dataUrl:['https://gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1','https://gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2'], f:{ owner:'OWNNAME', acreGis:'GISACRES', acreDeed:'TAXACRES' } },
+    NY:{ dataUrl:'https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer/1', f:{ owner:'PRIMARY_OWNER', owner2:'ADD_OWNER', mail:['MAIL_ADDR','PO_BOX'], mailCity:'MAIL_CITY', mailState:'MAIL_STATE', mailZip:'MAIL_ZIP', addr:'PARCEL_ADDR', city:'CITYTOWN_NAME', acreGis:'CALC_ACRES', acreDeed:'ACRES', pid:'PRINT_KEY' }, ownerNote:'Only participating counties publish owner.' },
+    NV:{ dataUrl:'https://gis.dot.nv.gov/agsphs/rest/services/Reference/Statewide_Parcels/MapServer/0', f:{ owner:'OwnerName', addr:'SiteAddress', city:'SiteCity', acreGis:'Acres', pid:'APN' } },
+    MN:{ dataUrl:'https://enterprise.gisdata.mn.gov/aghost/rest/services/us_mn_state_mngeo/plan_parcels_open/FeatureServer/1', f:{ owner:'owner_name', owner2:'owner_more', mail:['tax_add_l1','tax_add_l2'], addr:['anumber','st_pre_dir','st_name','st_pos_typ','st_pos_dir'], city:'ctu_name', st:'state_code', zip:'zip', acreGis:'acres_poly', acreDeed:'acres_deed', pid:'state_pin' } },
+    MS:{ dataUrl:['https://gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1','https://gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2'], f:{ owner:'OWNNAME', mail:'MAILADD1', mailCity:'MCITY1', mailState:'MSTATE1', mailZip:'MZIP1', addr:'SITEADD', city:'SCITY', st:'SSTATE', zip:'SZIP', acreGis:'GISACRES', acreDeed:'TAXACRES', pid:'PARNO' } },
     ID:{ dataUrl:'https://gis.idwr.idaho.gov/hosting/rest/services/Reference/Parcels/FeatureServer/0', f:{ pid:'PIN' }, ownerNote:'Owner name is at the county assessor.' },
     TX:{ ownerNote:'Owner, value & acreage are at the county appraisal district.' },
     FL:{ ownerNote:'Owner & value are at the county property appraiser.' },
