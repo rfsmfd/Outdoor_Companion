@@ -1864,7 +1864,9 @@
   .gus-hdr-face{ width:28px; height:28px; border-radius:50%; overflow:hidden; border:1px solid #D4B24C; flex:0 0 auto; background:#241810; }
   .gus-sub{ font-size:12px; color:#8aa596; margin:-6px 0 10px; }
   .gus-sub span{ color:#D4B24C; font-weight:600; }
-  .gus-messages{ flex:1 1 auto; overflow-y:auto; display:flex; flex-direction:column; gap:9px; padding:4px 2px; min-height:130px; }
+  .gus-messages{ position:relative; flex:1 1 auto; overflow-y:auto; display:flex; flex-direction:column; gap:9px; padding:4px 2px; min-height:130px; scroll-behavior:smooth; }
+  .gus-msg.gus-new{ animation:gusNewFlash 2.4s ease-out 1; }
+  @keyframes gusNewFlash{ 0%{ box-shadow:0 0 0 0 rgba(212,178,76,0);} 10%{ box-shadow:0 0 0 3px rgba(212,178,76,.65); border-color:#D4B24C;} 100%{ box-shadow:0 0 0 0 rgba(212,178,76,0);} }
   .gus-msg{ max-width:86%; padding:9px 13px; border-radius:14px; font-size:14.5px; line-height:1.5; white-space:pre-wrap; overflow-wrap:anywhere; }
   .gus-msg.user{ align-self:flex-end; background:#2f4a3c; color:#eef5ef; border-bottom-right-radius:4px; }
   .gus-msg.gus{ align-self:flex-start; background:#1d2a22; color:#e8f0ea; border:1px solid #2c3f34; border-bottom-left-radius:4px; }
@@ -2033,7 +2035,7 @@
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <button id="askGusBtn" title="Ask Ol' Gus — your hunting companion (powered by Claude)">🧔</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 532</div>
+    <div id="buildBadge">BUILD 533</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3477,14 +3479,21 @@
       if (!q || gusBusy) return;
       gusInput.value = '';
       gusStarters.innerHTML = '';           // starters clear once the conversation begins
-      gusBubble(q, 'user');
+      var userBubble = gusBubble(q, 'user');
       gusHistory.push({ role: 'user', text: q });
       gusBusy = true; gusSend.disabled = true;
       var thinking = gusBubble('Gus is thinking…', 'gus', 'thinking');
+      // Reveal a finished answer: flash it (so it's clearly the NEW one) and scroll the exchange so
+      // the question + the START of the answer sit up top — no scrolling back to find the beginning.
+      function reveal(answerBubble){
+        answerBubble.classList.add('gus-new');
+        setTimeout(function(){ answerBubble.classList.remove('gus-new'); }, 2600);
+        gusMsgs.scrollTop = Math.max(0, userBubble.offsetTop - 6);
+      }
       if (typeof firebase === 'undefined' || !firebase.auth || !firebase.auth().currentUser || !firebase.functions){
         thinking.classList.remove('thinking');
         thinking.textContent = "You'll need to be signed in for me to help — sign in and ask me again.";
-        gusBusy = false; gusSend.disabled = false; return;
+        gusBusy = false; gusSend.disabled = false; reveal(thinking); return;
       }
       try {
         var callable = firebase.app().functions('us-east1').httpsCallable('askGus');
@@ -3497,7 +3506,7 @@
         thinking.classList.remove('thinking');
         thinking.textContent = "Sorry — I couldn't get to that just now. Give it another try in a minute.";
       }
-      gusBusy = false; gusSend.disabled = false; gusMsgs.scrollTop = gusMsgs.scrollHeight;
+      gusBusy = false; gusSend.disabled = false; reveal(thinking);
     }
 
     var gusBtn = document.getElementById('askGusBtn'); if (gusBtn) gusBtn.addEventListener('click', gusOpen);
