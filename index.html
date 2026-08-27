@@ -1994,7 +1994,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 524</div>
+    <div id="buildBadge">BUILD 525</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3183,7 +3183,7 @@
     CO:{ f:{ owner:'owner', owner2:'owner2', addr:'ownerAdd', acreGis:'landAcres', pid:'parcel_id' } },
     MA:{ f:{ owner:'OWNER1', owner2:'OWN_CO', addr:'OWN_ADDR', pid:'LOC_ID' } },
     MT:{ f:{ owner:'OwnerName', owner2:'CareOfTaxpayer', addr:'OwnerAddress1', acreGis:'GISAcres', acreDeed:'TotalAcres' } },
-    NC:{ f:{ owner:'ownname', owner2:'ownname2', acreGis:'gisacres' } },
+    NC:{ f:{ owner:'ownname', owner2:'ownname2', addr:'siteadd', city:'scity', st:'sstate', zip:'szip', mail:'mailadd', mailCity:'mcity', mailState:'mstate', mailZip:'mzip', acreGis:'gisacres', pid:'parno' } },
     VT:{ f:{ owner:'OWNER1', acreGis:'ACRESGL', pid:'SPAN' } },
     WI:{ f:{ owner:'OWNERNME1', owner2:'OWNERNME2', acreGis:'ASSDACRES', acreDeed:'DEEDACRES', pid:'PARCELID' } },
     WY:{ f:{ owner:'ownername1', owner2:'ownername2' } },
@@ -3215,15 +3215,23 @@
   function _pdVal(attrs, fn){ if (!fn || !attrs) return null; var v = attrs[fn]; if (v === null || v === undefined) return null; v = ('' + v).trim(); return (v === '' || v === '.' || v.toLowerCase() === 'null') ? null : v; }
   function _pdAcre(v){ var n = parseFloat(v); if (isNaN(n) || n <= 0) return null; return n >= 10 ? n.toFixed(1) : n.toFixed(2); }
   function _pdEsc(s){ return ('' + s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function _pdAddr(attrs, f, kind){
+    var sk = (kind === 'mail') ? 'mail' : 'addr', ck = (kind === 'mail') ? 'mailCity' : 'city', stk = (kind === 'mail') ? 'mailState' : 'st', zk = (kind === 'mail') ? 'mailZip' : 'zip';
+    var street = _pdVal(attrs, f[sk]); if (!street) return null;
+    var tail = [_pdVal(attrs, f[ck]), _pdVal(attrs, f[stk]), _pdVal(attrs, f[zk])].filter(Boolean).join(' ');
+    return tail ? (street + ', ' + tail) : street;
+  }
+  function _pdMoney(v){ var n = parseFloat(v); if (isNaN(n) || n <= 0) return null; return '$' + Math.round(n).toLocaleString(); }
   function parcelCard(st, attrs){
     var src = _sourceFor(st), cfg = PARCEL_DATA[st] || {}, f = cfg.f || {};
     var rows = [];
     var owner = _pdVal(attrs, f.owner), o2 = _pdVal(attrs, f.owner2);
     if (owner) rows.push(['Owner', _pdEsc(owner) + (o2 ? (' &amp; ' + _pdEsc(o2)) : '')]);
-    var addr = _pdVal(attrs, f.addr); if (addr) rows.push(['Address', _pdEsc(addr)]);
+    var mail = _pdAddr(attrs, f, 'mail'); if (mail && owner) rows.push(['Owner mailing', _pdEsc(mail)]);
+    var site = _pdAddr(attrs, f, 'site'); if (site) rows.push(['Site', _pdEsc(site)]);
     var ag = _pdAcre(_pdVal(attrs, f.acreGis)), ad = _pdAcre(_pdVal(attrs, f.acreDeed));
     if (ag || ad) { var a = []; if (ag) a.push('GIS ' + ag + ' ac'); if (ad && ad !== ag) a.push('Deed ' + ad + ' ac'); rows.push(['Acreage', a.join(' &middot; ')]); }
-    var pid = _pdVal(attrs, f.pid); if (pid) rows.push(['Parcel ID', _pdEsc(pid)]);
+    var pid = _pdVal(attrs, f.pid); if (pid) rows.push(['Map ID', _pdEsc(pid)]);
     if (!owner) { var ot = _pdVal(attrs, f.ownerType); if (ot) rows.push(['Ownership', _pdEsc(ot)]); }
     var h = '<div class="oc-pcard"><div class="oc-pc-hd">' + _pdEsc(src ? src.name : st) + '</div>';
     if (rows.length) { h += '<table class="oc-pc-t">'; for (var i = 0; i < rows.length; i++) h += '<tr><th>' + rows[i][0] + '</th><td>' + rows[i][1] + '</td></tr>'; h += '</table>'; }
