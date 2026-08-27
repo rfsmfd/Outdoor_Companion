@@ -1812,6 +1812,17 @@
   .leaflet-overlay-pane img[src*="gis.odf.oregon.gov"]{
     filter:brightness(2.2) contrast(1.5) drop-shadow(0 0 1.3px #000) drop-shadow(0 0 0.7px #000);
   }
+  /* Parcel "tap → owner" card (Project 1). Sits in a standard white Leaflet popup. */
+  .oc-parcel-popup .leaflet-popup-content{ margin:11px 13px; }
+  .oc-parcel-popup .leaflet-popup-content-wrapper{ border-radius:11px; }
+  .oc-pcard{ font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; color:#1b231c; }
+  .oc-pc-hd{ font-weight:800; font-size:11.5px; letter-spacing:.04em; color:#8a6a12; text-transform:uppercase; padding-bottom:6px; margin-bottom:7px; border-bottom:2px solid #D4B24C; }
+  .oc-pc-t{ border-collapse:collapse; width:100%; }
+  .oc-pc-t th{ text-align:left; vertical-align:top; color:#6b7a6e; font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; padding:3px 12px 3px 0; white-space:nowrap; }
+  .oc-pc-t td{ text-align:left; vertical-align:top; font-weight:600; color:#141a15; padding:3px 0; }
+  .oc-pc-empty{ color:#6b7a6e; }
+  .oc-pc-note{ margin-top:8px; padding:6px 9px; background:#f4edd9; border-radius:7px; color:#6a561f; font-size:12px; line-height:1.35; }
+  .oc-pc-src{ margin-top:8px; color:#9aa79b; font-size:10px; font-style:italic; }
 </style>
 </head>
 <body>
@@ -1969,7 +1980,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 521</div>
+    <div id="buildBadge">BUILD 522</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3139,10 +3150,106 @@
       // layer carries maxScale ~1:37k, which otherwise hides it exactly when you zoom in to hunt (every WORKING
       // state's layer has maxScale 0). Harmless for the others.
       lyr = L.esri.featureLayer({ url: src.url, minZoom: 0, maxZoom: 24, style: function(){ return { color: '#D4B24C', weight: 1.5, fillOpacity: 0, opacity: 0.85 }; }, simplifyFactor: 0.35, precision: 5, attribution: src.attr });
+      // Tap a vector parcel → owner / acreage / parcel-ID card, read straight from the clicked feature (no extra request).
+      lyr.bindPopup(function(l){ return parcelCard(src.state, (l && l.feature && l.feature.properties) || {}); }, { maxWidth: 300, minWidth: 190, className: 'oc-parcel-popup', autoPan: true });
     }
     lyr.on('requesterror', function(){ showToast('Property lines from ' + src.name + ' are unreachable right now.'); });
     return lyr;
   }
+
+  // ---------- Parcel DATA — tap a parcel → owner card (Project 1) ----------
+  // Field map + queryable attribute source per state, from the verified spec in docs/OIS_Property_Data_Sources.md.
+  // f = which record field holds each value in that state. VECTOR states read straight from the clicked feature;
+  // image-OVERLAY (dynamic) states query dataUrl at the tapped point. No owner + a note = we can only point the
+  // hunter at the county (owner isn't in the free statewide layer, or the service is too slow/blocked to tap).
+  var PARCEL_DATA = {
+    // vector states — owner comes from the clicked feature
+    AR:{ f:{ owner:'ownername' } },
+    CO:{ f:{ owner:'owner', owner2:'owner2', addr:'ownerAdd', acreGis:'landAcres', pid:'parcel_id' } },
+    MA:{ f:{ owner:'OWNER1', owner2:'OWN_CO', addr:'OWN_ADDR', pid:'LOC_ID' } },
+    MT:{ f:{ owner:'OwnerName', owner2:'CareOfTaxpayer', addr:'OwnerAddress1', acreGis:'GISAcres', acreDeed:'TotalAcres' } },
+    NC:{ f:{ owner:'ownname', owner2:'ownname2', acreGis:'gisacres' } },
+    VT:{ f:{ owner:'OWNER1', acreGis:'ACRESGL', pid:'SPAN' } },
+    WI:{ f:{ owner:'OWNERNME1', owner2:'OWNERNME2', acreGis:'ASSDACRES', acreDeed:'DEEDACRES', pid:'PARCELID' } },
+    WY:{ f:{ owner:'ownername1', owner2:'ownername2' } },
+    MD:{ f:{ acreGis:'ACRES', acreDeed:'POLYACRES' }, ownerNote:'Owner is in Maryland SDAT records (by account #).' },
+    DE:{ f:{ acreGis:'ACRES' }, ownerNote:'Owner is in Delaware assessment records.' },
+    NJ:{ f:{ addr:'ST_ADDRESS', acreGis:'CALC_ACRE', pid:'PAMS_PIN' }, ownerNote:'Owner name is withheld statewide (Daniel’s Law).' },
+    OH:{ f:{ addr:'SitusAddressAll', acreGis:'LandArea', pid:'LocalParcelID' }, ownerNote:'Owner is at the county (CAMA).' },
+    WA:{ f:{ addr:'SITUS_ADDRESS', pid:'PARCEL_ID_NR' }, ownerNote:'Owner is in Washington’s access-restricted layer.' },
+    UT:{ f:{ addr:'PARCEL_ADD', pid:'PARCEL_ID', ownerType:'OWN_TYPE' }, ownerNote:'Owner name is at the county assessor.' },
+    ND:{ f:{ acreGis:'CalculatedAcres' }, ownerNote:'Owner name is at the county.' },
+    IN:{ f:{ addr:'dlgf_prop_address', pid:'parcel_id' }, ownerNote:'Owner name is at the county.' },
+    HI:{ f:{ acreGis:'gisacres', pid:'parcel' }, ownerNote:'Owner is via the county TMK / property system.' },
+    VA:{ f:{}, ownerNote:'Parcel details are at the city / county assessor.' },
+    WV:{ f:{}, ownerNote:'Owner is via WV State Tax / the county.' },
+    MB:{ f:{}, ownerNote:'Owner is via Manitoba Assessment.' },
+    // image-overlay states — owner queried on tap from dataUrl
+    NY:{ dataUrl:'https://gisservices.its.ny.gov/arcgis/rest/services/NYS_Tax_Parcels_Public/MapServer/1', f:{ owner:'PRIMARY_OWNER', owner2:'ADD_OWNER', addr:'PARCEL_ADDR', acreGis:'CALC_ACRES' }, ownerNote:'Only participating counties publish owner.' },
+    NV:{ dataUrl:'https://gis.dot.nv.gov/agsphs/rest/services/Reference/Statewide_Parcels/MapServer/0', f:{ owner:'OwnerName', acreGis:'Acres' } },
+    MN:{ dataUrl:'https://enterprise.gisdata.mn.gov/aghost/rest/services/us_mn_state_mngeo/plan_parcels_open/FeatureServer/1', f:{ owner:'owner_name', addr:'own_add_l1', acreGis:'acres_poly', acreDeed:'acres_deed', pid:'state_pin' } },
+    MS:{ dataUrl:['https://gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/1','https://gis.mississippi.edu/server/rest/services/Cadastral/MS_Parcels_August_2024/MapServer/2'], f:{ owner:'OWNNAME', acreGis:'GISACRES', acreDeed:'TAXACRES' } },
+    ID:{ dataUrl:'https://gis.idwr.idaho.gov/hosting/rest/services/Reference/Parcels/FeatureServer/0', f:{ pid:'PIN' }, ownerNote:'Owner name is at the county assessor.' },
+    TX:{ ownerNote:'Owner, value & acreage are at the county appraisal district.' },
+    FL:{ ownerNote:'Owner & value are at the county property appraiser.' },
+    CT:{ ownerNote:'Owner is in the state CAMA, by town.' },
+    OR:{ ownerNote:'Taxlot owner is at the county assessor.' },
+    PA:{ ownerNote:'Owner is at the county assessor.' },
+    BC:{ ownerNote:'Owner is via BC Assessment.' }
+  };
+  function _pdVal(attrs, fn){ if (!fn || !attrs) return null; var v = attrs[fn]; if (v === null || v === undefined) return null; v = ('' + v).trim(); return (v === '' || v === '.' || v.toLowerCase() === 'null') ? null : v; }
+  function _pdAcre(v){ var n = parseFloat(v); if (isNaN(n) || n <= 0) return null; return n >= 10 ? n.toFixed(1) : n.toFixed(2); }
+  function _pdEsc(s){ return ('' + s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function parcelCard(st, attrs){
+    var src = _sourceFor(st), cfg = PARCEL_DATA[st] || {}, f = cfg.f || {};
+    var rows = [];
+    var owner = _pdVal(attrs, f.owner), o2 = _pdVal(attrs, f.owner2);
+    if (owner) rows.push(['Owner', _pdEsc(owner) + (o2 ? (' &amp; ' + _pdEsc(o2)) : '')]);
+    var addr = _pdVal(attrs, f.addr); if (addr) rows.push(['Address', _pdEsc(addr)]);
+    var ag = _pdAcre(_pdVal(attrs, f.acreGis)), ad = _pdAcre(_pdVal(attrs, f.acreDeed));
+    if (ag || ad) { var a = []; if (ag) a.push('GIS ' + ag + ' ac'); if (ad && ad !== ag) a.push('Deed ' + ad + ' ac'); rows.push(['Acreage', a.join(' &middot; ')]); }
+    var pid = _pdVal(attrs, f.pid); if (pid) rows.push(['Parcel ID', _pdEsc(pid)]);
+    if (!owner) { var ot = _pdVal(attrs, f.ownerType); if (ot) rows.push(['Ownership', _pdEsc(ot)]); }
+    var h = '<div class="oc-pcard"><div class="oc-pc-hd">' + _pdEsc(src ? src.name : st) + '</div>';
+    if (rows.length) { h += '<table class="oc-pc-t">'; for (var i = 0; i < rows.length; i++) h += '<tr><th>' + rows[i][0] + '</th><td>' + rows[i][1] + '</td></tr>'; h += '</table>'; }
+    else h += '<div class="oc-pc-empty">Boundary from the free statewide layer.</div>';
+    if (!owner && cfg.ownerNote) h += '<div class="oc-pc-note">' + cfg.ownerNote + '</div>';
+    h += '<div class="oc-pc-src">reference only — not a legal survey</div></div>';
+    return h;
+  }
+  function _pdQueryAt(url, latlng, cb){
+    var d = 0.0004, u = url + '/query?where=1%3D1&geometry=' + encodeURIComponent((latlng.lng - d) + ',' + (latlng.lat - d) + ',' + (latlng.lng + d) + ',' + (latlng.lat + d)) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false&outFields=*&f=json';
+    var ctl = new AbortController(), to = setTimeout(function(){ ctl.abort(); }, 8000);
+    fetch(u, { signal: ctl.signal }).then(function(r){ return r.json(); }).then(function(j){ clearTimeout(to); cb((j.features && j.features[0] && j.features[0].attributes) || null); }).catch(function(){ clearTimeout(to); cb(null); });
+  }
+  function queryParcelData(st, latlng, cb){
+    var cfg = PARCEL_DATA[st] || {}, urls = cfg.dataUrl; if (!urls) { cb(null); return; }
+    if (typeof urls === 'string') urls = [urls];
+    var i = 0; (function next(){ if (i >= urls.length) { cb(null); return; } _pdQueryAt(urls[i++], latlng, function(a){ if (a) cb(a); else next(); }); })();
+  }
+  // Overlay (image) states aren't clickable vectors, so a guarded map-tap does the identify. Vector states use their
+  // own bindPopup (above). Skip when another map mode owns the tap (adding a site, drawing, cover-edit, scout pen).
+  function _parcelOverlayStateAt(latlng){
+    for (var i = 0; i < PARCEL_SOURCES.length; i++) { var s = PARCEL_SOURCES[i]; if (s.type !== 'dynamic') continue; var b = s.bbox;
+      if (latlng.lng >= b[0] && latlng.lng <= b[2] && latlng.lat >= b[1] && latlng.lat <= b[3]) return s.state; }
+    return null;
+  }
+  var _parcelPop = null;
+  map.on('click', function(e){
+    if (!parcelWanted || map.getZoom() < PARCEL_MIN_ZOOM) return;
+    if (typeof placing !== 'undefined' && placing) return;
+    if (typeof coverEditMode !== 'undefined' && coverEditMode) return;
+    if (typeof scoutDrawing !== 'undefined' && scoutDrawing) return;
+    var tgt = e.originalEvent && e.originalEvent.target;
+    if (tgt && tgt.closest && tgt.closest('.leaflet-marker-icon, .leaflet-marker-pane, path, .leaflet-popup, .leaflet-control')) return; // markers/vectors/popups/controls handle their own taps
+    var st = _parcelOverlayStateAt(e.latlng); if (!st) return;
+    var cfg = PARCEL_DATA[st] || {}, src = _sourceFor(st);
+    var pop = L.popup({ maxWidth: 300, minWidth: 190, className: 'oc-parcel-popup', autoPan: true }).setLatLng(e.latlng);
+    _parcelPop = pop;
+    if (!cfg.dataUrl) { pop.setContent(parcelCard(st, {})).openOn(map); return; }
+    pop.setContent('<div class="oc-pcard"><div class="oc-pc-hd">' + _pdEsc(src ? src.name : st) + '</div><div class="oc-pc-empty">Looking up parcel…</div></div>').openOn(map);
+    queryParcelData(st, e.latlng, function(attrs){ if (_parcelPop === pop) pop.setContent(parcelCard(st, attrs || {})); });
+  });
   // Show/hide the right state layers for the current view — pan across VA↔NC and both render at the seam.
   // Draw the right state layers for the current view — but ONLY when the intent is on AND we're zoomed in enough.
   // Zooming out just hides them (too many parcels to load); it does NOT forget the intent, so zooming back in
