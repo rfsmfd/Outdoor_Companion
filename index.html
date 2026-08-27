@@ -1994,7 +1994,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 526</div>
+    <div id="buildBadge">BUILD 527</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3182,7 +3182,7 @@
     AR:{ f:{ owner:'ownername' } },
     CO:{ f:{ owner:'owner', owner2:'owner2', addr:'ownerAdd', acreGis:'landAcres', pid:'parcel_id' } },
     MA:{ f:{ owner:'OWNER1', owner2:'OWN_CO', addr:'OWN_ADDR', pid:'LOC_ID' } },
-    MT:{ f:{ owner:'OwnerName', owner2:'CareOfTaxpayer', addr:'OwnerAddress1', acreGis:'GISAcres', acreDeed:'TotalAcres' } },
+    MT:{ f:{ owner:'OwnerName', owner2:'CareOfTaxpayer', mail:['OwnerAddress1','OwnerAddress2','OwnerAddress3'], mailCity:'OwnerCity', mailState:'OwnerState', mailZip:'OwnerZipCode', addr:'AddressLine1', city:'CityStateZip', acreGis:'GISAcres', acreDeed:'TotalAcres', pid:'PARCELID' } },
     NC:{ f:{ owner:'ownname', owner2:'ownname2', addr:'siteadd', city:'scity', st:'sstate', zip:'szip', mail:'mailadd', mailCity:'mcity', mailState:'mstate', mailZip:'mzip', acreGis:'gisacres', pid:'parno' } },
     VT:{ f:{ owner:'OWNER1', acreGis:'ACRESGL', pid:'SPAN' } },
     WI:{ f:{ owner:'OWNERNME1', owner2:'OWNERNME2', acreGis:'ASSDACRES', acreDeed:'DEEDACRES', pid:'PARCELID' } },
@@ -3215,9 +3215,17 @@
   function _pdVal(attrs, fn){ if (!fn || !attrs) return null; var v = attrs[fn]; if (v === null || v === undefined) return null; v = ('' + v).trim(); return (v === '' || v === '.' || v.toLowerCase() === 'null') ? null : v; }
   function _pdAcre(v){ var n = parseFloat(v); if (isNaN(n) || n <= 0) return null; return n >= 10 ? n.toFixed(1) : n.toFixed(2); }
   function _pdEsc(s){ return ('' + s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  // A street key may be one field OR an array of lines (line1/line2/line3) — join the non-empty ones so a PO box
+  // sitting on a second line is never dropped.
+  function _pdMulti(attrs, keyOrArr){
+    if (!keyOrArr) return null;
+    if (typeof keyOrArr === 'string') return _pdVal(attrs, keyOrArr);
+    var parts = []; for (var i = 0; i < keyOrArr.length; i++){ var v = _pdVal(attrs, keyOrArr[i]); if (v && parts.indexOf(v) < 0) parts.push(v); }
+    return parts.length ? parts.join(' ') : null;
+  }
   function _pdAddr(attrs, f, kind){
     var sk = (kind === 'mail') ? 'mail' : 'addr', ck = (kind === 'mail') ? 'mailCity' : 'city', stk = (kind === 'mail') ? 'mailState' : 'st', zk = (kind === 'mail') ? 'mailZip' : 'zip';
-    var street = _pdVal(attrs, f[sk]); if (!street) return null;
+    var street = _pdMulti(attrs, f[sk]); if (!street) return null;
     var tail = [_pdVal(attrs, f[ck]), _pdVal(attrs, f[stk]), _pdVal(attrs, f[zk])].filter(Boolean).join(' ');
     return tail ? (street + ', ' + tail) : street;
   }
