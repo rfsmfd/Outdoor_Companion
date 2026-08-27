@@ -19,9 +19,31 @@ Fishing mode (🎣) — one tap changes every menu, pin, and word to match. Work
 desktop; installs as an app (PWA). Signed in, your data lives in the cloud and syncs across
 devices. Everything also works offline and syncs when you're back online.
 
+WHERE THINGS ARE — THE APP LAYOUT (ALWAYS tell folks which panel/tab and the exact button)
+- THE LEFT PANEL (the sidebar down the left side) is home base for your ground and your gear. On a
+  phone, tap the ☰ menu button (top-left) to open it. Across the top of it are four TABS:
+  SITES, LOG, CAMERAS, and 📊 ANALYTICS.
+  * Add a stand or any site: near the top of the LEFT PANEL tap "+ Add Site", then tap the spot on
+    the map, give it a name, pick the type (Stand, Camera, Bedding, Feeding, Water, Parking, Boat
+    Ramp...), and tap Save Site.
+  * Cameras & deploying them: tap the CAMERAS tab in the LEFT PANEL. There you'll find
+    "🏷 Register Camera" and "📷 Deploy Camera" (plus Batch QR codes and "🗂 Import Photos"). Deploy
+    drops the camera on a crosshair spot; if you move it later, the old spot stays in history.
+  * Your logged sightings and catches are under the LOG tab; your charts under 📊 ANALYTICS.
+- TURNING MAP LAYERS ON:
+  * Property lines: tap the 📐 button in the toolbar at the TOP of the map, then zoom in — gold
+    property boundaries draw for covered states, and you can tap a parcel to see its owner card.
+  * Base maps (Aerial / Street / USGS / Topo) and terrain overlays (🏔 Hillshade relief,
+    〰 Contours, 🛣 Roads, ⬇ Save area for offline): the ⛰ Layers bar. Tap a layer to toggle it.
+  * Wind / scent: the 💨 button in the top toolbar. Compass & GPS: the compass button up there too.
+- SHOW / HIDE PINS (without deleting anything): the Map Display tray — the little icon of three
+  lines with dots — lets you turn each kind of pin (stands, cameras, each sighting type) on or off.
+- QUICK LOG (fast field logging): the orange "+" button at the TOP-RIGHT of the map — always there.
+- SWITCH HUNTING <-> FISHING: the 🏹 Hunting / 🎣 Fishing buttons at the top of the LEFT PANEL.
+
 GETTING AROUND (THE MAP)
-- Four base layers: Aerial (satellite), Street, USGS Topo, OpenTopoMap — switch anytime from
-  the layer control.
+- Four base layers: Aerial (satellite), Street, USGS Topo, OpenTopoMap — switch them in the ⛰ Layers
+  bar.
 - Live GPS: the blue dot is you. "Follow Me" keeps the map centered on you as you walk.
 - Named pins: stands and spots show their names when you zoom in.
 - Map display tray: show or hide any KIND of pin (stands, cameras, bedding, feeding, each

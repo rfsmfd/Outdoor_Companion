@@ -406,13 +406,42 @@ const GUS_SYSTEM =
   "the KNOWLEDGE below — the app's own feature guide plus the short 'about' note. For a how-to, give " +
   "plain, simple, numbered steps a first-timer can follow. If something truly isn't in what you " +
   "know, say so kindly ('That one I can't rightly say…') and point them to the closest thing — NEVER " +
-  "invent a feature, button, step, or fact you don't have. (2) Warm but not long-winded — a couple " +
+  "invent a feature, button, step, or fact you don't have. (1b) CRITICAL — assume the person is " +
+  "brand-new and does NOT know their way around yet. For ANY how-to, tell them WHERE the control is: " +
+  "which panel or tab and the EXACT button label, using the 'WHERE THINGS ARE' layout in the " +
+  "knowledge. Never just say 'go to Cameras' — say 'tap the CAMERAS tab in the left panel.' Never " +
+  "just say 'turn on the layer' — say which button and where (e.g. 'the 📐 button in the toolbar at " +
+  "the top of the map'). On a phone, remind them the ☰ menu (top-left) opens the left panel. Walk " +
+  "them there like you're pointing across the truck seat. (2) Warm but not long-winded — a couple " +
   "of friendly sentences, or a short numbered list. Get them the answer. (3) You help folks USE the " +
   "app; you're not a hunting-strategy advisor yet — if they ask for a read on their own ground, tell " +
   "them warmly that kind of advice is coming down the road, and point them to the feature that helps " +
   "today (Where to Hunt, Terrain Read, Huntability, When to Fish). (4) It's fine to chat a little " +
   "about what the app is and who made it, from the 'about' note — that's part of being a good " +
-  "companion. \n\n=== OUTDOOR COMPANION KNOWLEDGE ===\n" + GUS_KB;
+  "companion. (5) After each answer, suggest up to THREE short, natural follow-up questions on the " +
+  "SAME topic that the person is likely to want next — phrase each in first person the way they'd " +
+  "tap it ('How do I create QR tag sheets?', 'How do I import photos from my camera?'), and only " +
+  "ones you can actually answer from the knowledge. Put them in the 'followups' list; use an empty " +
+  "list if nothing natural fits. \n\n=== OUTDOOR COMPANION KNOWLEDGE ===\n" + GUS_KB;
+
+// Structured output: the warm answer + a few tappable follow-up questions on the same topic.
+const GUS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    answer: {
+      type: "string",
+      description: "The warm, plain-spoken answer, naming the exact panel/tab/button where the control lives.",
+    },
+    followups: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "Up to 3 SHORT natural next questions on the same topic, phrased in first person as the user would tap them (e.g. 'How do I deploy a camera?'). Each must be answerable from the knowledge. Empty array if none fit.",
+    },
+  },
+  required: ["answer", "followups"],
+};
 
 exports.askGus = onCall(
   {
@@ -448,7 +477,8 @@ exports.askGus = onCall(
     try {
       response = await client.messages.create({
         model: MODEL_CHEAP, // help desk — cheapest model; the knowledge block is cached below
-        max_tokens: 700,
+        max_tokens: 800,
+        output_config: { effort: "low", format: { type: "json_schema", schema: GUS_SCHEMA } },
         // Array-form system so the big, unchanging knowledge block can be prompt-cached: repeat
         // questions then only pay for the short question + answer, not the whole guide each time.
         system: [{ type: "text", text: GUS_SYSTEM, cache_control: { type: "ephemeral" } }],
@@ -460,10 +490,18 @@ exports.askGus = onCall(
     }
 
     const tb = (response.content || []).find((b) => b.type === "text");
-    const answer = tb && tb.text ? tb.text : "Hmm, I didn't quite catch that — ask me another way?";
+    let answer = "Hmm, I didn't quite catch that — ask me another way?";
+    let followups = [];
+    try {
+      const parsed = JSON.parse(tb.text);
+      if (parsed && typeof parsed.answer === "string" && parsed.answer.trim()) answer = parsed.answer;
+      if (parsed && Array.isArray(parsed.followups)) {
+        followups = parsed.followups.filter(function (s) { return typeof s === "string" && s.trim(); }).slice(0, 3);
+      }
+    } catch (e) { /* schema should guarantee JSON; keep the fallback answer if not */ }
     const u = response.usage || {};
     console.log("askGus ok:", "in=" + (u.input_tokens || 0), "out=" + (u.output_tokens || 0), "cacheRead=" + (u.cache_read_input_tokens || 0));
-    return { answer: answer, model: MODEL_CHEAP, answeredAt: Date.now() };
+    return { answer: answer, followups: followups, model: MODEL_CHEAP, answeredAt: Date.now() };
   }
 );
 
