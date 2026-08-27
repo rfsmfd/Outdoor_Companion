@@ -473,19 +473,25 @@ exports.askGus = onCall(
     messages.push({ role: "user", content: question });
 
     const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
-    let response;
-    try {
-      response = await client.messages.create({
-        model: MODEL_CHEAP, // help desk — cheapest model; the knowledge block is cached below
-        max_tokens: 800,
-        output_config: { effort: "low", format: { type: "json_schema", schema: GUS_SCHEMA } },
-        // Array-form system so the big, unchanging knowledge block can be prompt-cached: repeat
-        // questions then only pay for the short question + answer, not the whole guide each time.
-        system: [{ type: "text", text: GUS_SYSTEM, cache_control: { type: "ephemeral" } }],
-        messages: messages,
-      });
-    } catch (e) {
-      console.error("askGus request failed:", e && e.message);
+    // Array-form system so the big knowledge block is prompt-CACHED (repeat questions cost pennies).
+    const req = {
+      model: MODEL_CHEAP, // help desk — cheapest model
+      max_tokens: 800,
+      output_config: { effort: "low", format: { type: "json_schema", schema: GUS_SCHEMA } },
+      system: [{ type: "text", text: GUS_SYSTEM, cache_control: { type: "ephemeral" } }],
+      messages: messages,
+    };
+    // RETRY a few times — a transient API blip or a cold-start shouldn't ever show the user "Sorry."
+    let response = null, lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try { response = await client.messages.create(req); lastErr = null; break; }
+      catch (e) {
+        lastErr = e;
+        if (attempt < 2) await new Promise(function (r) { setTimeout(r, 500 + attempt * 800); });
+      }
+    }
+    if (lastErr || !response) {
+      console.error("askGus request failed after retries:", lastErr && lastErr.message);
       throw new HttpsError("internal", "Ol' Gus couldn't get to the answer right now. Try again in a minute.");
     }
 
