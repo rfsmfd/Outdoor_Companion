@@ -1994,7 +1994,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 529</div>
+    <div id="buildBadge">BUILD 530</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3268,9 +3268,11 @@
     return h;
   }
   function _pdQueryAt(url, latlng, cb){
-    var d = 0.0004, u = url + '/query?where=1%3D1&geometry=' + encodeURIComponent((latlng.lng - d) + ',' + (latlng.lat - d) + ',' + (latlng.lng + d) + ',' + (latlng.lat + d)) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=true&outSR=4326&outFields=*&f=json';
+    // returnGeometry=false: every dataUrl (overlay) state publishes an acreage field, so we never need the polygon
+    // here — and skipping it keeps the tap-lookup light on slow servers (NY). Vector states get geometry acreage free.
+    var d = 0.0004, u = url + '/query?where=1%3D1&geometry=' + encodeURIComponent((latlng.lng - d) + ',' + (latlng.lat - d) + ',' + (latlng.lng + d) + ',' + (latlng.lat + d)) + '&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false&outFields=*&f=json';
     var ctl = new AbortController(), to = setTimeout(function(){ ctl.abort(); }, 8000);
-    fetch(u, { signal: ctl.signal }).then(function(r){ return r.json(); }).then(function(j){ clearTimeout(to); var ft = j.features && j.features[0]; cb(ft ? (ft.attributes || {}) : null, ft ? ft.geometry : null); }).catch(function(){ clearTimeout(to); cb(null, null); });
+    fetch(u, { signal: ctl.signal }).then(function(r){ return r.json(); }).then(function(j){ clearTimeout(to); var ft = j.features && j.features[0]; cb(ft ? (ft.attributes || {}) : null, null); }).catch(function(){ clearTimeout(to); cb(null, null); });
   }
   function queryParcelData(st, latlng, cb){
     var cfg = PARCEL_DATA[st] || {}, urls = cfg.dataUrl; if (!urls) { cb(null, null); return; }
