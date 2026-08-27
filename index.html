@@ -1874,6 +1874,7 @@
   .gus-starters{ display:flex; flex-wrap:wrap; gap:6px; margin:9px 0 2px; }
   .gus-starters button{ font-size:12.5px; padding:6px 11px; border-radius:14px; border:1px solid #35443a; background:#18241d; color:#cfe0d4; cursor:pointer; }
   .gus-starters button:hover{ background:#20302a; }
+  .gus-fups-label{ width:100%; font-size:11px; color:#8aa596; margin:4px 0 1px; letter-spacing:.02em; }
   .gus-inputrow{ display:flex; gap:8px; margin-top:10px; }
   .gus-inputrow input{ flex:1; font-size:14.5px; }
   .gus-foot{ font-size:10.5px; color:#7a8f81; margin-top:9px; line-height:1.4; }
@@ -2033,9 +2034,8 @@
     <div id="windInfoLabel"></div>
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
-    <button id="askGusBtn" title="Ask Ol' Gus — your hunting companion (powered by Claude)">🧔</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 533</div>
+    <div id="buildBadge">BUILD 534</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3467,6 +3467,20 @@
         gusStarters.appendChild(b);
       });
     }
+    // Gus proposes his own natural next questions after each answer — shown as tappable chips.
+    function gusRenderFollowups(list){
+      gusStarters.innerHTML = '';
+      if (!list || !list.length) return;
+      var lbl = document.createElement('div'); lbl.className = 'gus-fups-label'; lbl.textContent = 'You might also ask:';
+      gusStarters.appendChild(lbl);
+      for (var i = 0; i < list.length && i < 3; i++){
+        (function(q){
+          var b = document.createElement('button'); b.type = 'button'; b.textContent = q;
+          b.addEventListener('click', function(){ gusAsk(q); });
+          gusStarters.appendChild(b);
+        })(list[i]);
+      }
+    }
     function gusOpen(){
       gusBackdrop.classList.add('show');
       if (!gusGreeted){ gusGreeted = true; gusBubble("Howdy — I'm Ol' Gus. Ask me how anything in the app works, or tap one below.", 'gus'); gusRenderStarters(); }
@@ -3502,6 +3516,7 @@
         thinking.classList.remove('thinking'); thinking.textContent = ans;
         gusHistory.push({ role: 'assistant', text: ans });
         if (gusHistory.length > 12) gusHistory = gusHistory.slice(-12);
+        gusRenderFollowups((res && res.data && Array.isArray(res.data.followups)) ? res.data.followups : []);
       } catch(e){
         thinking.classList.remove('thinking');
         thinking.textContent = "Sorry — I couldn't get to that just now. Give it another try in a minute.";
