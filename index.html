@@ -1994,7 +1994,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 528</div>
+    <div id="buildBadge">BUILD 529</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3179,7 +3179,7 @@
   // hunter at the county (owner isn't in the free statewide layer, or the service is too slow/blocked to tap).
   var PARCEL_DATA = {
     // vector states — owner comes from the clicked feature
-    AR:{ f:{ owner:'ownername', addr:['adrnum','adrlabel'], city:'adrcity', zip:'adrzip5', pid:'parcelid' } },
+    AR:{ f:{ owner:'ownername', addr:'adrlabel', city:'adrcity', zip:'adrzip5', pid:'parcelid' } },
     CO:{ f:{ owner:'owner', owner2:'owner2', mail:'ownerAdd', mailCity:'ownAddCty', mailState:'ownAddStt', mailZip:'ownAddZip', addr:'situsAdd', city:'sitAddCty', zip:'sitAddZip', acreGis:'landAcres', pid:'parcel_id' } },
     MA:{ f:{ owner:'OWNER1', owner2:'OWN_CO', mail:'OWN_ADDR', mailCity:'OWN_CITY', mailState:'OWN_STATE', mailZip:'OWN_ZIP', addr:'SITE_ADDR', city:'CITY', zip:'ZIP', pid:'MAP_PAR_ID' } },
     MT:{ f:{ owner:'OwnerName', owner2:'CareOfTaxpayer', mail:['OwnerAddress1','OwnerAddress2','OwnerAddress3'], mailCity:'OwnerCity', mailState:'OwnerState', mailZip:'OwnerZipCode', addr:'AddressLine1', city:'CityStateZip', acreGis:'GISAcres', acreDeed:'TotalAcres', pid:'PARCELID' } },
@@ -3227,7 +3227,7 @@
     var sk = (kind === 'mail') ? 'mail' : 'addr', ck = (kind === 'mail') ? 'mailCity' : 'city', stk = (kind === 'mail') ? 'mailState' : 'st', zk = (kind === 'mail') ? 'mailZip' : 'zip';
     var street = _pdMulti(attrs, f[sk]); if (!street) return null;
     var tail = [_pdVal(attrs, f[ck]), _pdVal(attrs, f[stk]), _pdVal(attrs, f[zk])].filter(Boolean).join(' ');
-    return tail ? (street + ', ' + tail) : street;
+    return (tail ? (street + ', ' + tail) : street).replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim();
   }
   // Fallback acreage straight from the polygon when a state publishes no acreage field — every parcel is a shape,
   // so no parcel should ever read blank. Uses leaflet.draw's geodesicArea (m²); shown as "≈ N ac" to flag it's map-measured.
