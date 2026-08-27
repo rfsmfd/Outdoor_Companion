@@ -33,6 +33,9 @@ const MODEL = "claude-sonnet-5";        // mid tier — escalation target (bucks
 const MODEL_CHEAP = "claude-haiku-4-5"; // first-pass bulk model (cheapest)
 const MODEL_DEEP = "claude-opus-5";     // deep single-photo re-tag + buck matching
 
+// Ol' Gus — the in-app help companion. His entire knowledge is the app's own feature guide.
+const { GUS_KB } = require("./gusKnowledge");
+
 // Strict JSON schema — guarantees the model returns exactly these fields.
 const OUTPUT_SCHEMA = {
   type: "object",
@@ -379,6 +382,84 @@ exports.compareBucks = onCall(
     }
     console.log("compareBucks ok:", photoId, "candidates=" + candidates.length, "likelyNew=" + parsed.likelyNew);
     return Object.assign({}, parsed, { model: "claude-opus-5", comparedAt: Date.now() });
+  }
+);
+
+/**
+ * Ol' Gus — "your hunting companion, powered by Claude."
+ *
+ * V1 = an in-app HELP DESK. A user asks "how do I… / where is… / what does X do?" and Gus
+ * answers in plain steps, grounded ONLY in the app's own feature guide (gusKnowledge.js) so he
+ * can't invent buttons or features. Not (yet) a my-ground hunting advisor — strategy questions
+ * get pointed at the feature that helps (Where to Hunt, Terrain Read, etc.).
+ *
+ * Cheap by design: Haiku, short answers, and the big knowledge block is prompt-CACHED so repeat
+ * questions only pay for the short question + answer. Reuses the existing ANTHROPIC_API_KEY
+ * secret — no new infra.
+ */
+const GUS_SYSTEM =
+  "You are Ol' Gus, the friendly in-app help companion for the Outdoor Companion app (a hunting " +
+  "and fishing app). Folks ask you how the app works and where to find things; you answer like a " +
+  "warm, plain-spoken hunting buddy. RULES: (1) Answer ONLY from the KNOWLEDGE below — it is the " +
+  "app's own feature guide. If something isn't in it, say plainly you're not sure that's in the " +
+  "app and suggest the closest thing or to check the menu — NEVER invent a feature, button, or " +
+  "step that isn't described. (2) Keep it tight: a couple of sentences, or a short numbered list " +
+  "for a how-to. No fluff, no long preambles. (3) You are a HELP guide, not a hunting/fishing " +
+  "advisor — if they ask for strategy or a read on their specific ground, tell them that kind of " +
+  "advice is on the way, and point them to the feature that helps today (Where to Hunt, Terrain " +
+  "Read, Huntability, When to Fish). (4) Stay friendly and encouraging; it's fine to sound like " +
+  "Gus. \n\n=== OUTDOOR COMPANION KNOWLEDGE ===\n" + GUS_KB;
+
+exports.askGus = onCall(
+  {
+    secrets: [ANTHROPIC_API_KEY],
+    region: "us-east1",
+    memory: "256MiB",
+    timeoutSeconds: 60,
+  },
+  async (request) => {
+    const uid = request.auth && request.auth.uid;
+    if (!uid) {
+      throw new HttpsError("unauthenticated", "You have to be signed in to ask Ol' Gus.");
+    }
+    const raw = request.data && request.data.question;
+    if (!raw || typeof raw !== "string" || !raw.trim()) {
+      throw new HttpsError("invalid-argument", "Ask Ol' Gus a question first.");
+    }
+    const question = raw.trim().slice(0, 1500);
+
+    // Optional short back-and-forth for follow-ups: [{role:'user'|'assistant', text}]. Cap it.
+    const hist = request.data && Array.isArray(request.data.history) ? request.data.history : [];
+    const messages = [];
+    for (let i = Math.max(0, hist.length - 6); i < hist.length; i++) {
+      const h = hist[i];
+      if (h && (h.role === "user" || h.role === "assistant") && typeof h.text === "string" && h.text.trim()) {
+        messages.push({ role: h.role, content: h.text.slice(0, 2000) });
+      }
+    }
+    messages.push({ role: "user", content: question });
+
+    const client = new Anthropic({ apiKey: ANTHROPIC_API_KEY.value() });
+    let response;
+    try {
+      response = await client.messages.create({
+        model: MODEL_CHEAP, // help desk — cheapest model; the knowledge block is cached below
+        max_tokens: 700,
+        // Array-form system so the big, unchanging knowledge block can be prompt-cached: repeat
+        // questions then only pay for the short question + answer, not the whole guide each time.
+        system: [{ type: "text", text: GUS_SYSTEM, cache_control: { type: "ephemeral" } }],
+        messages: messages,
+      });
+    } catch (e) {
+      console.error("askGus request failed:", e && e.message);
+      throw new HttpsError("internal", "Ol' Gus couldn't get to the answer right now. Try again in a minute.");
+    }
+
+    const tb = (response.content || []).find((b) => b.type === "text");
+    const answer = tb && tb.text ? tb.text : "Hmm, I didn't quite catch that — ask me another way?";
+    const u = response.usage || {};
+    console.log("askGus ok:", "in=" + (u.input_tokens || 0), "out=" + (u.output_tokens || 0), "cacheRead=" + (u.cache_read_input_tokens || 0));
+    return { answer: answer, model: MODEL_CHEAP, answeredAt: Date.now() };
   }
 );
 
