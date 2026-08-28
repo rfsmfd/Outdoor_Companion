@@ -1989,7 +1989,7 @@
 
     <div class="display-tray-section">
       <div class="display-tray-section-title">Camera History</div>
-      <div class="toggle-row">
+      <div class="toggle-row" data-tray-toggle="camera-history">
         <div class="toggle-row-label">📍 Past deployment locations</div>
         <div class="toggle-switch" id="cameraHistoryToggle"><div class="knob"></div></div>
       </div>
@@ -2052,7 +2052,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 542</div>
+    <div id="buildBadge">BUILD 543</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3585,6 +3585,24 @@
       'compass': { el:'compassBtn', map:true, label:'the compass button' },
       'map-display': { el:'displayTrayToggleBtn', map:true, label:'the Map Display button' },
       'show-cameras': { tray:'camera', map:true, label:'the Camera Locations toggle in the Map Display tray' },
+      'show-camera-icons': { tray:'camera-icons', map:true, label:'the Camera icons toggle in the Map Display tray' },
+      'show-stands': { tray:'stand', map:true, label:'the Stand Locations toggle in the Map Display tray' },
+      'show-access': { tray:'access', map:true, label:'the Access toggle in the Map Display tray' },
+      'show-bedding': { tray:'bedding', map:true, label:'the Bedding toggle in the Map Display tray' },
+      'show-feeding': { tray:'feeding', map:true, label:'the Feeding toggle in the Map Display tray' },
+      'show-water': { tray:'water', map:true, label:'the Water toggle in the Map Display tray' },
+      'show-bucks': { tray:'obs-buck', map:true, label:'the Bucks toggle in the Map Display tray' },
+      'show-does': { tray:'obs-doe', map:true, label:'the Does toggle in the Map Display tray' },
+      'show-bears': { tray:'obs-bear', map:true, label:'the Bears toggle in the Map Display tray' },
+      'show-turkeys': { tray:'obs-turkey', map:true, label:'the Turkeys toggle in the Map Display tray' },
+      'show-scrapes': { tray:'obs-scrape', map:true, label:'the Scrapes toggle in the Map Display tray' },
+      'show-rubs': { tray:'obs-rub', map:true, label:'the Rubs toggle in the Map Display tray' },
+      'show-tracks': { tray:'obs-track', map:true, label:'the Tracks toggle in the Map Display tray' },
+      'show-deer-trails': { tray:'obs-trail', map:true, label:'the deer Trails toggle in the Map Display tray' },
+      'show-hunts': { tray:'obs-hunt', map:true, label:'the Hunts toggle in the Map Display tray' },
+      'show-camera-history': { tray:'camera-history', map:true, label:'the Past deployment locations toggle in the Map Display tray' },
+      'show-scout-board': { tray:'scout-board', map:true, label:'the Scout Mode toggle in the Map Display tray' },
+      'show-camera-coverage': { tray:'camera-coverage', map:true, label:'the Camera coverage toggle in the Map Display tray' },
       'mode-hunting': { mod:'hunting', label:'the 🏹 Hunting button' },
       'mode-fishing': { mod:'fishing', label:'the 🎣 Fishing button' },
       'photo-gallery': { tools:true, el:'photoGalleryBtn', label:'"Photo Gallery"' },
@@ -8527,6 +8545,7 @@
   function trayCamIconsRow(){
     var row = document.createElement('div');
     row.className = 'toggle-row';
+    row.setAttribute('data-tray-toggle', 'camera-icons');   // handle so Ol' Gus can point at this exact toggle
     row.innerHTML =
       '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">📷</span> Camera icons</div>' +
       '<div class="toggle-switch' + (showCameraFlags ? ' on' : '') + '"><div class="knob"></div></div>';
@@ -8561,6 +8580,7 @@
     var isOn = activeObsFilters.has(key);
     var row = document.createElement('div');
     row.className = 'toggle-row';
+    row.setAttribute('data-tray-toggle', 'obs-' + key);   // handle so Ol' Gus can point at this sighting toggle
     row.innerHTML =
       '<div class="toggle-row-label"><span style="display:inline-flex;width:24px;height:24px;align-items:center;justify-content:center;vertical-align:middle;margin-right:4px;">'+obsGlyphInline(key, 22)+'</span>' + t.label + '</div>' +
       '<div style="display:flex;align-items:center;gap:8px;">' +
@@ -8694,6 +8714,7 @@
   function trayScoutModeRow(){
     var row = document.createElement('div');
     row.className = 'toggle-row';
+    row.setAttribute('data-tray-toggle', 'scout-board');
     row.innerHTML =
       '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">🔍</span> Scout Mode — all sign &amp; targets</div>' +
       '<div class="toggle-switch' + (scoutMode ? ' on' : '') + '"><div class="knob"></div></div>';
@@ -8703,6 +8724,7 @@
   function trayCameraCoverageRow(){
     var row = document.createElement('div');
     row.className = 'toggle-row';
+    row.setAttribute('data-tray-toggle', 'camera-coverage');
     row.innerHTML =
       '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">📷</span> Camera coverage (3 mo) ' +
         '<select id="covRadiusSel" style="margin-left:6px;padding:2px 4px;border-radius:6px;border:1px solid var(--line);background:rgba(0,0,0,.28);color:var(--text);font-size:11px;"><option value="100">100 yd</option><option value="150">150 yd</option><option value="200">200 yd</option></select></div>' +
