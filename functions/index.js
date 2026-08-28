@@ -435,7 +435,7 @@ const GUS_TARGET_TOKENS = [
   "add-site", "my-location", "plan-hunt", "where-to-hunt", "field-card", "hunt-mode", "walk-in",
   "log-sit", "scout-mode", "camera-plan", "terrain-read", "tab-sites", "tab-log", "tab-cameras",
   "tab-analytics", "register-camera", "deploy-camera", "batch-qr", "import-photos", "quick-log",
-  "property-lines", "layers", "wind", "compass", "map-display", "mode-hunting", "mode-fishing",
+  "property-lines", "layers", "wind", "compass", "map-display", "show-cameras", "mode-hunting", "mode-fishing",
   "photo-gallery", "solunar", "journal", "trails", "import", "export",
 ];
 
