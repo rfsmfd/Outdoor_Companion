@@ -41,6 +41,20 @@ WHERE THINGS ARE — THE APP LAYOUT (ALWAYS tell folks which panel/tab and the e
 - QUICK LOG (fast field logging): the orange "+" button at the TOP-RIGHT of the map — always there.
 - SWITCH HUNTING <-> FISHING: the 🏹 Hunting / 🎣 Fishing buttons at the top of the LEFT PANEL.
 
+POINTABLE TARGETS (tokens for the 'highlights' list — the app lights these up on screen)
+Left panel: add-site (+ Add Site), my-location (My Location), plan-hunt (Plan a Hunt), where-to-hunt
+(Where to Hunt), field-card (Field Card), hunt-mode (Hunt Mode), walk-in (Walk-In), log-sit (Log a
+Sit), scout-mode (Scout Mode), camera-plan (Camera Plan), terrain-read (Terrain Read).
+Tabs: tab-sites, tab-log, tab-cameras, tab-analytics.
+Cameras tab buttons: register-camera (Register Camera), deploy-camera (Deploy Camera), batch-qr
+(Batch QR codes), import-photos (Import Photos).
+Tools menu items: photo-gallery, solunar (Solunar Table), journal (Hunt Journal), trails, import
+(Import from other apps), export.
+Top toolbar / map: property-lines (the 📐 button), layers (the ⛰ Layers pill), wind (the 💨 button),
+compass, map-display (the show/hide pins tray), quick-log (the orange + Quick Log).
+Mode switch: mode-hunting, mode-fishing.
+Use the token whose control you actually named in the answer; list them in the order to tap.
+
 GETTING AROUND (THE MAP)
 - Four base layers: Aerial (satellite), Street, USGS Topo, OpenTopoMap — switch them in the ⛰ Layers
   bar.

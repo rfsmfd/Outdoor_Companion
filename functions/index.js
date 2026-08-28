@@ -422,9 +422,24 @@ const GUS_SYSTEM =
   "SAME topic that the person is likely to want next — phrase each in first person the way they'd " +
   "tap it ('How do I create QR tag sheets?', 'How do I import photos from my camera?'), and only " +
   "ones you can actually answer from the knowledge. Put them in the 'followups' list; use an empty " +
-  "list if nothing natural fits. \n\n=== OUTDOOR COMPANION KNOWLEDGE ===\n" + GUS_KB;
+  "list if nothing natural fits. (6) When your answer tells the person to TAP specific on-screen " +
+  "controls, ALSO fill 'highlights' with those controls' tokens IN TAP ORDER, using ONLY the " +
+  "POINTABLE TARGETS tokens in the knowledge — the app then lights each one up on screen as you " +
+  "talk them through it. Match the token to the control you named (e.g. Cameras tab = tab-cameras, " +
+  "Deploy Camera = deploy-camera, the + Add Site button = add-site). Leave it empty for answers " +
+  "that aren't a tap-here walkthrough. \n\n=== OUTDOOR COMPANION KNOWLEDGE ===\n" + GUS_KB;
 
-// Structured output: the warm answer + a few tappable follow-up questions on the same topic.
+// The on-screen controls Gus can point at (the client lights each one up in order). Keep in sync
+// with GUS_TARGETS in index.html and the POINTABLE TARGETS list in gusKnowledge.js.
+const GUS_TARGET_TOKENS = [
+  "add-site", "my-location", "plan-hunt", "where-to-hunt", "field-card", "hunt-mode", "walk-in",
+  "log-sit", "scout-mode", "camera-plan", "terrain-read", "tab-sites", "tab-log", "tab-cameras",
+  "tab-analytics", "register-camera", "deploy-camera", "batch-qr", "import-photos", "quick-log",
+  "property-lines", "layers", "wind", "compass", "map-display", "mode-hunting", "mode-fishing",
+  "photo-gallery", "solunar", "journal", "trails", "import", "export",
+];
+
+// Structured output: warm answer + follow-up questions + the controls to point at on screen.
 const GUS_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -439,8 +454,14 @@ const GUS_SCHEMA = {
       description:
         "Up to 3 SHORT natural next questions on the same topic, phrased in first person as the user would tap them (e.g. 'How do I deploy a camera?'). Each must be answerable from the knowledge. Empty array if none fit.",
     },
+    highlights: {
+      type: "array",
+      items: { type: "string", enum: GUS_TARGET_TOKENS },
+      description:
+        "If the answer tells the user to tap specific on-screen controls, list their tokens here IN THE ORDER the user should tap them — the app lights each one up as Gus talks. Use ONLY these tokens, matching the controls named in the answer. Empty array when the answer isn't a tap-here walkthrough.",
+    },
   },
-  required: ["answer", "followups"],
+  required: ["answer", "followups", "highlights"],
 };
 
 exports.askGus = onCall(
@@ -498,16 +519,20 @@ exports.askGus = onCall(
     const tb = (response.content || []).find((b) => b.type === "text");
     let answer = "Hmm, I didn't quite catch that — ask me another way?";
     let followups = [];
+    let highlights = [];
     try {
       const parsed = JSON.parse(tb.text);
       if (parsed && typeof parsed.answer === "string" && parsed.answer.trim()) answer = parsed.answer;
       if (parsed && Array.isArray(parsed.followups)) {
         followups = parsed.followups.filter(function (s) { return typeof s === "string" && s.trim(); }).slice(0, 3);
       }
+      if (parsed && Array.isArray(parsed.highlights)) {
+        highlights = parsed.highlights.filter(function (s) { return GUS_TARGET_TOKENS.indexOf(s) >= 0; }).slice(0, 8);
+      }
     } catch (e) { /* schema should guarantee JSON; keep the fallback answer if not */ }
     const u = response.usage || {};
     console.log("askGus ok:", "in=" + (u.input_tokens || 0), "out=" + (u.output_tokens || 0), "cacheRead=" + (u.cache_read_input_tokens || 0));
-    return { answer: answer, followups: followups, model: MODEL_CHEAP, answeredAt: Date.now() };
+    return { answer: answer, followups: followups, highlights: highlights, model: MODEL_CHEAP, answeredAt: Date.now() };
   }
 );
 
