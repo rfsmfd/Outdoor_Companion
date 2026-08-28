@@ -2052,7 +2052,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 538</div>
+    <div id="buildBadge">BUILD 539</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3610,11 +3610,26 @@
       if (el && (el.offsetParent === null && el.getClientRects().length === 0)) el = null;
       return { el: el, label: t.label };
     }
-    var gusPointEl = null, gusTourBar = null, gusTourTimer = null;
+    var gusPointEl = null, gusTourBar = null, gusTourTimer = null, gusTourGen = 0;
     function gusClearTourTimer(){ if (gusTourTimer){ clearTimeout(gusTourTimer); gusTourTimer = null; } }
     function gusClearPoint(){ if (gusPointEl){ gusPointEl.classList.remove('oc-gus-point'); gusPointEl = null; } }
-    function gusEndTour(){ gusClearTourTimer(); gusClearPoint(); if (gusTourBar && gusTourBar.parentNode) gusTourBar.parentNode.removeChild(gusTourBar); gusTourBar = null; }
+    function gusEndTour(){ gusTourGen++; gusClearTourTimer(); gusClearPoint(); gusStopSpeaking(); if (gusTourBar && gusTourBar.parentNode) gusTourBar.parentNode.removeChild(gusTourBar); gusTourBar = null; }
+    // Gus talks each step aloud as it lights up. Forced during a tour — tapping "Show me" is an
+    // explicit ask for a guided walk-through — but only when the browser can actually speak.
+    function gusSpeakTour(text, onDone){
+      if (!window.speechSynthesis){ if (onDone) onDone(); return; }
+      try {
+        window.speechSynthesis.cancel();
+        var u = new SpeechSynthesisUtterance(text);
+        if (gusVoice) u.voice = gusVoice;
+        u.rate = 0.95; u.pitch = 0.82;
+        var done = false; function fin(){ if (done) return; done = true; if (onDone) onDone(); }
+        u.onend = fin; u.onerror = fin;
+        window.speechSynthesis.speak(u);
+      } catch(e){ if (onDone) onDone(); }
+    }
     function gusPointStep(tokens, idx){
+      gusTourGen++; var myGen = gusTourGen;
       gusClearTourTimer(); gusClearPoint();
       if (!gusTourBar || idx >= tokens.length){ gusEndTour(); return; }
       var r = gusResolveTarget(tokens[idx]);
@@ -3625,9 +3640,16 @@
       gusTourBar.querySelector('.gus-tour-label').innerHTML = '<b>Step ' + (idx + 1) + ' of ' + tokens.length + ':</b> tap ' + r.label;
       var next = gusTourBar.querySelector('.gus-tour-next');
       next.textContent = last ? 'Done' : 'Next ▸';
-      next.onclick = function(){ gusClearTourTimer(); if (last) gusEndTour(); else gusPointStep(tokens, idx + 1); };
-      // Auto-advance through the steps on its own; pause on the LAST one so you can actually tap it.
-      if (!last) gusTourTimer = setTimeout(function(){ gusPointStep(tokens, idx + 1); }, 3800);
+      next.onclick = function(){ if (last) gusEndTour(); else gusPointStep(tokens, idx + 1); };
+      // Narrate the step, then auto-advance once Gus finishes talking (or on a timer if he can't speak).
+      var spoken = r.label.replace(/["“”]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[☀-➿️]/g, '').replace(/\s+/g, ' ').trim();
+      var lead = (tokens.length === 1) ? 'Here — tap ' : (idx === 0 ? 'Alright, first, tap ' : (last ? 'And last, tap ' : 'Now tap '));
+      function advance(){ if (myGen !== gusTourGen) return; gusPointStep(tokens, idx + 1); }
+      if (window.speechSynthesis){
+        gusSpeakTour(lead + spoken + '.', last ? null : function(){ if (myGen !== gusTourGen) return; gusTourTimer = setTimeout(advance, 900); });
+      } else if (!last){
+        gusTourTimer = setTimeout(advance, 3800);
+      }
     }
     function gusStartTour(tokens){
       tokens = (tokens || []).filter(function(t){ return GUS_TARGETS[t]; });
