@@ -1875,6 +1875,17 @@
   .gus-starters button{ font-size:12.5px; padding:6px 11px; border-radius:14px; border:1px solid #35443a; background:#18241d; color:#cfe0d4; cursor:pointer; }
   .gus-starters button:hover{ background:#20302a; }
   .gus-fups-label{ width:100%; font-size:11px; color:#8aa596; margin:4px 0 1px; letter-spacing:.02em; }
+  /* Ol' Gus "Show me" guided tour */
+  .gus-showme{ align-self:flex-start; margin-top:-1px; background:#E8823F; color:#1a1204; border:none; border-radius:12px; padding:8px 13px; font-size:13.5px; font-weight:700; cursor:pointer; box-shadow:0 2px 9px rgba(0,0,0,.32); }
+  .gus-showme:hover{ filter:brightness(1.06); }
+  .oc-gus-point{ box-shadow:0 0 0 3px #F0CE6A, 0 0 20px 6px rgba(212,178,76,.7) !important; border-radius:8px !important; animation:gusPointPulse 1.15s ease-in-out infinite; }
+  @keyframes gusPointPulse{ 0%,100%{ box-shadow:0 0 0 3px #D4B24C, 0 0 12px 3px rgba(212,178,76,.5) !important; } 50%{ box-shadow:0 0 0 5px #F0CE6A, 0 0 28px 9px rgba(212,178,76,.9) !important; } }
+  .gus-tour-bar{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:100062; display:flex; align-items:center; gap:11px; background:#14201a; border:1px solid #D4B24C; border-radius:14px; padding:9px 11px 9px 10px; box-shadow:0 12px 40px rgba(0,0,0,.6); color:#e8f0ea; max-width:min(94vw,560px); font-size:14px; }
+  .gus-tour-face{ width:32px; height:32px; border-radius:50%; overflow:hidden; border:1px solid #D4B24C; flex:0 0 auto; background:#241810; }
+  .gus-tour-label{ flex:1; line-height:1.35; }
+  .gus-tour-label b{ color:#D4B24C; }
+  .gus-tour-next{ background:#E8823F; color:#1a1204; border:none; border-radius:9px; padding:7px 13px; font-weight:700; cursor:pointer; font-size:13.5px; white-space:nowrap; }
+  .gus-tour-x{ background:transparent; border:none; color:#9db0a3; font-size:17px; cursor:pointer; line-height:1; padding:0 2px; }
   .gus-inputrow{ display:flex; gap:8px; margin-top:10px; align-items:stretch; }
   .gus-inputrow input{ flex:1; font-size:14.5px; }
   .gus-iconbtn{ background:transparent; border:1px solid #35443a; color:#cfe0d4; border-radius:8px; padding:0 10px; font-size:16px; line-height:1; cursor:pointer; }
@@ -2041,7 +2052,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 536</div>
+    <div id="buildBadge">BUILD 537</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3542,6 +3553,91 @@
       gusMsgs.appendChild(d); gusMsgs.scrollTop = gusMsgs.scrollHeight;
       return d;
     }
+
+    // ---- "Show me" — Gus opens the right tab/panel and pulses a glow on each control, in order ----
+    // el = DOM id to point at; tab = open this left-panel tab first; tools = expand the Tools group;
+    // mod = a mode button; map = a map/toolbar control (not in the sidebar). Keep tokens in sync with
+    // GUS_TARGET_TOKENS in functions/index.js.
+    var GUS_TARGETS = {
+      'add-site': { el:'addSiteBtn', label:'the "+ Add Site" button' },
+      'my-location': { el:'gpsSiteBtn', label:'the "My Location" button' },
+      'plan-hunt': { el:'forecastBtn', label:'"Plan a Hunt"' },
+      'where-to-hunt': { el:'huntTodayBtn', label:'"Where to Hunt"' },
+      'field-card': { el:'fieldCardBtn', label:'"Field Card"' },
+      'hunt-mode': { el:'huntModeBtn', label:'"Hunt Mode"' },
+      'walk-in': { el:'walkInBtn', label:'"Walk-In"' },
+      'log-sit': { el:'sitLogBtn', label:'"Log a Sit"' },
+      'scout-mode': { el:'scoutModeBtn', label:'"Scout Mode"' },
+      'camera-plan': { el:'cameraPlanBtn', label:'"Camera Plan"' },
+      'terrain-read': { el:'terrainReadBtn', label:'"Terrain Read"' },
+      'tab-sites': { tab:'sites', label:'the Sites tab' },
+      'tab-log': { tab:'log', label:'the Log tab' },
+      'tab-cameras': { tab:'cameras', label:'the Cameras tab' },
+      'tab-analytics': { tab:'analytics', label:'the Analytics tab' },
+      'register-camera': { tab:'cameras', el:'registerCamBtn', label:'"Register Camera"' },
+      'deploy-camera': { tab:'cameras', el:'scanDeployBtn', label:'"Deploy Camera"' },
+      'batch-qr': { tab:'cameras', el:'batchAddBtn', label:'"Batch QR Codes"' },
+      'import-photos': { tab:'cameras', el:'importPhotosBtn', label:'"Import Photos"' },
+      'quick-log': { el:'quickLogFab', map:true, label:'the orange "+" Quick Log button' },
+      'property-lines': { el:'parcelToggleBtn', map:true, label:'the 📐 property-lines button' },
+      'layers': { el:'layersToggleBtn', map:true, label:'the ⛰ Layers button' },
+      'wind': { el:'windToggleBtn', map:true, label:'the 💨 wind button' },
+      'compass': { el:'compassBtn', map:true, label:'the compass button' },
+      'map-display': { el:'displayTrayToggleBtn', map:true, label:'the Map Display button' },
+      'mode-hunting': { mod:'hunting', label:'the 🏹 Hunting button' },
+      'mode-fishing': { mod:'fishing', label:'the 🎣 Fishing button' },
+      'photo-gallery': { tools:true, el:'photoGalleryBtn', label:'"Photo Gallery"' },
+      'solunar': { tools:true, el:'solunarBtn', label:'"Solunar Table"' },
+      'journal': { tools:true, el:'huntLogBtn', label:'"Hunt Journal"' },
+      'trails': { tools:true, el:'manageTrailsBtn', label:'"Trails"' },
+      'import': { tools:true, el:'importWaypointsBtn', label:'"Import from other apps"' },
+      'export': { tools:true, el:'exportBtn', label:'"Export"' }
+    };
+    function gusResolveTarget(tok){
+      var t = GUS_TARGETS[tok]; if (!t) return null;
+      try {
+        // On phones the left panel slides away — open it for sidebar targets, close it for map ones.
+        var sb = document.getElementById('sidebar');
+        if (sb && window.innerWidth <= 820){ if (t.map) sb.classList.remove('open'); else sb.classList.add('open'); }
+        if (t.tab){ var tb = document.querySelector('#tabs .tab-btn[data-tab="' + t.tab + '"]'); if (tb && !tb.classList.contains('active')) tb.click(); }
+        if (t.tools){ var tg = document.getElementById('toolsGroup'), tt = document.getElementById('toolsToggleBtn'); if (tg && tt && getComputedStyle(tg).display === 'none') tt.click(); }
+      } catch(e){}
+      var el = null;
+      if (t.el) el = document.getElementById(t.el);
+      else if (t.tab) el = document.querySelector('#tabs .tab-btn[data-tab="' + t.tab + '"]');
+      else if (t.mod) el = document.querySelector('#moduleSwitcher .module-btn[data-module="' + t.mod + '"]');
+      // Only point at something actually visible on screen.
+      if (el && (el.offsetParent === null && el.getClientRects().length === 0)) el = null;
+      return { el: el, label: t.label };
+    }
+    var gusPointEl = null, gusTourBar = null;
+    function gusClearPoint(){ if (gusPointEl){ gusPointEl.classList.remove('oc-gus-point'); gusPointEl = null; } }
+    function gusEndTour(){ gusClearPoint(); if (gusTourBar && gusTourBar.parentNode) gusTourBar.parentNode.removeChild(gusTourBar); gusTourBar = null; }
+    function gusPointStep(tokens, idx){
+      gusClearPoint();
+      if (!gusTourBar || idx >= tokens.length){ gusEndTour(); return; }
+      var r = gusResolveTarget(tokens[idx]);
+      if (!r || !r.el){ gusPointStep(tokens, idx + 1); return; }   // skip controls that aren't on screen
+      gusPointEl = r.el; r.el.classList.add('oc-gus-point');
+      try { r.el.scrollIntoView({ block:'center', inline:'center', behavior:'smooth' }); } catch(e){}
+      var last = (idx + 1 >= tokens.length);
+      gusTourBar.querySelector('.gus-tour-label').innerHTML = '<b>Step ' + (idx + 1) + ' of ' + tokens.length + ':</b> tap ' + r.label;
+      var next = gusTourBar.querySelector('.gus-tour-next');
+      next.textContent = last ? 'Done' : 'Next ▸';
+      next.onclick = function(){ if (last) gusEndTour(); else gusPointStep(tokens, idx + 1); };
+    }
+    function gusStartTour(tokens){
+      tokens = (tokens || []).filter(function(t){ return GUS_TARGETS[t]; });
+      if (!tokens.length) return;
+      gusEndTour();
+      gusClose();   // tuck the chat away so it doesn't cover the buttons he's pointing at
+      gusTourBar = document.createElement('div'); gusTourBar.id = 'gusTourBar'; gusTourBar.className = 'gus-tour-bar';
+      gusTourBar.innerHTML = '<span class="gus-tour-face"></span><span class="gus-tour-label"></span><button class="gus-tour-next" type="button">Next ▸</button><button class="gus-tour-x" type="button" title="Done" aria-label="Done">✕</button>';
+      document.body.appendChild(gusTourBar);
+      gusTourBar.querySelector('.gus-tour-face').innerHTML = GUS_AVATAR_SVG;
+      gusTourBar.querySelector('.gus-tour-x').onclick = gusEndTour;
+      gusPointStep(tokens, 0);
+    }
     function gusRenderStarters(){
       gusStarters.innerHTML = '';
       GUS_STARTERS.forEach(function(q){
@@ -3600,6 +3696,13 @@
         gusHistory.push({ role: 'assistant', text: ans });
         if (gusHistory.length > 12) gusHistory = gusHistory.slice(-12);
         gusRenderFollowups((res && res.data && Array.isArray(res.data.followups)) ? res.data.followups : []);
+        var hl = (res && res.data && Array.isArray(res.data.highlights)) ? res.data.highlights.filter(function(t){ return GUS_TARGETS[t]; }) : [];
+        if (hl.length){
+          var showBtn = document.createElement('button'); showBtn.type = 'button'; showBtn.className = 'gus-showme';
+          showBtn.textContent = '👉 Show me on the screen';
+          showBtn.addEventListener('click', function(){ gusStartTour(hl); });
+          gusMsgs.appendChild(showBtn);
+        }
         gusSpeak(ans);
       } catch(e){
         thinking.classList.remove('thinking');
