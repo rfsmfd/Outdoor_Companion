@@ -2052,7 +2052,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 541</div>
+    <div id="buildBadge">BUILD 542</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3621,8 +3621,9 @@
     function gusClearTourTimer(){ if (gusTourTimer){ clearTimeout(gusTourTimer); gusTourTimer = null; } }
     function gusClearPoint(){ if (gusPointEl){ gusPointEl.classList.remove('oc-gus-point'); gusPointEl = null; } }
     function gusEndTour(){ gusTourGen++; gusClearTourTimer(); gusClearPoint(); gusStopSpeaking(); if (gusTourBar && gusTourBar.parentNode) gusTourBar.parentNode.removeChild(gusTourBar); gusTourBar = null; }
-    // When the walk-through wraps up (Done or ✕), bring the chat right back so follow-ups are ready.
-    function gusFinishTour(){ gusEndTour(); gusOpen(); }
+    // When the walk-through wraps up (Done or ✕), just end it — leave whatever Gus opened (like the
+    // Map Display tray) usable, and let his always-on-top corner face bring the chat back in one tap.
+    function gusFinishTour(){ gusEndTour(); }
     // Gus talks each step aloud as it lights up. Forced during a tour — tapping "Show me" is an
     // explicit ask for a guided walk-through — but only when the browser can actually speak.
     function gusSpeakTour(text, onDone){
@@ -3694,7 +3695,9 @@
         })(list[i]);
       }
     }
+    function gusCloseDisplayTray(){ try { var d = document.getElementById('displayTray'), b = document.getElementById('displayTrayBackdrop'); if (d) d.classList.remove('open'); if (b) b.classList.remove('show'); } catch(e){} }
     function gusOpen(){
+      gusCloseDisplayTray();   // never sit on top of the Map Display tray — one or the other
       gusBackdrop.classList.add('show');
       if (!gusGreeted){ gusGreeted = true; gusBubble("Howdy — I'm Ol' Gus. Ask me how anything in the app works, or tap one below.", 'gus'); gusRenderStarters(); }
       setTimeout(function(){ try { gusInput.focus(); } catch(e){} }, 60);
@@ -3749,6 +3752,7 @@
     if (gusLauncher) gusLauncher.addEventListener('click', gusOpen);
     var gusGreet = document.getElementById('gusGreet'); if (gusGreet) gusGreet.addEventListener('click', gusOpen);
     document.getElementById('gusClose').addEventListener('click', gusClose);
+    var gusTrayBtn = document.getElementById('displayTrayToggleBtn'); if (gusTrayBtn) gusTrayBtn.addEventListener('click', gusClose);   // opening the Map Display tray tucks the chat away
     gusSend.addEventListener('click', function(){ gusAsk(); });
     gusInput.addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.preventDefault(); gusAsk(); } });
 

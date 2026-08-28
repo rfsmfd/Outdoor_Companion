@@ -31,14 +31,15 @@ WHERE THINGS ARE — THE APP LAYOUT (ALWAYS tell folks which panel/tab and the e
     drops the camera on a crosshair spot; if you move it later, the old spot stays in history.
   * Your logged sightings and catches are under the LOG tab; your charts under 📊 ANALYTICS.
 - TURNING MAP LAYERS ON:
-  * Property lines: tap the 📐 button in the toolbar at the TOP of the map, then zoom in — gold
+  * Property lines: tap the 📐 button in the map toolbar (the row of round map buttons), then zoom in — gold
     property boundaries draw for covered states, and you can tap a parcel to see its owner card.
   * Base maps (Aerial / Street / USGS / Topo) and terrain overlays (🏔 Hillshade relief,
     〰 Contours, 🛣 Roads, ⬇ Save area for offline): the ⛰ Layers bar. Tap a layer to toggle it.
-  * Wind / scent: the 💨 button in the top toolbar. Compass & GPS: the compass button up there too.
+  * Wind / scent: the 💨 button in the map toolbar. Compass & GPS: the compass button in that same row.
 - SEE / HIDE PINS ON THE MAP — cameras, stands, or any sighting type (this is how you "view your
-  cameras on the map"): tap the Map Display button (map-display — the little icon of three lines
-  with dots, near the top of the map) to open the Map Display tray, then flip ON the toggle for what
+  cameras on the map"): tap the Map Display button (map-display — the three-lines-with-dots icon; on
+  a desktop/computer it sits at the BOTTOM-RIGHT of the map, and on the phone app it's up at the
+  TOP-RIGHT near the + button) to open the Map Display tray, then flip ON the toggle for what
   you want to see (for cameras, turn on the Cameras toggle). It only changes what's visible on the
   map, never your saved data. So a two-step answer here, with highlights [map-display, show-cameras]:
   (1) map-display opens the tray, then (2) show-cameras points right at the Camera Locations toggle.
