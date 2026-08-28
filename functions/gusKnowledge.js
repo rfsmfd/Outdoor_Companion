@@ -246,6 +246,247 @@ DATA IN & OUT
   conditions.
 - Full backup / restore: a complete copy of everything, to reload or migrate.
 
+==================================================================================
+STEP-BY-STEP HOW-TO — the full click-by-click for every workflow. When someone asks
+"how do I..." pull the matching steps from here, in Gus's own warm words. Controls
+were verified against the live app. (Map toolbar buttons — 📐 property lines, 💨
+wind, compass, Map Display — sit at the BOTTOM-RIGHT of the map on a computer and at
+the TOP-RIGHT near the + button on the phone app.)
+==================================================================================
+
+GETTING STARTED
+HOW TO sign in / get started: 1) On the sign-in splash, type your Email and Password (tap the 👁 to
+see it). 2) Tap LOG IN — or, if you're new, tap CREATE ACCOUNT, enter an email + a password (6+
+characters), and CREATE ACCOUNT; "Log in instead" switches back, "Forgot password?" resets it. 3)
+Signed in, your data lives in your cloud account and syncs across phone + desktop on its own. 4) The
+app works offline (map, GPS, your farms cached), but sign in BEFORE you lose signal. 5) Sign out from
+the pill at the top-right of the map (the 🔄 there reloads the app).
+HOW TO switch Hunting <-> Fishing: at the top of the LEFT PANEL tap 🏹 Hunting or 🎣 Fishing. It
+swaps every site type, Quick-Log type, map pin, and word (a "Property" becomes a "Lake", a "sighting"
+a "catch", a "Hunt" a "Trip"); each mode shows only its own data.
+
+YOUR GROUND
+HOW TO add a Property / farm (a Lake in fishing): 1) Pan/zoom the map to frame the whole property. 2)
+Tap the ⚙ button by the Property dropdown (top of the left panel) to open Manage Properties. 3) Type
+a name. 4) Tap "+ Save This Map View as a Property". 5) The Property Setup wizard opens (reopen it
+anytime from ⚙ Properties -> Set up).
+HOW TO draw a property boundary (hunting): 1) In the Property Setup wizard, on "1. Draw the boundary"
+tap Draw. 2) The map flies to your farm with parcel lines as a guide. 3) Click each corner (follow
+the parcel line where right, cut your own where wrong). 4) Click your first point again to close it.
+5) It then offers to attach every stand/camera/sighting/hunt/path inside the line to that farm in one
+tap. Boundary is editable forever (Redraw); acreage then shows in the Property dropdown.
+HOW TO run the Property Setup wizard (hunting): open ⚙ Properties -> Set up (tap the ? on any step for
+help; it saves as you go). Steps: 1 Draw the boundary; 2 "Scan field vs woods" (tap Scan to auto-read
+cover; fix under the 🌲 Cover layer); 3 Import/add stands & cameras (Import a file, or + Add Site by
+hand); 4 Parking/entry points (tap Add, tap where you park); 5 Access paths (tap Draw, trace your
+walk-in lanes); 6 Feeding areas and 7 Bedding areas (tap Add, mark each). (In fishing it's just two
+steps: boat ramps & access, then mark your spots, plus an optional 📐 Lake acreage panel.)
+HOW TO set lake acreage (fishing): in the Lake's setup, use the 📐 Lake acreage panel — type the
+known acreage and Save, or "Trace the outline for exact acreage". It powers catch-per-acre.
+HOW TO add a Site / Stand: 1) LEFT PANEL, Sites tab (phone: open it with the ☰ menu top-left). 2) Tap
+"+ Add Site". 3) Tap the spot on the map. 4) Fill Name, pick a Type (Trail Camera, Tree Stand,
+Parking/Access, Feeding, Bedding, Water, Custom Point... fishing: Boat Ramp, Dock, Favorite Hole,
+Structure, Drop-off, Brush Pile, etc.), optionally a Property, and Notes. 5) Tap "Save Site" (if you
+don't pick a Property it auto-links to the farm it sits inside).
+HOW TO add a site where you're standing: LEFT PANEL -> "📍 My Location" grabs a fresh GPS fix and
+opens Add Site right there; fill Name/Type and Save Site.
+HOW TO record a trail as you walk: 1) Tap the ⚫ Record Trail button (left side of the map, above 🧭
+Follow Me). 2) Walk it — a live line and distance/time show. 3) Tap ⚫ again to stop. 4) Name it, pick
+a Type (Access Trail / Boat Route / Game Trail / Custom), color, and line style (Solid/Dashed/Dotted).
+HOW TO draw a trail on the map: tap the ✏️ Draw-a-path button (map toolbar), click along the lane at
+each bend, double-click to finish, name it and set its style. Saves as an Access trail.
+HOW TO manage trails: LEFT PANEL -> "🥾 Trails" — Show/Hide, Edit (rename/recolor/restyle; never
+changes the path), or Delete. You can also tap a trail line on the map to edit it there. Line style
+tells the Walk-In planner how you travel it: Solid = vehicle-ready, Dashed = walk-only, Dotted =
+walk-only & rough.
+HOW TO switch the base map: tap "⛰ Layers" to open the layer bar, tap Aerial / Street / USGS / Topo.
+Terrain overlays (🏔 Hillshade, 〰 Contours, 💧 Streams, 🌲 Cover) live in that same bar.
+HOW TO use Follow Me: tap the 🧭 Follow Me button (left side of the map); it recenters on your live
+blue dot as you walk, and turns off the moment you pan. Tap again to re-enable.
+
+IN THE FIELD
+HOW TO Quick-Log a buck/doe/sign/catch: 1) Tap the orange "+" at the map's top-right. 2) Tap the type
+tile. 3) On "Confirm Location", tap "📍 Use My Location (fast)" if it happened where you stand, OR pan
+the crosshair to the real spot and tap "Confirm This Spot". 4) Moon attaches instantly; weather fills
+in a few seconds later on its own.
+HOW TO tag a buck sighting to a named buck in the moment: when Quick-Logging a Buck, on Confirm
+Location tap a chip in the "Which buck?" row — the sighting lands on his timeline (optional).
+HOW TO mark travel direction: for a Buck/Doe/Bear/Turkey, tap a compass chip in the "Heading which
+way?" row on Confirm Location — the pin gets a heading arrow.
+HOW TO start/end a Hunt or Trip: tap the "🏹 Start Hunt" pill at the top-center of the map (🎣 Start
+Trip in fishing); confirm the property if asked; a live bar tracks time + count; tap "End Hunt" to
+finish (a summary toast shows).
+HOW TO Log a Sit: tap "End Hunt" (the sheet auto-pops) or "📓 Log a Sit" in the left panel. Pick the
+stand, tap the movement (💤 Dead / 🐾 Slow / 🦌 Steady / 🔥 Hot), bump doe/buck counts and tap chips
+for named bucks seen, optionally mark a harvest/shot + note, Save. (If you Quick-Logged during the
+sit, counts pre-fill — just top up; it saves only the difference.)
+HOW TO open the Journal: LEFT PANEL -> "📋 Hunt Journal" (Fish Journal in fishing). Sessions group by
+day, newest first; use the All Time / This Week / This Month / Custom filters; tap a row to expand.
+HOW TO fix a hunt's times: in the Journal, tap "Set End Time" on an in-progress session, or "fix
+start time" on any row, and enter the real time in the picker.
+
+TRAIL CAMERAS
+HOW TO register a camera: point your phone's NORMAL Camera app at the printed QR tag and tap the link
+-> "🏷 Register / Edit Details" -> fill Name/Make/Model/Notes -> "Save Details". (The "🏷 Register
+Camera" button on the Cameras tab just reminds you to use the phone's camera, with an in-app scanner
+fallback.)
+HOW TO deploy a camera: scan its tag (or "📷 Deploy Camera" on the Cameras tab) -> "📷 Deploy Here
+(use my GPS)" -> pick an existing place or drop & name a new spot -> pan the orange crosshair to the
+exact spot -> "Lock In Deployment".
+HOW TO move a camera: physically move it, scan the same tag again, "📷 Deploy Here" and deploy — the
+old spot is kept forever in Deployment History automatically (no un-deploy step).
+HOW TO pick up a camera: Cameras tab -> the camera's row -> "Pick Up" -> confirm. It ends the
+deployment, drops the live pin, and leaves the camera ready to redeploy (no re-registration).
+HOW TO see deployment history: Cameras tab -> the camera's row -> "📜 History" (date/GPS/weather/moon
+per spot, permanent); "View on Map" shows a dashed-yellow marker at that old spot.
+HOW TO batch-generate QR tags: Cameras tab -> "🖶 Batch Generate QR Codes" (ONLY for brand-new
+cameras — makes new unique codes) -> enter how many + a name prefix -> print single-sided. Do a big
+batch in one run (numbering restarts each run).
+HOW TO re-print an existing camera's tag: Cameras tab -> "Print / Re-print Sheet" (reuses its code,
+keeps history). Never use Batch Generate for a replacement — that makes a second, disconnected camera.
+
+PHOTOS, AI TAGGING & SORTING
+HOW TO browse the Photo Gallery: LEFT PANEL -> "🧰 Tools & Data" -> "📸 Photo Gallery". Filter by
+farm / location / camera / species; tick "group bursts" to collapse a burst into one visit; tap a
+photo for the full-screen viewer (scroll to zoom, ‹ › to page).
+HOW TO clean up empty misfire photos: in the Photo Gallery, first tap "🔍 Find blank frames · free
+(do this first)" (flags wind/heat misfires, no AI cost) — checked photos get deleted, uncheck any
+real animal, confirm. Then "🧹 Clean up empty frames" reviews the AI-flagged empties the same way.
+Both deletes are permanent.
+HOW TO name/create a buck: LEFT PANEL -> "🦌 Buck Gallery" -> type a name (+ optional notes) -> "+
+Create Profile" (you can make him before you have a photo).
+HOW TO sort unnamed buck photos by eye (free Step 2): Photo Gallery -> "🧩 Step 2 · Group bucks" ->
+named bucks are folders on top, unlinked buck photos cluster by antler traits below. Tap photos to
+select (green ✓), or tap "⚡" to grab a whole burst; then tap a buck's folder to tag them, or "➕ New
+buck" to make one, or a cluster's "🦌 Name & link all". Park many-buck frames in the "🦌🦌 Multi-buck"
+holder. Nothing links until you tag it.
+HOW TO set bucks aside ("🚫 Not tagging"): on the Step 2 board, select the buck photos you won't ID,
+tap "🚫 Not tagging" — they leave the board but still count as buck activity (the "Not interested"
+bin brings them back).
+HOW TO run AI "Which buck?": open a buck photo -> "🦌 Link to buck…" -> "🔍 Which buck? (AI)" (needs
+at least one named buck). It ranks your known bucks with reasoning; you confirm. To match many at
+once, use "🦌 Step 3 · Match" on the sort board (a paid step, ~½¢ each; free Step-2 sorting never
+spends).
+HOW TO read a buck's Huntability: "🦌 Buck Gallery" -> tap his row -> read the 🎯 Huntability card
+(daylight-movement %, a Heating/Steady/Gone-quiet verdict, a when-he-moves chart, and Best window
+tonight); toggle 7/14/30 days.
+HOW TO play his movement / see where he's been: "🦌 Buck Gallery" -> his row -> "🎬 Movement timeline"
+(plays his track in date order) or "📍 Where he's been (map)" (sized rings on his hotspots).
+
+PLAN A HUNT
+HOW TO Plan a Hunt: LEFT PANEL -> "🗓 Plan a Hunt". If you hunt several farms it asks which farm
+first; then pick "Now" or an upcoming forecast sit (each with a go/caution/no-go stoplight); that sets
+the conditions for the rest.
+HOW TO see Where to Hunt: LEFT PANEL -> "🎯 Where to Hunt". Set the "🗓 When are you sitting?" window
+(Now->dark / Light->noon / Noon->dark / All day) and the "🏹 How do you hunt?" style; read the
+"TONIGHT'S CALL" pick, then the ranked stands (each with property, a red/yellow/green scent stoplight,
+recent activity), and the "🦌 Bucks in play" list.
+HOW TO switch hunting style: in "🎯 Where to Hunt", the "🏹 How do you hunt?" row — "🌞 Daylight
+zones" (rank the best daylight-activity areas across all your bucks) or "🎯 Target a buck" (lock on
+one). It re-ranks instantly and is remembered.
+HOW TO use the Walk-In planner: LEFT PANEL -> "🚶 Walk-In". Pick the stand; set "Getting there on"
+(Walk / eBike / UTV / Truck); choose "🕶 Stealth" or "➡ Direct"; use the "🚶 Walk In / 🌙 Walk Out"
+toggle (Walk Out keeps you off the fields leaving an evening sit); where a field's in the way pick
+"✂ Cut the field" or "🌲 Edge around".
+HOW TO use Hunt Mode (HUD): LEFT PANEL -> "🎯 Hunt Mode" -> pick your stand -> read the shooting-light
+countdown, the scent line for that stand (clean vs swirling), and the raw wind + thermal underneath.
+
+READ THE LAND
+HOW TO turn on LiDAR terrain: "⛰ Layers" -> "🏔 Hillshade" (pick Relief+ / Relief / Elevation tint +
+strength slider); "〰 Contours" (own transparency); "💧 Streams" for creeks/drainages. Tap a layer
+again to turn it off.
+HOW TO read elevation: "⛰ Layers" -> "📈 Elev" -> "Draw profile" (click a line across the ground,
+"✓ Finish" for high/low/relief/length) or "Tap for height" (tap the map to read feet; a second tap
+shows the difference).
+HOW TO turn on Thermals: zoom in, "⛰ Layers" -> "🌡 Thermals" — amber = rising uphill (morning), blue
+= draining downhill (evening/night), grey = midday. A forecast time slider appears at the bottom to
+scrub ahead; "Now" snaps back.
+HOW TO turn on Scent cones: "⛰ Layers" -> "🌬 Scent cones" — a cone at each hunt spot shows where your
+scent blows now (red = a downwind deer smells you); tight cone = predictable, wide/fuzzy = swirling,
+ring = dead calm. The bottom time slider checks a future hour.
+HOW TO read/edit Cover: "⛰ Layers" -> "🌲 Cover" (or "Scan field vs woods" in Property Setup) paints
+field/hardwood/pine/cutover/etc. across your ground + ½ mile. Use "Fade" to compare to the aerial. Tap
+"✏️ Edit" to correct a patch (tap a block / box / area / line, pick what it really is), or "🖌 Paint"
+to drag-fill.
+HOW TO show wind arrows: tap the "💨" button in the map toolbar — arrows point where the wind (and
+your scent) travels, with a "12 mph from NW" label. Tap "💨" again to clear; re-tap after panning far.
+HOW TO run Terrain Read: pick a farm in the top Property dropdown, LEFT PANEL -> "🗺 Terrain Read". It
+points out cover + terrain features (📌 Timber point, 📐 Inside corner, ⏳ Pinch/neck, saddles,
+benches...) as candidates to verify; tap a row to fly to it. (Run "Field vs woods" in Property Setup
+first if it asks.)
+HOW TO use Scout Mode: LEFT PANEL -> "🔍 Scout Mode" (shows all sign & conjecture marks at once). Then
+"➕ Add a Mark" to drop a pin, "✏️ Draw a Line" for a rub line/corridor, "🔍 Scouting Report" for the
+composite read. Tap "🔍 Scout Mode" again to turn it off.
+HOW TO run Camera Plan: pick a farm in the top dropdown, LEFT PANEL -> "📸 Camera Plan". Read
+"📷 MY CAMERAS" (a verdict on each; set 📌 Anchor / 🎈 Float roles; ★ = shared, can't move), and
+"🎯 SUGGESTED SPOTS" (where to hang one to cover a gap — shown as 📷 map pins with capture rings). On
+a suggestion, "📍 Show on map" or "📷 Drop a mark".
+
+PROPERTY LINES & OWNER CARDS
+HOW TO see property lines + an owner card: zoom in to property level, tap the "📐" button in the map
+toolbar — gold parcel lines appear (they auto-hide zoomed way out, return when you zoom in). Tap a
+parcel for its card: Owner, Owner mailing, Site address, Acreage (GIS/Deed), Map ID — whatever the
+state publishes. Where a state doesn't publish owner, you get the boundary + an honest "owner is at
+the county assessor" note. Coverage varies by state (the 📐 tooltip lists covered states).
+
+CONDITIONS
+HOW TO view the Solunar Table: LEFT PANEL -> "🧰 Tools & Data" -> "⭐ Solunar Table" — the day's major
+(~2 hr) & minor (~1 hr) feeding periods, moon phase, sun times; ◀ ▶ step days, "Jump to Today"
+returns.
+HOW TO check the "When to Fish" bite forecast: in fishing mode, Tools & Data -> "🎣 When to Fish" —
+a verdict + 0-99 score (🔥 Prime / 👍 Good / 😐 Fair / 💤 Slow), the day's best windows in clock time,
+and what's driving it (solunar strength, first/last-light overlap, pressure trend).
+
+ANALYTICS
+HOW TO open Analytics + read the charts: LEFT PANEL -> "📊 Analytics" tab. Set the filter bar (Data
+Source Photos/Sightings/Both, Date Range, Property, and a Subject drill-down). Scroll the charts: By
+Moon Phase, Wind, Pressure Trend, Temperature, Time of Day, Solunar, By Site, By Property, and (hunt)
+By Buck. (Fishing adds By Species / Lure / Weight.) Under ~15 entries it warns the pattern may be
+noise.
+HOW TO see By Lake + catch-per-acre (fishing): Analytics tab -> the "🎣 By Lake" and "🎣 Catch per
+acre (by lake)" charts (needs each lake's acreage, set in ⚙ Manage Properties).
+HOW TO build a Custom Query (DESKTOP only — hidden on phones): Analytics tab -> "🔧 Custom Query" ->
+add Conditions (match ALL/ANY), pick a "Break Down By" dimension, pick "Show As" (Bar / Pie / Total /
+Detection Rate / Count Markers / Heat Map / Home Range Rings), "▶ Run Query". Draw an area to limit it
+with "▭ Box / ◯ Circle / ⬟ Shape" then "▶ Run"; "✕ Clear" removes it. Home Range Rings need 3+
+matching sightings.
+
+FISHING
+HOW TO enter catch details: in fishing mode tap a fish catch pin -> fill Weight, Length, Lure, Color,
+Tag # (if tagged), and "📷 Take / Choose Photo". Every field auto-saves; "Save Details" just closes.
+HOW TO look up Tag History: fishing mode -> Log tab -> "🏷 Search Tag History" -> type a tag # -> see
+every catch of that exact fish (date, weight, length, lure, weather, moon, photo).
+HOW TO read spot intel: fishing mode -> tap a marked spot pin -> "🎣 Spot intel" (count, top species,
+your biggest, hot lure, best pressure/season). Catches auto-attach to a spot within ~25 yards.
+
+SHARE WITH YOUR CAMP
+HOW TO create or join a group: top account bar -> the scope dropdown ("📁 My Data") -> "＋ Create a
+group…" (name it, share the invite code) or "🔑 Join with a code…" (enter a code). The group then
+shows as "🤝 <name>" in that dropdown.
+HOW TO switch My Data <-> the camp: the scope dropdown — "📁 My Data" for private, "🤝 <group>" for
+the pooled camp set; "⚙ Group info & invite code…" opens details, "🚪 Leave this group…" leaves.
+HOW TO share a whole farm: be in a group, tap ⚙ by the Property dropdown -> Manage Properties -> on
+the farm tap "🤝 Share" -> pick the group -> confirm. Shares the whole farm (boundary/stands/trails/
+sightings/cameras/photos) read-only; new items auto-share. Only farms you share are visible; the rest
+stays private. Use "🔗 Attach inside" to pull in spots not yet linked to the farm.
+HOW TO set member permissions (owner): scope dropdown -> the group -> "⚙ Group info…" -> a member's
+"⚙ Permissions" -> role Viewer / Suggester / Editor, tick which data types it covers, optionally
+"Allow AI matching" (billed to you), Save.
+HOW TO suggest / approve a buck tag: a Suggester opens a shared photo and uses "💬 Suggest a buck…"
+(goes to the owner's inbox); the owner opens their Photo Gallery -> "💬 N teammate suggestions" ->
+"✓ Approve" (or Approve all). An Editor's "🦌 Link to buck…" applies instantly.
+HOW TO sort the camp's bucks together: switch to the group scope, open the Photo Gallery Step-2 board
+— it pools everyone's shared buck photos; an Editor tags directly, a Suggester's picks go to the
+owner's inbox, a Viewer looks only.
+
+DATA IN & OUT
+HOW TO export: LEFT PANEL -> "🧰 Tools & Data" -> "Export" -> pick KMZ (Google Earth) / CSV (Google
+Maps) / GPX (GPS) / GeoJSON (ArcGIS), or "📦 Export Both — One Zip". Exports carry photos, weather &
+moon and include both hunting + fishing records.
+HOW TO back up / restore: in the Export dialog's "Full Data Backup" section, "💾 Download Full Backup"
+saves one complete file of everything; "📤 Restore From Backup File" loads it back (replaces current
+data, so it confirms first).
+
 ABOUT THE APP & WHO MADE IT (share this warmly if folks ask)
 Outdoor Companion is made by Faison Digital Works, LLC. It was built by a lifelong hunter and
 fisherman — a fella with around sixty years in the woods and on the water — first and foremost
