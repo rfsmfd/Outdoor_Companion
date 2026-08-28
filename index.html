@@ -1840,7 +1840,7 @@
   /* ---------- Ol' Gus — in-app help companion ---------- */
   .gus-face{ display:block; width:100%; height:100%; }
   /* His little corner — steps out & waves when the app opens */
-  #gusCorner{ position:fixed; left:16px; bottom:18px; z-index:2400; pointer-events:none; font-family:inherit; }
+  #gusCorner{ position:fixed; left:16px; bottom:18px; z-index:100058; pointer-events:none; font-family:inherit; }
   #gusLauncher{ pointer-events:auto; width:60px; height:60px; border-radius:50%; border:2px solid #D4B24C; background:#241810; padding:0; overflow:hidden; cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,.55); transition:transform .15s ease; }
   #gusLauncher:hover{ transform:scale(1.06); }
   #gusLauncher:active{ transform:scale(.96); }
@@ -1856,7 +1856,7 @@
   @media (prefers-reduced-motion: reduce){ #gusCorner.gus-entrance #gusLauncher,#gusCorner.gus-entrance #gusWave,#gusCorner.gus-entrance #gusGreet{ animation:none !important; } #gusWave{ opacity:0; } }
   /* The panel is NON-BLOCKING + DRAGGABLE, so the map/app stays live behind Gus while he walks you
      through steps as you actually do them (same pass-through trick as the Manage Trails sheet). */
-  #gusModalBackdrop.show{ display:block; background:transparent; pointer-events:none; }
+  #gusModalBackdrop.show{ display:block; background:transparent; pointer-events:none; z-index:100050; }
   #gusModal{ pointer-events:auto; position:fixed; left:16px; bottom:88px; top:auto; width:360px; max-width:92vw; max-height:62vh; display:flex; flex-direction:column; box-shadow:0 14px 44px rgba(0,0,0,.6); }
   #gusModal h3{ cursor:grab; user-select:none; gap:8px; }
   #gusModal h3.gus-grabbing{ cursor:grabbing; }
@@ -1880,7 +1880,7 @@
   .gus-showme:hover{ filter:brightness(1.06); }
   .oc-gus-point{ box-shadow:0 0 0 4px #F0CE6A, 0 0 34px 12px rgba(212,178,76,.8) !important; border-radius:9px !important; animation:gusPointPulse 1.05s ease-in-out infinite; }
   @keyframes gusPointPulse{ 0%,100%{ box-shadow:0 0 0 4px #D4B24C, 0 0 22px 7px rgba(212,178,76,.6) !important; } 50%{ box-shadow:0 0 0 8px #F0CE6A, 0 0 50px 20px rgba(212,178,76,.98) !important; } }
-  .gus-tour-bar{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:100062; display:flex; align-items:center; gap:11px; background:#14201a; border:1px solid #D4B24C; border-radius:14px; padding:9px 11px 9px 10px; box-shadow:0 12px 40px rgba(0,0,0,.6); color:#e8f0ea; max-width:min(94vw,560px); font-size:14px; }
+  .gus-tour-bar{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:100056; display:flex; align-items:center; gap:11px; background:#14201a; border:1px solid #D4B24C; border-radius:14px; padding:9px 11px 9px 10px; box-shadow:0 12px 40px rgba(0,0,0,.6); color:#e8f0ea; max-width:min(94vw,560px); font-size:14px; }
   .gus-tour-face{ width:32px; height:32px; border-radius:50%; overflow:hidden; border:1px solid #D4B24C; flex:0 0 auto; background:#241810; }
   .gus-tour-label{ flex:1; line-height:1.35; }
   .gus-tour-label b{ color:#D4B24C; }
@@ -2052,7 +2052,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 539</div>
+    <div id="buildBadge">BUILD 540</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3614,6 +3614,8 @@
     function gusClearTourTimer(){ if (gusTourTimer){ clearTimeout(gusTourTimer); gusTourTimer = null; } }
     function gusClearPoint(){ if (gusPointEl){ gusPointEl.classList.remove('oc-gus-point'); gusPointEl = null; } }
     function gusEndTour(){ gusTourGen++; gusClearTourTimer(); gusClearPoint(); gusStopSpeaking(); if (gusTourBar && gusTourBar.parentNode) gusTourBar.parentNode.removeChild(gusTourBar); gusTourBar = null; }
+    // When the walk-through wraps up (Done or ✕), bring the chat right back so follow-ups are ready.
+    function gusFinishTour(){ gusEndTour(); gusOpen(); }
     // Gus talks each step aloud as it lights up. Forced during a tour — tapping "Show me" is an
     // explicit ask for a guided walk-through — but only when the browser can actually speak.
     function gusSpeakTour(text, onDone){
@@ -3640,7 +3642,7 @@
       gusTourBar.querySelector('.gus-tour-label').innerHTML = '<b>Step ' + (idx + 1) + ' of ' + tokens.length + ':</b> tap ' + r.label;
       var next = gusTourBar.querySelector('.gus-tour-next');
       next.textContent = last ? 'Done' : 'Next ▸';
-      next.onclick = function(){ if (last) gusEndTour(); else gusPointStep(tokens, idx + 1); };
+      next.onclick = function(){ if (last) gusFinishTour(); else gusPointStep(tokens, idx + 1); };
       // Narrate the step, then auto-advance once Gus finishes talking (or on a timer if he can't speak).
       var spoken = r.label.replace(/["“”]/g, '').replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[☀-➿️]/g, '').replace(/\s+/g, ' ').trim();
       var lead = (tokens.length === 1) ? 'Here — tap ' : (idx === 0 ? 'Alright, first, tap ' : (last ? 'And last, tap ' : 'Now tap '));
@@ -3660,7 +3662,7 @@
       gusTourBar.innerHTML = '<span class="gus-tour-face"></span><span class="gus-tour-label"></span><button class="gus-tour-next" type="button">Next ▸</button><button class="gus-tour-x" type="button" title="Done" aria-label="Done">✕</button>';
       document.body.appendChild(gusTourBar);
       gusTourBar.querySelector('.gus-tour-face').innerHTML = GUS_AVATAR_SVG;
-      gusTourBar.querySelector('.gus-tour-x').onclick = gusEndTour;
+      gusTourBar.querySelector('.gus-tour-x').onclick = gusFinishTour;
       gusPointStep(tokens, 0);
     }
     function gusRenderStarters(){
