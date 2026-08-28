@@ -1878,6 +1878,9 @@
   /* Ol' Gus "Show me" guided tour */
   .gus-showme{ align-self:flex-start; margin-top:-1px; background:#E8823F; color:#1a1204; border:none; border-radius:12px; padding:8px 13px; font-size:13.5px; font-weight:700; cursor:pointer; box-shadow:0 2px 9px rgba(0,0,0,.32); }
   .gus-showme:hover{ filter:brightness(1.06); }
+  /* pinned Show-me bar — stays put below the messages so it never scrolls out of reach */
+  .gus-showme-bar{ flex:0 0 auto; margin:8px 0 0; padding-top:8px; border-top:1px solid #253128; }
+  .gus-showme-bar .gus-showme{ width:100%; text-align:center; margin-top:0; font-size:14px; padding:10px 13px; }
   .oc-gus-point{ box-shadow:0 0 0 4px #F0CE6A, 0 0 34px 12px rgba(212,178,76,.8) !important; border-radius:9px !important; animation:gusPointPulse 1.05s ease-in-out infinite; }
   @keyframes gusPointPulse{ 0%,100%{ box-shadow:0 0 0 4px #D4B24C, 0 0 22px 7px rgba(212,178,76,.6) !important; } 50%{ box-shadow:0 0 0 8px #F0CE6A, 0 0 50px 20px rgba(212,178,76,.98) !important; } }
   .gus-tour-bar{ position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:100056; display:flex; align-items:center; gap:11px; background:#14201a; border:1px solid #D4B24C; border-radius:14px; padding:9px 11px 9px 10px; box-shadow:0 12px 40px rgba(0,0,0,.6); color:#e8f0ea; max-width:min(94vw,560px); font-size:14px; }
@@ -2052,7 +2055,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 543</div>
+    <div id="buildBadge">BUILD 544</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2354,6 +2357,7 @@
       <h3><span class="gus-hdr-name"><span class="gus-hdr-face" id="gusHdrFace"></span>Ol' Gus</span><button class="gus-iconbtn" id="gusSpeakToggle" title="Read answers aloud">🔇</button><button class="close-x" id="gusClose">&times;</button></h3>
       <div class="gus-sub">Your hunting companion — <span>powered by Claude</span></div>
       <div id="gusMessages" class="gus-messages"></div>
+      <div id="gusShowmeBar" class="gus-showme-bar" style="display:none;"></div>
       <div id="gusStarters" class="gus-starters"></div>
       <div class="gus-inputrow">
         <button class="gus-iconbtn" id="gusMic" title="Ask by voice" aria-label="Ask by voice">🎤</button>
@@ -3457,6 +3461,7 @@
     var gusInput = document.getElementById('gusInput');
     var gusSend = document.getElementById('gusSend');
     var gusStarters = document.getElementById('gusStarters');
+    var gusShowmeBar = document.getElementById('gusShowmeBar');
     var gusHistory = [];   // [{role:'user'|'assistant', text}]
     var gusBusy = false, gusGreeted = false;
     var GUS_STARTERS = ['What can this app do?', 'How do I add a stand?', 'How do I import trail-cam photos?', 'How do property lines work?', 'How do I plan a hunt?'];
@@ -3699,6 +3704,18 @@
         gusStarters.appendChild(b);
       });
     }
+    // The "Show me" button is PINNED below the messages (not in the scroll) so a long answer can't
+    // push it out of reach. Set it from the current answer's highlights; hide it when there are none.
+    function gusSetShowme(hl){
+      if (!gusShowmeBar) return;
+      gusShowmeBar.innerHTML = '';
+      if (!hl || !hl.length){ gusShowmeBar.style.display = 'none'; return; }
+      var b = document.createElement('button'); b.type = 'button'; b.className = 'gus-showme';
+      b.textContent = '👉 Show me on the screen';
+      b.addEventListener('click', function(){ gusStartTour(hl); });
+      gusShowmeBar.appendChild(b);
+      gusShowmeBar.style.display = 'block';
+    }
     // Gus proposes his own natural next questions after each answer — shown as tappable chips.
     function gusRenderFollowups(list){
       gusStarters.innerHTML = '';
@@ -3727,6 +3744,7 @@
       if (!q || gusBusy) return;
       gusInput.value = '';
       gusStarters.innerHTML = '';           // starters clear once the conversation begins
+      gusSetShowme([]);                      // clear any prior "Show me" while this one is answered
       var userBubble = gusBubble(q, 'user');
       gusHistory.push({ role: 'user', text: q });
       gusBusy = true; gusSend.disabled = true;
@@ -3752,12 +3770,7 @@
         if (gusHistory.length > 12) gusHistory = gusHistory.slice(-12);
         gusRenderFollowups((res && res.data && Array.isArray(res.data.followups)) ? res.data.followups : []);
         var hl = (res && res.data && Array.isArray(res.data.highlights)) ? res.data.highlights.filter(function(t){ return GUS_TARGETS[t]; }) : [];
-        if (hl.length){
-          var showBtn = document.createElement('button'); showBtn.type = 'button'; showBtn.className = 'gus-showme';
-          showBtn.textContent = '👉 Show me on the screen';
-          showBtn.addEventListener('click', function(){ gusStartTour(hl); });
-          gusMsgs.appendChild(showBtn);
-        }
+        gusSetShowme(hl);
         gusSpeak(ans);
       } catch(e){
         thinking.classList.remove('thinking');
