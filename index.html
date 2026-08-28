@@ -2052,7 +2052,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 540</div>
+    <div id="buildBadge">BUILD 541</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3584,6 +3584,7 @@
       'wind': { el:'windToggleBtn', map:true, label:'the 💨 wind button' },
       'compass': { el:'compassBtn', map:true, label:'the compass button' },
       'map-display': { el:'displayTrayToggleBtn', map:true, label:'the Map Display button' },
+      'show-cameras': { tray:'camera', map:true, label:'the Camera Locations toggle in the Map Display tray' },
       'mode-hunting': { mod:'hunting', label:'the 🏹 Hunting button' },
       'mode-fishing': { mod:'fishing', label:'the 🎣 Fishing button' },
       'photo-gallery': { tools:true, el:'photoGalleryBtn', label:'"Photo Gallery"' },
@@ -3601,11 +3602,17 @@
         if (sb && window.innerWidth <= 820){ if (t.map) sb.classList.remove('open'); else sb.classList.add('open'); }
         if (t.tab){ var tb = document.querySelector('#tabs .tab-btn[data-tab="' + t.tab + '"]'); if (tb && !tb.classList.contains('active')) tb.click(); }
         if (t.tools){ var tg = document.getElementById('toolsGroup'), tt = document.getElementById('toolsToggleBtn'); if (tg && tt && getComputedStyle(tg).display === 'none') tt.click(); }
+        if (t.tray){   // open the Map Display tray (its rows are pre-built) so the toggle is visible to point at
+          try { if (typeof renderChips === 'function') renderChips(); } catch(e2){}
+          var dt = document.getElementById('displayTray'), dbk = document.getElementById('displayTrayBackdrop');
+          if (dt) dt.classList.add('open'); if (dbk) dbk.classList.add('show');
+        }
       } catch(e){}
       var el = null;
       if (t.el) el = document.getElementById(t.el);
       else if (t.tab) el = document.querySelector('#tabs .tab-btn[data-tab="' + t.tab + '"]');
       else if (t.mod) el = document.querySelector('#moduleSwitcher .module-btn[data-module="' + t.mod + '"]');
+      else if (t.tray) el = document.querySelector('[data-tray-toggle="' + t.tray + '"] .toggle-switch');
       // Only point at something actually visible on screen.
       if (el && (el.offsetParent === null && el.getClientRects().length === 0)) el = null;
       return { el: el, label: t.label };
@@ -8533,6 +8540,7 @@
       : '<span class="dot" style="background:'+t.color+';width:9px;height:9px;border-radius:50%;display:inline-block;"></span>';
     var row = document.createElement('div');
     row.className = 'toggle-row';
+    row.setAttribute('data-tray-toggle', key);   // stable handle so Ol' Gus can point at this exact toggle
     row.innerHTML =
       '<div class="toggle-row-label">' + icon + lbl + '</div>' +
       '<div class="toggle-switch' + (isOn ? ' on' : '') + '"><div class="knob"></div></div>';

@@ -40,8 +40,8 @@ WHERE THINGS ARE — THE APP LAYOUT (ALWAYS tell folks which panel/tab and the e
   cameras on the map"): tap the Map Display button (map-display — the little icon of three lines
   with dots, near the top of the map) to open the Map Display tray, then flip ON the toggle for what
   you want to see (for cameras, turn on the Cameras toggle). It only changes what's visible on the
-  map, never your saved data. So a two-step answer here is: (1) map-display to open the tray, then
-  (2) switch on the pin type you want.
+  map, never your saved data. So a two-step answer here, with highlights [map-display, show-cameras]:
+  (1) map-display opens the tray, then (2) show-cameras points right at the Camera Locations toggle.
 - QUICK LOG (fast field logging): the orange "+" button at the TOP-RIGHT of the map — always there.
 - SWITCH HUNTING <-> FISHING: the 🏹 Hunting / 🎣 Fishing buttons at the top of the LEFT PANEL.
 
@@ -55,7 +55,9 @@ Cameras tab buttons: register-camera (Register Camera), deploy-camera (Deploy Ca
 Tools menu items: photo-gallery, solunar (Solunar Table), journal (Hunt Journal), trails, import
 (Import from other apps), export.
 Top toolbar / map: property-lines (the 📐 button), layers (the ⛰ Layers pill), wind (the 💨 button),
-compass, map-display (the show/hide pins tray), quick-log (the orange + Quick Log).
+compass, map-display (opens the show/hide pins tray), show-cameras (the Camera Locations toggle
+INSIDE that tray — use this as step 2 when someone wants to see their cameras on the map),
+quick-log (the orange + Quick Log).
 Mode switch: mode-hunting, mode-fishing.
 Use the token whose control you actually named in the answer; list them in the order to tap.
 
