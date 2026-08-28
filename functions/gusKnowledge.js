@@ -116,8 +116,24 @@ TRAIL CAMERAS (hunting)
   spot in history forever. Deployment history keeps every spot a camera ever sat, with
   date/GPS/weather.
 - QR tag sheets: batch-print new tags, or reprint a camera's tag (keeps its history).
-- Photo import: bring in a whole card as a ZIP (Reveal / WiseEye / GardePro). It reads each
-  photo's real time so it lands on the right spot and date.
+- Photo import — the WHOLE process (don't stop at the button): on the CAMERAS tab tap "Import
+  Photos", then in the dialog that opens:
+  (1) Pick which camera these photos are from (the "Which camera are these photos from?" dropdown).
+  (2) Choose where they were taken — leave "From a scanned camera site" if you deployed/QR-scanned
+      that camera (it auto-matches the spot by date), OR pick "Set the location for this batch" for a
+      camera you didn't scan, and reuse a saved location or drop a new pin on the map.
+  (3) Tap the Photos picker ("ZIP export from Reveal/WiseEye, or select image files directly") and
+      choose EITHER a ZIP you exported/downloaded from your camera's own app or website
+      (Reveal / WiseEye / GardePro), OR the image files themselves straight off the SD card.
+  (4) If you're loading an SD card to replace lower-res cellular shots with the full-res versions,
+      tick the "🔺 SD card — upgrade to full-res" checkbox (it keeps their tags & site).
+  (5) Tap "Process Photos" (or "🔍 Verify ZIP first" to peek at what's inside before importing).
+  The app reads each photo's real capture time and lands it on the right camera spot and date, with
+  moon & weather stamped from that date. Tip: GardePro doesn't stamp the camera name into the file,
+  so import ONE camera at a time.
+  Accepted files for PHOTO import: a .zip archive (a camera export), or plain image files (JPG /
+  JPEG / PNG). That's different from importing your MAPS/waypoints — see "Import from other apps"
+  below, which takes KML, KMZ, GPX, GeoJSON, or CSV.
 - The app fully works WITHOUT trail cameras — sign, sightings, journal, and terrain stand on
   their own. Cameras enrich it; they're never required.
 
@@ -221,8 +237,11 @@ SHARE WITH YOUR CAMP (group sharing)
   directly.
 
 DATA IN & OUT
-- Import from other apps: KML / KMZ / GPX / GeoJSON / CSV from HuntStand, onX, Google Earth,
-  Garmin, ArcGIS.
+- Import from other apps (your sites, waypoints & trails): open the LEFT PANEL, tap "🧰 Tools &
+  Data" to expand it, then "Import from other apps" (token: import), and pick your file. Accepted
+  formats: KML, KMZ, GPX, GeoJSON, or CSV — the kind onX, HuntStand, Google Earth, Garmin, and
+  ArcGIS export. (This brings in map stuff — pins and trails. Trail-cam PHOTOS come in the other
+  way, through Import Photos on the Cameras tab.)
 - Export: KMZ (Google Earth), GeoJSON (ArcGIS), CSV (Google Maps), GPX (GPS) — with photos and
   conditions.
 - Full backup / restore: a complete copy of everything, to reload or migrate.
