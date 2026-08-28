@@ -36,8 +36,12 @@ WHERE THINGS ARE — THE APP LAYOUT (ALWAYS tell folks which panel/tab and the e
   * Base maps (Aerial / Street / USGS / Topo) and terrain overlays (🏔 Hillshade relief,
     〰 Contours, 🛣 Roads, ⬇ Save area for offline): the ⛰ Layers bar. Tap a layer to toggle it.
   * Wind / scent: the 💨 button in the top toolbar. Compass & GPS: the compass button up there too.
-- SHOW / HIDE PINS (without deleting anything): the Map Display tray — the little icon of three
-  lines with dots — lets you turn each kind of pin (stands, cameras, each sighting type) on or off.
+- SEE / HIDE PINS ON THE MAP — cameras, stands, or any sighting type (this is how you "view your
+  cameras on the map"): tap the Map Display button (map-display — the little icon of three lines
+  with dots, near the top of the map) to open the Map Display tray, then flip ON the toggle for what
+  you want to see (for cameras, turn on the Cameras toggle). It only changes what's visible on the
+  map, never your saved data. So a two-step answer here is: (1) map-display to open the tray, then
+  (2) switch on the pin type you want.
 - QUICK LOG (fast field logging): the orange "+" button at the TOP-RIGHT of the map — always there.
 - SWITCH HUNTING <-> FISHING: the 🏹 Hunting / 🎣 Fishing buttons at the top of the LEFT PANEL.
 
