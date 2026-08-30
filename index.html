@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 551</div>
+    <div id="buildBadge">BUILD 552</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18968,6 +18968,7 @@
   var CF_BASE = 'https://us-east1-outdoor-companion-ee5b3.cloudfunctions.net';
   var FEEDBACK_URL = CF_BASE + '/submitFeedback';
   var CHECK_INVITE_URL = CF_BASE + '/checkInvite';
+  var CHECK_ACCESS_URL = CF_BASE + '/checkAccess';
   var LOG_EVENT_URL = CF_BASE + '/logEvent';
 
   function ocBuildNum(){ try { return (document.getElementById('buildBadge').textContent || '').replace(/[^0-9]/g,''); } catch(e){ return ''; } }
@@ -19101,7 +19102,8 @@
       '<div id="oc-admin-modal">' +
         '<div class="oc-adm-head"><h3>🛠 Owner Console</h3><button type="button" id="oc-adm-refresh" title="Reload">↻</button><button type="button" id="oc-adm-close" title="Close">&times;</button></div>' +
         '<div id="oc-admin-tabs">' +
-          '<button type="button" class="active" data-atab="testers">👥 Testers</button>' +
+          '<button type="button" class="active" data-atab="access">🔑 Access</button>' +
+          '<button type="button" data-atab="testers">👥 Testers</button>' +
           '<button type="button" data-atab="usage">📊 Usage</button>' +
           '<button type="button" data-atab="feedback">💡 Feedback</button>' +
           '<button type="button" data-atab="waitlist">✉ Waitlist</button>' +
@@ -19120,7 +19122,7 @@
       renderAdminTab(this.getAttribute('data-atab'));
     }); }
   }
-  var _adminData = null, _adminTab = 'testers';
+  var _adminData = null, _adminTab = 'access';
   function openAdminConsole(){
     buildAdminModal();
     document.getElementById('oc-admin-backdrop').classList.add('show');
@@ -19140,10 +19142,65 @@
       body.innerHTML = '<div class="empty">' + ocEsc(m) + '</div>';
     }
   }
+  async function adminAccess(fnName, data){
+    var msgEl = document.getElementById('oc-acc-msg');
+    function say(t, good){ var el = document.getElementById('oc-acc-msg'); if (el){ el.textContent = t; el.style.color = good ? '#bcd18a' : '#efb097'; } }
+    if (!data.email || data.email.indexOf('@') < 0){ say('Enter a valid email.', false); return; }
+    say(fnName === 'revokeAccess' ? 'Revoking…' : 'Granting…', true);
+    try {
+      var callable = firebase.app().functions('us-east1').httpsCallable(fnName);
+      await callable(data);
+      _adminData = null;
+      await loadAdminData(true);   // re-renders the Access tab with the fresh list
+      say(fnName === 'revokeAccess' ? 'Access revoked.' : 'Access granted — ' + data.email + '. Let them know they can sign up with that email.', true);
+    } catch(e){
+      say((e && e.message) ? e.message : 'That didn\'t work — try again.', false);
+    }
+  }
   function renderAdminTab(tab){
-    _adminTab = tab || 'testers';
+    _adminTab = tab || 'access';
     var body = document.getElementById('oc-admin-body'); if (!body) return;
     var D = _adminData || {};
+    if (_adminTab === 'access'){
+      var acc = D.access || [];
+      var granted = 0; acc.forEach(function(a){ if (a.active !== false) granted++; });
+      var a = '<p class="muted" style="margin-top:0;font-size:13.5px;">Only approved emails can create an account. Add someone here, then let them know they can sign up with that email.</p>';
+      a += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 4px;">' +
+        '<input id="oc-acc-email" type="email" placeholder="tester@email.com" autocomplete="off" style="flex:2;min-width:180px;padding:12px 13px;border-radius:10px;border:1px solid #566637;background:rgba(15,20,11,.5);color:#efe8d1;font-size:15px;" />' +
+        '<input id="oc-acc-note" type="text" placeholder="name / note (optional)" style="flex:1;min-width:120px;padding:12px 13px;border-radius:10px;border:1px solid #566637;background:rgba(15,20,11,.5);color:#efe8d1;font-size:15px;" />' +
+        '<button type="button" id="oc-acc-grant" style="padding:12px 18px;border:1px solid #8a9a4e;border-radius:10px;background:#79883f;color:#f5f1e0;font-weight:700;font-size:15px;cursor:pointer;">Grant access</button>' +
+        '</div>';
+      a += '<div id="oc-acc-msg" style="min-height:16px;font-size:13.5px;margin:4px 2px 12px;color:#bcd18a;"></div>';
+      if (!acc.length){ a += '<div class="empty">No one approved yet. Add the first tester above.</div>'; }
+      else {
+        a += '<p class="meta" style="margin:0 0 4px;color:#a9b18c;">' + granted + ' approved</p>';
+        a += '<table><thead><tr><th>Email</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>';
+        acc.forEach(function(x){
+          var st, cls;
+          if (x.active === false){ st='Revoked'; cls='off'; }
+          else if (x.signedUp){ st='Signed up'; cls='on'; }
+          else { st='Invited'; cls='mid'; }
+          var act = (x.active === false)
+            ? '<button type="button" class="oc-acc-regrant" data-email="' + ocEsc(x.email) + '" style="background:#31481f;color:#c6e08a;border:none;border-radius:8px;padding:6px 11px;font-size:12.5px;cursor:pointer;">Re-grant</button>'
+            : '<button type="button" class="oc-acc-revoke" data-email="' + ocEsc(x.email) + '" style="background:#4a2c22;color:#efb097;border:none;border-radius:8px;padding:6px 11px;font-size:12.5px;cursor:pointer;">Revoke</button>';
+          a += '<tr><td>' + ocEsc(x.email) + '</td><td class="muted">' + ocEsc(x.note||'') + '</td><td><span class="pill ' + cls + '">' + st + '</span></td><td style="text-align:right;">' + act + '</td></tr>';
+        });
+        a += '</tbody></table>';
+      }
+      a += '<p class="meta" style="margin-top:12px;color:#9aa382;font-size:12.5px;">For now, tell approved folks yourself that they can sign up. (Automatic welcome emails come once the sending account is set up.)</p>';
+      body.innerHTML = a;
+      var grantBtn = document.getElementById('oc-acc-grant');
+      if (grantBtn) grantBtn.addEventListener('click', function(){
+        var em = (document.getElementById('oc-acc-email').value||'').trim();
+        var note = (document.getElementById('oc-acc-note').value||'').trim();
+        adminAccess('grantAccess', { email: em, note: note });
+      });
+      var revBtns = body.querySelectorAll('.oc-acc-revoke');
+      for (var ri=0; ri<revBtns.length; ri++) revBtns[ri].addEventListener('click', function(){ adminAccess('revokeAccess', { email: this.getAttribute('data-email') }); });
+      var regBtns = body.querySelectorAll('.oc-acc-regrant');
+      for (var gi=0; gi<regBtns.length; gi++) regBtns[gi].addEventListener('click', function(){ adminAccess('grantAccess', { email: this.getAttribute('data-email') }); });
+      return;
+    }
     if (_adminTab === 'testers'){
       var ts = D.testers || [];
       if (!ts.length){ body.innerHTML = '<div class="empty">No accounts yet. Testers show up here once they sign up.</div>'; return; }
@@ -19326,9 +19383,10 @@
         secondary.textContent = 'CREATE ACCOUNT';
         passEl.setAttribute('autocomplete','current-password');
       }
-      // Invite gate: the code field + hint only appear when creating an account (test phase).
-      if (inviteEl) inviteEl.style.display = signup ? 'block' : 'none';
-      if (inviteHintEl) inviteHintEl.style.display = signup ? 'block' : 'none';
+      // Access gate (Option #4): sign-up is limited to emails the owner has approved.
+      // No code to type — the email itself is the key — so the invite field stays hidden.
+      if (inviteEl) inviteEl.style.display = 'none';
+      if (inviteHintEl){ inviteHintEl.style.display = signup ? 'block' : 'none'; inviteHintEl.textContent = 'Outdoor Companion is invite-only right now. Sign up with the email the owner approved for you — or join the waitlist below.'; }
       showWaitlist(false);
       setMsg('');
     }
@@ -19361,19 +19419,17 @@
       var email = emailEl.value.trim();
       var pass = passEl.value;
       if (!email || !pass){ setMsg('Enter your email and password.'); return; }
-      // Invite gate — during the invited test phase, creating an account needs a valid code.
+      // Access gate (Option #4) — sign-up is limited to emails the owner has approved.
       if (mode === 'signup'){
-        var code = (inviteEl && inviteEl.value || '').trim();
-        if (!code){ setMsg('Enter your invite code to create an account.'); showWaitlist(true); return; }
-        btn.disabled = true; setMsg('Checking your invite…', true);
+        btn.disabled = true; setMsg('Checking your access…', true);
         var ok = false;
         try {
-          var cr = await fetch(CHECK_INVITE_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: code }) });
+          var cr = await fetch(CHECK_ACCESS_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email: email }) });
           var cj = await cr.json().catch(function(){ return {}; });
           ok = !!(cr.ok && cj && cj.ok);
-        } catch(e){ setMsg('Couldn\'t check that code — check your connection and try again.'); btn.disabled = false; return; }
-        if (!ok){ setMsg('That invite code isn\'t valid. Double-check it, or join the waitlist.'); showWaitlist(true); btn.disabled = false; track('invite_rejected'); return; }
-        track('invite_accepted');
+        } catch(e){ setMsg('Couldn\'t check access — check your connection and try again.'); btn.disabled = false; return; }
+        if (!ok){ setMsg('This email isn\'t on the access list yet. Ask the owner for access, or join the waitlist below.'); showWaitlist(true); btn.disabled = false; track('access_denied'); return; }
+        track('access_granted');
       }
       btn.disabled = true; setMsg(mode === 'signup' ? 'Creating your account…' : 'Signing in…', true);
       try{
