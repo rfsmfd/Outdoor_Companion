@@ -695,18 +695,21 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
   const now = Date.now();
   const DAY = 24 * 3600 * 1000;
 
-  // --- feedback + waitlist + agreements + allowlist (newest first) ---
-  const [fbSnap, wlSnap, agSnap, alSnap] = await Promise.all([
+  // --- feedback + waitlist + agreements + allowlist + activity (newest first) ---
+  const [fbSnap, wlSnap, agSnap, alSnap, uaSnap] = await Promise.all([
     db.collection("feedback").orderBy("createdAt", "desc").limit(200).get().catch(() => ({ docs: [] })),
     db.collection("waitlist").orderBy("createdAt", "desc").limit(200).get().catch(() => ({ docs: [] })),
     db.collection("agreements").limit(2000).get().catch(() => ({ docs: [] })),
     db.collection("allowlist").limit(2000).get().catch(() => ({ docs: [] })),
+    db.collection("userActivity").limit(2000).get().catch(() => ({ docs: [] })),
   ]);
   const feedback = fbSnap.docs.map((d) => d.data());
   const waitlist = wlSnap.docs.map((d) => d.data());
   const agreements = {};   // uid -> { acceptedAt, version }
   agSnap.docs.forEach((d) => { agreements[d.id] = d.data(); });
   const access = alSnap.docs.map((d) => d.data());
+  const activity = {};     // uid -> lastSeenAt (real app-open time, not just password sign-in)
+  uaSnap.docs.forEach((d) => { const v = d.data(); activity[d.id] = v.lastSeenAt || 0; });
 
   // --- telemetry aggregates (last 30 days), anonymous ---
   const telSnap = await db.collection("telemetry")
@@ -747,6 +750,8 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
     res.users.forEach((u) => {
       const em = (u.email || "").toLowerCase();
       const lastSignIn = u.metadata && u.metadata.lastSignInTime ? Date.parse(u.metadata.lastSignInTime) : 0;
+      // Real "last active" = the later of a fresh sign-in and the app-open heartbeat.
+      const lastActive = Math.max(lastSignIn, activity[u.uid] || 0);
       const fbCount = (fbByEmail[em] || 0) + (fbByUid[u.uid] || 0);
       const ag = agreements[u.uid];
       testers.push({
@@ -754,7 +759,8 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
         uid: u.uid,
         createdAt: u.metadata && u.metadata.creationTime ? Date.parse(u.metadata.creationTime) : 0,
         lastSignIn: lastSignIn,
-        daysQuiet: lastSignIn ? Math.floor((now - lastSignIn) / DAY) : null,
+        lastActive: lastActive,
+        daysQuiet: lastActive ? Math.floor((now - lastActive) / DAY) : null,
         feedbackCount: fbCount,
         agreedAt: ag ? (ag.acceptedAt || 0) : 0,
         agreedVersion: ag ? (ag.version || 0) : 0,
@@ -762,7 +768,7 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
     });
     pageToken = res.pageToken;
   } while (pageToken);
-  testers.sort((a, b) => (b.lastSignIn || 0) - (a.lastSignIn || 0));
+  testers.sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
 
   // Mark which approved emails have actually created an account yet.
   const testerEmails = {};
@@ -786,6 +792,22 @@ exports.recordAgreement = onCall({ region: "us-east1" }, async (request) => {
   const email = (request.auth.token && request.auth.token.email) || "";
   await admin.firestore().collection("agreements").doc(uid).set({
     uid: uid, email: email, version: version, acceptedAt: Date.now(),
+  }, { merge: true });
+  return { ok: true };
+});
+
+/**
+ * Heartbeat — stamps a signed-in user's LAST-ACTIVE time (userActivity/{uid}). Firebase Auth's
+ * lastSignInTime only moves on a fresh password sign-in, but the app keeps sessions alive, so it
+ * badly understates real use. The console roster uses max(lastSignIn, lastSeenAt) instead.
+ * Called on app open while signed in. Cheap; identity here is fair (it's the tester's own account).
+ */
+exports.heartbeat = onCall({ region: "us-east1" }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) return { ok: false };
+  const email = (request.auth.token && request.auth.token.email) || "";
+  await admin.firestore().collection("userActivity").doc(uid).set({
+    uid: uid, email: email, lastSeenAt: Date.now(),
   }, { merge: true });
   return { ok: true };
 });
