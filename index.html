@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 556</div>
+    <div id="buildBadge">BUILD 557</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -19005,6 +19005,46 @@
   try { window.track = track; } catch(e){}
   // One anonymous "app opened" ping per load, deferred so module/demo state has settled.
   try { setTimeout(function(){ try { track('app_open'); } catch(e){} }, 1500); } catch(e){}
+
+  // Contribute sightings/catches to the anonymized crowd movement dataset (deer & fish vs conditions).
+  // Coarsened ON THIS DEVICE before sending — exact coords rounded to a ~15-mi cell, no identity, no
+  // exact day, no property/site/notes/photos. Never runs in demo or signed-out. Idempotent server-side.
+  function syncAggregate(){
+    try {
+      if (typeof demoMode !== 'undefined' && demoMode) return;
+      if (typeof firebase === 'undefined' || !firebase.functions || !firebase.auth || !firebase.auth().currentUser) return;
+      var sent = {};
+      try { sent = JSON.parse(localStorage.getItem('oc_aggr_sent') || '{}') || {}; } catch(e){}
+      var items = [], ids = [];
+      (typeof observations !== 'undefined' ? observations : []).forEach(function(o){
+        if (!o || !o.id || sent[o.id]) return;
+        if (o.lat == null || o.lng == null) return;
+        if (o.weatherStatus === 'pending') return;   // wait until conditions resolved (caught next load)
+        var mod = (typeof OBS_TYPES_HUNTING !== 'undefined' && OBS_TYPES_HUNTING[o.type]) ? 'hunting'
+                : (typeof OBS_TYPES_FISHING !== 'undefined' && OBS_TYPES_FISHING[o.type]) ? 'fishing' : '';
+        var d = new Date(o.createdAt || Date.now());
+        var w = o.weather || {};
+        items.push({
+          k: o.id, module: mod, type: o.type,
+          region: { lat: Math.round(o.lat/0.25)*0.25, lng: Math.round(o.lng/0.25)*0.25 },   // coarse cell only
+          hour: d.getHours(), month: d.getMonth()+1, year: d.getFullYear(),
+          moon: (typeof o.moonPhase === 'number') ? o.moonPhase : null,
+          solunar: o.solunarPeriod || null,
+          weather: o.weather ? { tempF:w.tempF, windDir:w.windDir, windMph:w.windMph, pressureInHg:w.pressureInHg, pressureTrend:w.pressureTrend, cloudCoverPct:w.cloudCoverPct, humidity:w.humidity } : null,
+          depthFt: (o.depthFt != null) ? o.depthFt : null,
+          headingDir: o.headingDir || null
+        });
+        ids.push(o.id);
+      });
+      if (!items.length) return;
+      var chunk = items.slice(0, 500), chunkIds = ids.slice(0, 500);
+      firebase.app().functions('us-east1').httpsCallable('contributeAggregate')({ items: chunk }).then(function(){
+        chunkIds.forEach(function(id){ sent[id] = 1; });
+        try { localStorage.setItem('oc_aggr_sent', JSON.stringify(sent)); } catch(e){}
+      }).catch(function(){});
+    } catch(e){}
+  }
+  try { window.syncAggregate = syncAggregate; } catch(e){}
   function openFeedback(context){
     if (!document.getElementById('oc-feedback-backdrop')) buildFeedbackModal();
     var bd = document.getElementById('oc-feedback-backdrop');
@@ -19105,6 +19145,7 @@
           '<button type="button" class="active" data-atab="access">🔑 Access</button>' +
           '<button type="button" data-atab="testers">👥 Testers</button>' +
           '<button type="button" data-atab="email">📣 Email</button>' +
+          '<button type="button" data-atab="insights">📈 Insights</button>' +
           '<button type="button" data-atab="usage">📊 Usage</button>' +
           '<button type="button" data-atab="feedback">💡 Feedback</button>' +
           '<button type="button" data-atab="waitlist">✉ Waitlist</button>' +
@@ -19263,6 +19304,31 @@
       });
       h += '</tbody></table><p class="meta" style="margin-top:12px;color:#9aa382;font-size:12.5px;">“Feedback” counts suggestions/bugs each tester sent. Anonymous usage (below, in 📊 Usage) is group-wide and not tied to names — by design.</p>';
       body.innerHTML = h;
+    } else if (_adminTab === 'insights'){
+      var ins = D.insights || {};
+      var b = '<p class="muted" style="margin-top:0;font-size:13.5px;">The anonymized <strong>movement database</strong> — every sighting &amp; catch pooled by conditions, coarse region only. No names, no exact spots. This is what makes the app smarter as it grows.</p>';
+      if (!ins.total){ b += '<div class="empty">No pooled records yet. They flow in automatically as you and your testers log sightings &amp; catches.</div>'; body.innerHTML = b; return; }
+      var im = ins.byModule || {};
+      b += '<div class="oc-cards">' +
+        '<div class="oc-card"><b>' + (ins.total||0) + '</b><span>pooled records</span></div>' +
+        '<div class="oc-card"><b>' + (im.hunting||0) + '</b><span>🦌 hunting</span></div>' +
+        '<div class="oc-card"><b>' + (im.fishing||0) + '</b><span>🎣 fishing</span></div>' +
+        '<div class="oc-card"><b>' + (ins.regions||0) + '</b><span>regions</span></div>' +
+        '</div>';
+      function kv2(obj, label, order){
+        var keys = order ? order.filter(function(k){ return obj && obj[k]; }) : Object.keys(obj||{});
+        if (!order) keys.sort(function(a,b){ return obj[b]-obj[a]; });
+        if (!keys.length) return '';
+        var s = '<p style="margin:14px 0 4px;"><strong class="kind">' + label + '</strong></p><table><tbody>';
+        keys.forEach(function(k){ s += '<tr><td>' + ocEsc(k) + '</td><td style="text-align:right;">' + obj[k] + '</td></tr>'; });
+        return s + '</tbody></table>';
+      }
+      b += kv2(ins.byHour, 'By time of day', ['Dawn','Morning','Midday','Evening','Dusk','Night','Unknown']);
+      b += kv2(ins.byMoon, 'By moon', ['New','Waxing','Full','Waning','Unknown']);
+      b += kv2(ins.byPressure, 'By pressure trend', ['Rising','Steady','Falling','Unknown']);
+      b += kv2(ins.byType, 'By type');
+      body.innerHTML = b;
+      return;
     } else if (_adminTab === 'usage'){
       var u = D.telemetry || {};
       if (!u.totalEvents){ body.innerHTML = '<div class="empty">No usage recorded yet (last 30 days).</div>'; return; }
@@ -19531,7 +19597,7 @@
   function hideAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o) o.style.display = 'none'; }
 
   // ---------------- First-login use agreement (testers agree before the app opens) ----------------
-  var TERMS_VERSION = 1;
+  var TERMS_VERSION = 2;   // bump when the agreement text changes → testers re-accept
   function termsAccepted(uid){ try { return localStorage.getItem('oc_terms_v' + TERMS_VERSION + '_' + uid) === '1'; } catch(e){ return false; } }
   function maybeShowTermsGate(user){ if (user && user.uid && !termsAccepted(user.uid)) showTermsGate(user); }
   function showTermsGate(user){
@@ -19562,6 +19628,7 @@
             '<li>Outdoor Companion and all of its code, design, and data are the private property of <strong>Faison Digital Works, LLC</strong>. This is not open-source.</li>' +
             '<li>You agree <strong>not to copy, reverse-engineer, decompile, extract, redistribute, resell, or attempt to hack, break into, or tamper with</strong> the app, its code, or its data.</li>' +
             '<li>You\'ll keep your invite code and login <strong>private</strong> and use the app only for your own hunting/fishing.</li>' +
+            '<li><strong>Anonymous, pooled data</strong> about conditions and activity (never your identity, exact locations, or personal records) may be used to improve the app for everyone.</li>' +
             '<li>This is a <strong>test version, provided as-is</strong>, with no warranty — things may change or break.</li>' +
             '<li>Access is granted for testing and can be ended at any time.</li>' +
           '</ul>' +
@@ -19645,6 +19712,9 @@
             try{ if (await userIsMemberOf(user.uid, stored.id)) scope = { type: 'group', id: stored.id }; }catch(e){}
           }
           try{ await applyScope(scope); }catch(e){ console.warn('Cloud load issue:', e); }
+          // Contribute this account's sightings/catches to the anonymized movement dataset (after a
+          // beat so weather has resolved). Coarsened on-device; skips demo & anything already sent.
+          try { setTimeout(function(){ try { syncAggregate(); } catch(e){} }, 6000); } catch(e){}
         })();
       } else {
         hasChatStorage = false;

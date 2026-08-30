@@ -16,6 +16,7 @@ const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const Anthropic = require("@anthropic-ai/sdk");
 const nodemailer = require("nodemailer");
+const crypto = require("crypto");
 
 admin.initializeApp();
 
@@ -735,13 +736,14 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
   const now = Date.now();
   const DAY = 24 * 3600 * 1000;
 
-  // --- feedback + waitlist + agreements + allowlist + activity (newest first) ---
-  const [fbSnap, wlSnap, agSnap, alSnap, uaSnap] = await Promise.all([
+  // --- feedback + waitlist + agreements + allowlist + activity + aggregate (newest first) ---
+  const [fbSnap, wlSnap, agSnap, alSnap, uaSnap, agrSnap] = await Promise.all([
     db.collection("feedback").orderBy("createdAt", "desc").limit(200).get().catch(() => ({ docs: [] })),
     db.collection("waitlist").orderBy("createdAt", "desc").limit(200).get().catch(() => ({ docs: [] })),
     db.collection("agreements").limit(2000).get().catch(() => ({ docs: [] })),
     db.collection("allowlist").limit(2000).get().catch(() => ({ docs: [] })),
     db.collection("userActivity").limit(2000).get().catch(() => ({ docs: [] })),
+    db.collection("aggregate").limit(8000).get().catch(() => ({ docs: [] })),
   ]);
   const feedback = fbSnap.docs.map((d) => d.data());
   const waitlist = wlSnap.docs.map((d) => d.data());
@@ -832,7 +834,38 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
   });
   waitlistOut.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-  return { generatedAt: now, feedback: feedback, waitlist: waitlistOut, telemetry: telemetry, testers: testers, access: access };
+  // --- aggregate movement dataset: summary only (the raw records carry no identity) ---
+  const agg = agrSnap.docs.map((d) => d.data());
+  const aggByModule = {}, aggByType = {}, aggByHour = {}, aggByPressure = {}, aggByMoon = {};
+  const regionSet = {};
+  function hourBucket(h) {
+    if (h == null) return "Unknown";
+    if (h >= 5 && h < 8) return "Dawn"; if (h >= 8 && h < 11) return "Morning";
+    if (h >= 11 && h < 15) return "Midday"; if (h >= 15 && h < 18) return "Evening";
+    if (h >= 18 && h < 21) return "Dusk"; return "Night";
+  }
+  function moonBucket(m) {
+    if (m == null) return "Unknown";
+    if (m < 0.1 || m > 0.9) return "New"; if (m >= 0.4 && m <= 0.6) return "Full";
+    return m < 0.5 ? "Waxing" : "Waning";
+  }
+  agg.forEach((r) => {
+    if (r.module) aggByModule[r.module] = (aggByModule[r.module] || 0) + 1;
+    if (r.type) aggByType[r.type] = (aggByType[r.type] || 0) + 1;
+    aggByHour[hourBucket(r.hour)] = (aggByHour[hourBucket(r.hour)] || 0) + 1;
+    aggByMoon[moonBucket(r.moon)] = (aggByMoon[moonBucket(r.moon)] || 0) + 1;
+    const pt = (r.weather && r.weather.pressureTrend) || "Unknown";
+    aggByPressure[pt] = (aggByPressure[pt] || 0) + 1;
+    if (r.regionLat != null && r.regionLng != null) regionSet[r.regionLat + "," + r.regionLng] = true;
+  });
+  const insights = {
+    total: agg.length,
+    byModule: aggByModule, byType: aggByType, byHour: aggByHour,
+    byPressure: aggByPressure, byMoon: aggByMoon,
+    regions: Object.keys(regionSet).length,
+  };
+
+  return { generatedAt: now, feedback: feedback, waitlist: waitlistOut, telemetry: telemetry, testers: testers, access: access, insights: insights };
 });
 
 /**
@@ -901,6 +934,64 @@ exports.heartbeat = onCall({ region: "us-east1" }, async (request) => {
     opens: admin.firestore.FieldValue.increment(1),
   }, { merge: true });
   return { ok: true };
+});
+
+/**
+ * AGGREGATE MOVEMENT DATA — the anonymized crowd dataset (deer & fish movement vs conditions).
+ * Each sighting/catch contributes ONE record: species/activity type, coarse region, time-of-day,
+ * season, moon, solunar, and weather — and NOTHING that identifies the person or the exact spot.
+ *   - Identity: NONE stored. The doc id is sha256(uid + ":" + obsKey) purely for idempotency (so
+ *     re-sending the same observation overwrites instead of duplicating); it's one-way and the record
+ *     itself holds no uid/email/obsId.
+ *   - Location: COARSE only. The client already rounds to a ~15-mi grid before sending; we round again
+ *     defensively and store just the cell — never the real coordinates, property, or site.
+ *   - Also dropped: names, notes, photos, exact day, buck names, siteId/propertyId.
+ * Only whitelisted primitive fields are ever written, so a misbehaving client can't smuggle anything in.
+ */
+const AGG_GRID = 0.25;   // ~15-17 mile cells — coarse region, never a specific spot
+function aggCell(n) { return (typeof n === "number" && isFinite(n)) ? Math.round(n / AGG_GRID) * AGG_GRID : null; }
+function aggNum(n) { return (typeof n === "number" && isFinite(n)) ? n : null; }
+function aggStr(s, max) { return s ? String(s).slice(0, max || 20) : null; }
+
+exports.contributeAggregate = onCall({ region: "us-east1", memory: "512MiB", timeoutSeconds: 120 }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Sign in required.");
+  const items = (request.data && request.data.items) || [];
+  if (!Array.isArray(items) || !items.length) return { ok: true, wrote: 0 };
+  const db = admin.firestore();
+  let wrote = 0;
+  for (let i = 0; i < items.length && i < 3000; i += 400) {
+    const batch = db.batch();
+    items.slice(i, i + 400).forEach((it) => {
+      const key = String((it && it.k) || "");
+      if (!key) return;
+      const w = (it && it.weather) || {};
+      const rec = {
+        module: (it.module === "fishing" || it.module === "hunting") ? it.module : "",
+        type: aggStr(it.type, 40),
+        regionLat: aggCell(it.region && it.region.lat),
+        regionLng: aggCell(it.region && it.region.lng),
+        hour: (typeof it.hour === "number") ? Math.max(0, Math.min(23, Math.floor(it.hour))) : null,
+        month: (typeof it.month === "number") ? Math.max(1, Math.min(12, Math.floor(it.month))) : null,
+        year: (typeof it.year === "number") ? Math.floor(it.year) : null,
+        moon: aggNum(it.moon),
+        solunar: aggStr(it.solunar, 20),
+        weather: {
+          tempF: aggNum(w.tempF), windDir: aggStr(w.windDir, 6), windMph: aggNum(w.windMph),
+          pressureInHg: aggNum(w.pressureInHg), pressureTrend: aggStr(w.pressureTrend, 10),
+          cloudCoverPct: aggNum(w.cloudCoverPct), humidity: aggNum(w.humidity),
+        },
+        depthFt: aggNum(it.depthFt),
+        heading: aggStr(it.headingDir, 6),
+        contributedAt: Date.now(),
+      };
+      const docId = crypto.createHash("sha256").update(uid + ":" + key).digest("hex");
+      batch.set(db.collection("aggregate").doc(docId), rec);   // idempotent — no duplicates
+      wrote++;
+    });
+    await batch.commit();
+  }
+  return { ok: true, wrote: wrote };
 });
 
 /**
@@ -998,6 +1089,7 @@ const AGREEMENT_LINES = [
   "Outdoor Companion and all of its code, design, and data are the private property of Faison Digital Works, LLC. This is not open-source.",
   "You agree not to copy, reverse-engineer, decompile, extract, redistribute, resell, or attempt to hack, break into, or tamper with the app, its code, or its data.",
   "You'll keep your login private and use the app only for your own hunting/fishing.",
+  "Anonymous, pooled data about conditions and activity (never your identity, exact locations, or personal records) may be used to improve the app for everyone.",
   "This is a test version, provided as-is, with no warranty — things may change or break.",
   "Access is granted for testing and can be ended at any time.",
 ];

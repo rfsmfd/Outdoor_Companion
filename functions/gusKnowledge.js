@@ -278,8 +278,9 @@ Not approved yet? Tap "Join the waitlist" right there (uses the email you typed)
 reach out. Already have an account? Just LOG IN. "Log in instead" switches back, "Forgot password?"
 resets it. The FIRST time you sign in, a short
 Tester Use Agreement pops up (the app is private property of Faison Digital Works, LLC; you agree not
-to copy or hack it, and to keep your code private) — tick the box and tap "Agree & continue" to start;
-you only see it once. 3)
+to copy or hack it, keep your login private, and that anonymous pooled data about conditions & activity
+— never your identity, exact locations, or personal records — may be used to make the app smarter for
+everyone) — tick the box and tap "Agree & continue" to start; you only see it once. 3)
 Signed in, your data lives in your cloud account and syncs across phone + desktop on its own. 4) The
 app works offline (map, GPS, your farms cached), but sign in BEFORE you lose signal. 5) Sign out from
 the pill at the top-right of the map (the 🔄 there reloads the app).
