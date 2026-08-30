@@ -671,6 +671,114 @@ exports.logEvent = onRequest(
 );
 
 /**
+ * Admin console data — founder-only. Reads server-side (admin SDK) so the raw
+ * feedback/waitlist/telemetry collections never need to be client-readable, and
+ * returns three things:
+ *   - telemetry: AGGREGATES only (counts, unique installs) — stays anonymous, no names.
+ *   - feedback + waitlist: the actual entries (these already carry any email the sender chose).
+ *   - testers: the account roster from Firebase Auth (email, signed-up, LAST sign-in) cross-
+ *     referenced with feedback counts — this is what answers "who's engaging and who's gone quiet."
+ * Gated to the founder's email. Everyone else gets permission-denied.
+ */
+const FOUNDER_EMAIL = "rfsmfd@gmail.com";
+
+exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSeconds: 60 }, async (request) => {
+  const email = String((request.auth && request.auth.token && request.auth.token.email) || "").toLowerCase();
+  if (!request.auth || email !== FOUNDER_EMAIL) {
+    throw new HttpsError("permission-denied", "This area is for the app owner.");
+  }
+  const db = admin.firestore();
+  const now = Date.now();
+  const DAY = 24 * 3600 * 1000;
+
+  // --- feedback + waitlist + agreements (newest first) ---
+  const [fbSnap, wlSnap, agSnap] = await Promise.all([
+    db.collection("feedback").orderBy("createdAt", "desc").limit(200).get().catch(() => ({ docs: [] })),
+    db.collection("waitlist").orderBy("createdAt", "desc").limit(200).get().catch(() => ({ docs: [] })),
+    db.collection("agreements").limit(2000).get().catch(() => ({ docs: [] })),
+  ]);
+  const feedback = fbSnap.docs.map((d) => d.data());
+  const waitlist = wlSnap.docs.map((d) => d.data());
+  const agreements = {};   // uid -> { acceptedAt, version }
+  agSnap.docs.forEach((d) => { agreements[d.id] = d.data(); });
+
+  // --- telemetry aggregates (last 30 days), anonymous ---
+  const telSnap = await db.collection("telemetry")
+    .where("createdAt", ">=", now - 30 * DAY).limit(8000).get().catch(() => ({ docs: [] }));
+  const tel = telSnap.docs.map((d) => d.data());
+  const byEvent = {}, byTab = {}, platform = { mobile: 0, desktop: 0 };
+  const installs = {}, installs7 = {};
+  let demoStarts = 0, appOpens = 0;
+  tel.forEach((t) => {
+    byEvent[t.event] = (byEvent[t.event] || 0) + 1;
+    if (t.event === "demo_start") demoStarts++;
+    if (t.event === "app_open") appOpens++;
+    if (t.event === "tab_open" && t.props && t.props.tab) byTab[t.props.tab] = (byTab[t.props.tab] || 0) + 1;
+    if (t.platform === "mobile" || t.platform === "desktop") platform[t.platform]++;
+    if (t.anonId) {
+      installs[t.anonId] = true;
+      if (t.createdAt >= now - 7 * DAY) installs7[t.anonId] = true;
+    }
+  });
+  const telemetry = {
+    windowDays: 30, totalEvents: tel.length,
+    uniqueInstalls: Object.keys(installs).length,
+    activeInstalls7d: Object.keys(installs7).length,
+    appOpens: appOpens, demoStarts: demoStarts,
+    byEvent: byEvent, byTab: byTab, platform: platform,
+  };
+
+  // --- tester roster from Firebase Auth (identity is fair game for invited accounts) ---
+  const fbByEmail = {}, fbByUid = {};
+  feedback.forEach((f) => {
+    if (f.email) fbByEmail[String(f.email).toLowerCase()] = (fbByEmail[String(f.email).toLowerCase()] || 0) + 1;
+    if (f.uid) fbByUid[f.uid] = (fbByUid[f.uid] || 0) + 1;
+  });
+  const testers = [];
+  let pageToken;
+  do {
+    const res = await admin.auth().listUsers(1000, pageToken);
+    res.users.forEach((u) => {
+      const em = (u.email || "").toLowerCase();
+      const lastSignIn = u.metadata && u.metadata.lastSignInTime ? Date.parse(u.metadata.lastSignInTime) : 0;
+      const fbCount = (fbByEmail[em] || 0) + (fbByUid[u.uid] || 0);
+      const ag = agreements[u.uid];
+      testers.push({
+        email: u.email || "(no email)",
+        uid: u.uid,
+        createdAt: u.metadata && u.metadata.creationTime ? Date.parse(u.metadata.creationTime) : 0,
+        lastSignIn: lastSignIn,
+        daysQuiet: lastSignIn ? Math.floor((now - lastSignIn) / DAY) : null,
+        feedbackCount: fbCount,
+        agreedAt: ag ? (ag.acceptedAt || 0) : 0,
+        agreedVersion: ag ? (ag.version || 0) : 0,
+      });
+    });
+    pageToken = res.pageToken;
+  } while (pageToken);
+  testers.sort((a, b) => (b.lastSignIn || 0) - (a.lastSignIn || 0));
+
+  return { generatedAt: now, feedback: feedback, waitlist: waitlist, telemetry: telemetry, testers: testers };
+});
+
+/**
+ * Records a tester's acceptance of the use agreement (shown on first sign-in).
+ * Authenticated: writes agreements/{uid} keyed by the signed-in user, so it's a
+ * tamper-resistant record of who agreed, when, and to which version — surfaced in
+ * the owner console. One doc per user (re-accepting a new version overwrites).
+ */
+exports.recordAgreement = onCall({ region: "us-east1" }, async (request) => {
+  const uid = request.auth && request.auth.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "You must be signed in.");
+  const version = Number((request.data && request.data.version) || 1) || 1;
+  const email = (request.auth.token && request.auth.token.email) || "";
+  await admin.firestore().collection("agreements").doc(uid).set({
+    uid: uid, email: email, version: version, acceptedAt: Date.now(),
+  }, { merge: true });
+  return { ok: true };
+});
+
+/**
  * Group sharing — membership mutations that clients can't do safely.
  *
  * Data model: groups/{gid} = { name, ownerUid, memberUids:[...],
