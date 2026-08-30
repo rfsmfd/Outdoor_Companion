@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 553</div>
+    <div id="buildBadge">BUILD 554</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -19250,15 +19250,16 @@
         '<div class="oc-card"><b>' + active + '</b><span>active (7 days)</span></div>' +
         '<div class="oc-card"><b>' + contributing + '</b><span>have sent feedback</span></div>' +
         '</div>';
-      h += '<table><thead><tr><th>Tester</th><th>Last sign-in</th><th>Feedback</th><th>Agreed</th><th>Status</th></tr></thead><tbody>';
+      h += '<table><thead><tr><th>Tester</th><th>Last active</th><th>Feedback</th><th>Agreed</th><th>Status</th></tr></thead><tbody>';
       ts.forEach(function(t){
+        var la = t.lastActive || t.lastSignIn || 0;
         var status, cls;
-        if (t.lastSignIn == null || !t.lastSignIn){ status='Never signed in'; cls='off'; }
+        if (!la){ status='Never signed in'; cls='off'; }
         else if (t.daysQuiet <= 7){ status='Active'; cls='on'; }
         else if (t.daysQuiet <= 30){ status='Quiet ' + t.daysQuiet + 'd'; cls='mid'; }
         else { status='Gone ' + t.daysQuiet + 'd'; cls='off'; }
         var agreed = t.agreedAt ? '<span class="pill on" title="' + ocDate(t.agreedAt) + '">✓ v' + (t.agreedVersion||1) + '</span>' : '<span class="pill off">—</span>';
-        h += '<tr><td>' + ocEsc(t.email) + '<div class="meta" style="font-size:11.5px;">signed up ' + ocDate(t.createdAt) + '</div></td><td>' + ocAgo(t.lastSignIn) + '</td><td>' + (t.feedbackCount||0) + '</td><td>' + agreed + '</td><td><span class="pill ' + cls + '">' + status + '</span></td></tr>';
+        h += '<tr><td>' + ocEsc(t.email) + '<div class="meta" style="font-size:11.5px;">signed up ' + ocDate(t.createdAt) + '</div></td><td>' + ocAgo(la) + '</td><td>' + (t.feedbackCount||0) + '</td><td>' + agreed + '</td><td><span class="pill ' + cls + '">' + status + '</span></td></tr>';
       });
       h += '</tbody></table><p class="meta" style="margin-top:12px;color:#9aa382;font-size:12.5px;">“Feedback” counts suggestions/bugs each tester sent. Anonymous usage (below, in 📊 Usage) is group-wide and not tied to names — by design.</p>';
       body.innerHTML = h;
@@ -19586,6 +19587,8 @@
         showSignoutButton(user.email);
         try { if (window.__gusShow) window.__gusShow(); } catch(e){}
         try { maybeShowTermsGate(user); } catch(e){}
+        // Stamp real "last active" (Auth's lastSignInTime doesn't move on restored sessions).
+        try { firebase.app().functions('us-east1').httpsCallable('heartbeat')({}).catch(function(){}); } catch(e){}
         if (didInitForUid === user.uid){
           // Token refresh — DON'T clobber an active group scope. Rebuild the adapter for
           // whatever scope is currently in view (this was the silent data-flip bug).
