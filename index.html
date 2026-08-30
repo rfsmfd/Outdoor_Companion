@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 549</div>
+    <div id="buildBadge">BUILD 550</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13097,6 +13097,7 @@
   document.querySelectorAll('.tab-btn').forEach(function(btn){
     btn.addEventListener('click', function(){
       activeTab = btn.getAttribute('data-tab');
+      try { track('tab_open', { tab: activeTab }); } catch(e){}
       document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
       document.getElementById('filters').style.display = (activeTab === 'sites') ? '' : 'none';
@@ -18952,6 +18953,7 @@
     try { map.setView([D.prop.centerLat, D.prop.centerLng], D.prop.zoom); } catch(e){}
     try { if (typeof window.__gusShow === 'function') window.__gusShow(); } catch(e){}
     setTimeout(function(){ try { if (typeof window.__gusStartWelcomeTour === 'function') window.__gusStartWelcomeTour(); } catch(e){} }, 1100);
+    try { track('demo_start'); } catch(e){}
   }
   function showDemoBanner(){
     var ex = document.getElementById('oc-demo-banner'); if (ex){ ex.style.display = 'flex'; return; }
@@ -18962,8 +18964,46 @@
     document.getElementById('oc-demo-feedback').addEventListener('click', function(){ openFeedback('demo'); });
   }
 
-  // ---------------- Feedback (suggestions / issues) — demo + signed-in, into one log ----------------
-  var FEEDBACK_URL = 'https://us-east1-outdoor-companion-ee5b3.cloudfunctions.net/submitFeedback';
+  // ---------------- Cloud endpoints (feedback, invite gate, anonymous usage) ----------------
+  var CF_BASE = 'https://us-east1-outdoor-companion-ee5b3.cloudfunctions.net';
+  var FEEDBACK_URL = CF_BASE + '/submitFeedback';
+  var CHECK_INVITE_URL = CF_BASE + '/checkInvite';
+  var LOG_EVENT_URL = CF_BASE + '/logEvent';
+
+  function ocBuildNum(){ try { return (document.getElementById('buildBadge').textContent || '').replace(/[^0-9]/g,''); } catch(e){ return ''; } }
+
+  // Anonymous per-install id — a random tag so a session's events group together.
+  // NOT the user's identity: no email, no name, no account. Resettable (clear site data).
+  function ocAnonId(){
+    try {
+      var k = 'oc_anon_id', v = localStorage.getItem(k);
+      if (!v){ v = 'a' + Math.random().toString(36).slice(2,12) + '-' + ocBuildNum(); localStorage.setItem(k, v); }
+      return v;
+    } catch(e){ return 'a-nostore'; }
+  }
+
+  // Fire-and-forget anonymous usage telemetry — "generic data, nothing personal."
+  // Records WHICH features get used (event + short props), the module, demo-vs-real, build, platform.
+  // Never sends coordinates, record contents, names, free text, or email. Silently no-ops on any error.
+  function track(event, props){
+    try {
+      var signedIn = false;
+      try { signedIn = !!(typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser); } catch(e){}
+      var payload = {
+        event: String(event || ''),
+        anonId: ocAnonId(),
+        build: ocBuildNum(),
+        module: (typeof activeModule !== 'undefined' ? activeModule : ''),
+        demo: !!(typeof demoMode !== 'undefined' && demoMode),
+        signedIn: signedIn,
+        props: (props && typeof props === 'object') ? props : {}
+      };
+      fetch(LOG_EVENT_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: true }).catch(function(){});
+    } catch(e){}
+  }
+  try { window.track = track; } catch(e){}
+  // One anonymous "app opened" ping per load, deferred so module/demo state has settled.
+  try { setTimeout(function(){ try { track('app_open'); } catch(e){} }, 1500); } catch(e){}
   function openFeedback(context){
     if (!document.getElementById('oc-feedback-backdrop')) buildFeedbackModal();
     var bd = document.getElementById('oc-feedback-backdrop');
@@ -19035,7 +19075,7 @@
       // (not the login form) so a returning user sees a clean loading screen, never a flash of the form.
       '#oc-auth-loading{margin-top:14px;text-align:center;color:#9aa382;font-size:13px;letter-spacing:1.5px;}' +
       '#oc-auth-overlay:not(.oc-checking) #oc-auth-loading{display:none;}' +
-      '#oc-auth-overlay.oc-checking #oc-auth-email,#oc-auth-overlay.oc-checking #oc-auth-pass-wrap,#oc-auth-overlay.oc-checking #oc-auth-btn,#oc-auth-overlay.oc-checking #oc-auth-or,#oc-auth-overlay.oc-checking #oc-auth-secondary,#oc-auth-overlay.oc-checking #oc-auth-forgot,#oc-auth-overlay.oc-checking #oc-auth-msg,#oc-auth-overlay.oc-checking #oc-auth-demo,#oc-auth-overlay.oc-checking #oc-auth-demo-or{display:none !important;}' +
+      '#oc-auth-overlay.oc-checking #oc-auth-email,#oc-auth-overlay.oc-checking #oc-auth-pass-wrap,#oc-auth-overlay.oc-checking #oc-auth-btn,#oc-auth-overlay.oc-checking #oc-auth-or,#oc-auth-overlay.oc-checking #oc-auth-secondary,#oc-auth-overlay.oc-checking #oc-auth-forgot,#oc-auth-overlay.oc-checking #oc-auth-msg,#oc-auth-overlay.oc-checking #oc-auth-demo,#oc-auth-overlay.oc-checking #oc-auth-demo-or,#oc-auth-overlay.oc-checking #oc-auth-invite,#oc-auth-overlay.oc-checking #oc-auth-invite-hint,#oc-auth-overlay.oc-checking #oc-auth-waitlist{display:none !important;}' +
       '#oc-auth-demo-or{display:flex;align-items:center;gap:12px;margin:20px 2px 0;color:#8a9270;font-size:11px;font-weight:600;letter-spacing:2px;}' +
       '#oc-auth-demo-or::before,#oc-auth-demo-or::after{content:"";flex:1;height:1px;background:#3a4526;}' +
       '#oc-auth-demo{width:100%;margin-top:14px;padding:14px;border:1px dashed #8a9a4e;border-radius:11px;background:rgba(121,136,63,.12);color:#e6e0c8;font-size:14px;font-weight:700;letter-spacing:.6px;cursor:pointer;}' +
@@ -19068,8 +19108,11 @@
         '<input id="oc-auth-pass" type="password" autocomplete="current-password" placeholder="Password" aria-label="Password" />' +
         '<button id="oc-auth-eye" type="button" aria-label="Show password" title="Show password">👁</button>' +
       '</div>' +
+      '<input id="oc-auth-invite" type="text" autocomplete="off" spellcheck="false" placeholder="Invite code" aria-label="Invite code" style="display:none;text-transform:uppercase;letter-spacing:2px;" />' +
+      '<div id="oc-auth-invite-hint" style="display:none;margin-top:8px;font-size:12px;color:#c9a24a;line-height:1.45;">Outdoor Companion is in invite-only testing. Enter your invite code to create an account — or join the waitlist below.</div>' +
       '<button id="oc-auth-btn" type="button">LOG IN</button>' +
       '<div id="oc-auth-msg"></div>' +
+      '<button id="oc-auth-waitlist" type="button" style="display:none;width:100%;margin-top:10px;padding:12px;border:1px solid #566637;border-radius:11px;background:transparent;color:#d9d3bd;font-size:13px;font-weight:700;letter-spacing:.6px;cursor:pointer;">✉ Join the waitlist</button>' +
       '<div id="oc-auth-or">OR</div>' +
       '<button id="oc-auth-secondary" type="button">CREATE ACCOUNT</button>' +
       '<div id="oc-auth-forgot"><a id="oc-auth-reset">Forgot password?</a></div>' +
@@ -19112,10 +19155,15 @@
       try { passEl.focus(); } catch (e) {}
     });
 
+    var inviteEl = document.getElementById('oc-auth-invite');
+    var inviteHintEl = document.getElementById('oc-auth-invite-hint');
+    var waitlistBtn = document.getElementById('oc-auth-waitlist');
     function setMsg(text, ok){ msg.textContent = text || ''; msg.className = ok ? 'ok' : ''; }
+    function showWaitlist(show){ if (waitlistBtn) waitlistBtn.style.display = show ? 'block' : 'none'; }
     function setMode(m){
       mode = m;
-      if (m === 'signup'){
+      var signup = (m === 'signup');
+      if (signup){
         btn.textContent = 'CREATE ACCOUNT';
         secondary.textContent = 'Log in instead';
         passEl.setAttribute('autocomplete','new-password');
@@ -19124,9 +19172,27 @@
         secondary.textContent = 'CREATE ACCOUNT';
         passEl.setAttribute('autocomplete','current-password');
       }
+      // Invite gate: the code field + hint only appear when creating an account (test phase).
+      if (inviteEl) inviteEl.style.display = signup ? 'block' : 'none';
+      if (inviteHintEl) inviteHintEl.style.display = signup ? 'block' : 'none';
+      showWaitlist(false);
       setMsg('');
     }
     secondary.addEventListener('click', function(){ setMode(mode === 'signin' ? 'signup' : 'signin'); });
+
+    // Waitlist — capture interest from folks without a code (reuses the feedback endpoint, kind:"waitlist").
+    if (waitlistBtn) waitlistBtn.addEventListener('click', async function(){
+      var email = emailEl.value.trim();
+      if (!email){ setMsg('Pop your email in the top box, then tap “Join the waitlist.”'); return; }
+      waitlistBtn.disabled = true; setMsg('Adding you to the list…', true);
+      try {
+        var r = await fetch(FEEDBACK_URL, { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ kind:'waitlist', email: email, context:'signup', build: ocBuildNum(), text:'waitlist signup' }) });
+        var j = await r.json().catch(function(){ return {}; });
+        if (r.ok && j && j.ok){ setMsg('You\'re on the list — thank you! I\'ll be in touch. 🤝', true); showWaitlist(false); track('waitlist_join'); }
+        else { setMsg('Hmm, that didn\'t go through — try again in a bit.'); waitlistBtn.disabled = false; }
+      } catch(e){ setMsg('Network hiccup — give it another try in a minute.'); waitlistBtn.disabled = false; }
+    });
 
     function humanError(e){
       var c = (e && e.code) || '';
@@ -19141,10 +19207,24 @@
       var email = emailEl.value.trim();
       var pass = passEl.value;
       if (!email || !pass){ setMsg('Enter your email and password.'); return; }
+      // Invite gate — during the invited test phase, creating an account needs a valid code.
+      if (mode === 'signup'){
+        var code = (inviteEl && inviteEl.value || '').trim();
+        if (!code){ setMsg('Enter your invite code to create an account.'); showWaitlist(true); return; }
+        btn.disabled = true; setMsg('Checking your invite…', true);
+        var ok = false;
+        try {
+          var cr = await fetch(CHECK_INVITE_URL, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: code }) });
+          var cj = await cr.json().catch(function(){ return {}; });
+          ok = !!(cr.ok && cj && cj.ok);
+        } catch(e){ setMsg('Couldn\'t check that code — check your connection and try again.'); btn.disabled = false; return; }
+        if (!ok){ setMsg('That invite code isn\'t valid. Double-check it, or join the waitlist.'); showWaitlist(true); btn.disabled = false; track('invite_rejected'); return; }
+        track('invite_accepted');
+      }
       btn.disabled = true; setMsg(mode === 'signup' ? 'Creating your account…' : 'Signing in…', true);
       try{
-        if (mode === 'signup'){ await firebase.auth().createUserWithEmailAndPassword(email, pass); }
-        else { await firebase.auth().signInWithEmailAndPassword(email, pass); }
+        if (mode === 'signup'){ await firebase.auth().createUserWithEmailAndPassword(email, pass); track('account_created'); }
+        else { await firebase.auth().signInWithEmailAndPassword(email, pass); track('sign_in'); }
       }catch(e){ setMsg(humanError(e)); btn.disabled = false; }
     }
     btn.addEventListener('click', submit);

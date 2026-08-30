@@ -570,12 +570,102 @@ exports.submitFeedback = onRequest(
         userAgent: String(req.headers["user-agent"] || "").slice(0, 300),
         createdAt: Date.now(),
       };
-      await admin.firestore().collection("feedback").add(doc);
-      console.log("feedback:", doc.kind, "build=" + doc.build, "from=" + (doc.email || doc.uid || (doc.demo ? "demo" : "anon")), "|", text.slice(0, 80));
+      const coll = doc.kind === "waitlist" ? "waitlist" : "feedback";   // waitlist sign-ups get their own list
+      await admin.firestore().collection(coll).add(doc);
+      console.log(coll + ":", doc.kind, "build=" + doc.build, "from=" + (doc.email || doc.uid || (doc.demo ? "demo" : "anon")), "|", text.slice(0, 80));
       res.json({ ok: true });
     } catch (e) {
       console.error("submitFeedback failed:", e && e.message);
       res.status(500).json({ ok: false, error: "server" });
+    }
+  }
+);
+
+/**
+ * Invite gate for account sign-up during the invited test phase.
+ * Validated SERVER-SIDE so the valid codes never live in the client bundle.
+ *   - HARDCODED_INVITE_CODES: quick shared code(s) the founder can hand out immediately.
+ *     Edit this array + redeploy to rotate. (Case-insensitive; stored/compared upper-case.)
+ *   - Firestore `inviteCodes`: for more/managed codes — add a doc { code:"XXXX", active:true }
+ *     in the console to grant another code without a redeploy.
+ * NOTE: this is a SOFT gate for the friendly test phase (deters casual/stranger sign-ups
+ * from the public demo URL). It is not hard enforcement — that comes later via security
+ * rules requiring an approved flag. Kept deliberately simple for now.
+ */
+const HARDCODED_INVITE_CODES = ["CEDARCREEK26"];   // ← founder: change/add codes here, then redeploy
+
+exports.checkInvite = onRequest(
+  { region: "us-east1", cors: true, memory: "256MiB", timeoutSeconds: 15 },
+  async (req, res) => {
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    if (req.method !== "POST") { res.status(405).json({ ok: false, error: "POST only" }); return; }
+    try {
+      const code = String((req.body && req.body.code) || "").trim().toUpperCase();
+      if (!code) { res.json({ ok: false }); return; }
+      if (HARDCODED_INVITE_CODES.map((c) => c.toUpperCase()).indexOf(code) >= 0) { res.json({ ok: true }); return; }
+      const snap = await admin.firestore().collection("inviteCodes")
+        .where("code", "==", code).where("active", "==", true).limit(1).get();
+      res.json({ ok: !snap.empty });
+    } catch (e) {
+      console.error("checkInvite failed:", e && e.message);
+      res.status(500).json({ ok: false, error: "server" });
+    }
+  }
+);
+
+/**
+ * Anonymous usage telemetry — "generic data, nothing personal."
+ * Captures how the app is USED (which features, which module, demo vs real, what build)
+ * so the founder can see engagement in aggregate. Deliberately privacy-preserving:
+ *   - Identity is a random per-install id the CLIENT generates (oc_anon_id) — NOT the
+ *     user's email/uid/name. It ties a session's events together, nothing more.
+ *   - NO map coordinates, NO record contents, NO names, NO free text, NO email.
+ *   - `props` is sanitized to short primitives only (numbers/booleans/short enums), so even
+ *     a misbehaving client can't smuggle personal data or large blobs into the log.
+ * Writes to the `telemetry` collection. Fire-and-forget from the client.
+ */
+function sanitizeProps(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  let n = 0;
+  for (const k of Object.keys(raw)) {
+    if (n++ >= 12) break;                                   // cap number of keys
+    const key = String(k).slice(0, 40);
+    const v = raw[k];
+    if (typeof v === "number" && isFinite(v)) out[key] = v;
+    else if (typeof v === "boolean") out[key] = v;
+    else if (typeof v === "string") out[key] = v.slice(0, 60);   // short enums/labels only
+    // objects/arrays/anything else are dropped on purpose
+  }
+  return out;
+}
+
+exports.logEvent = onRequest(
+  { region: "us-east1", cors: true, memory: "128MiB", timeoutSeconds: 10 },
+  async (req, res) => {
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    if (req.method !== "POST") { res.status(405).json({ ok: false }); return; }
+    try {
+      const b = req.body || {};
+      const event = String(b.event || "").trim().slice(0, 60);
+      if (!event) { res.json({ ok: false }); return; }
+      const ua = String(req.headers["user-agent"] || "");
+      const doc = {
+        event: event,                                        // e.g. "app_open", "tab_open", "demo_start"
+        anonId: String(b.anonId || "").slice(0, 40),         // random per-install id (not personal)
+        build: String(b.build || "").slice(0, 20),
+        module: (b.module === "fishing" || b.module === "hunting") ? b.module : "",
+        demo: !!b.demo,
+        signedIn: !!b.signedIn,                              // boolean only — never who
+        platform: /Mobi|Android|iPhone|iPad/i.test(ua) ? "mobile" : "desktop",
+        props: sanitizeProps(b.props),
+        createdAt: Date.now(),
+      };
+      await admin.firestore().collection("telemetry").add(doc);
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("logEvent failed:", e && e.message);
+      res.status(500).json({ ok: false });
     }
   }
 );
