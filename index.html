@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 557</div>
+    <div id="buildBadge">BUILD 558</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -19013,6 +19013,8 @@
     try {
       if (typeof demoMode !== 'undefined' && demoMode) return;
       if (typeof firebase === 'undefined' || !firebase.functions || !firebase.auth || !firebase.auth().currentUser) return;
+      // Consent gate: only pool data once they've accepted the agreement that discloses it.
+      if (typeof termsAccepted === 'function' && !termsAccepted(firebase.auth().currentUser.uid)) return;
       var sent = {};
       try { sent = JSON.parse(localStorage.getItem('oc_aggr_sent') || '{}') || {}; } catch(e){}
       var items = [], ids = [];
@@ -19653,6 +19655,8 @@
         }
       } catch(e){}
       try { track('terms_accepted'); } catch(e){}
+      // Now that they've consented to the disclosure, pooling may proceed this session.
+      try { setTimeout(function(){ try { syncAggregate(); } catch(e){} }, 3000); } catch(e){}
       var o = document.getElementById('oc-terms-overlay'); if (o) o.parentNode.removeChild(o);
     });
     document.getElementById('oc-terms-decline').addEventListener('click', function(){
