@@ -262,20 +262,21 @@ button. Tapping it drops you onto a ready-made SAMPLE FARM ("Cedar Creek") — a
 before you make an account. Nothing you do in the demo is saved. A "DEMO — sample
 farm" banner sits at the top; its "Start my own farm →" button takes you to sign-up to begin your
 own. (In the demo, Ol' Gus greets you and can walk you around with "Show me," but to type him a
-question and get an answer you need to be signed in.) NOTE: while we're in invite-only testing,
-starting your own farm needs an invite code — if you don't have one yet, join the waitlist right
-there on the sign-up screen and we'll get you in.
+question and get an answer you need to be signed in.) NOTE: we're in invite-only testing, so starting
+your own farm means signing up with an email the owner has approved for you — no code needed. Not
+approved yet? Join the waitlist right there on the sign-up screen and the owner will get you in.
 HOW TO send a suggestion or report an issue (FEEDBACK): tap the 💡 Suggestion / Issue button — it's
 at the TOP-RIGHT of the app (by Refresh / Sign out), or the "💡 Suggestion" button in the DEMO
 banner. Pick Suggestion or Issue, type it, optionally add your email so we can follow up, and Send.
 It goes straight to the maker — every one is read. You can send feedback whether you're signed in OR
 just looking around in the demo. (Encourage folks to use it — it's how the app gets better.)
 HOW TO sign in / get started: 1) On the sign-in splash, type your Email and Password (tap the 👁 to
-see it). 2) Tap LOG IN — or, if you're new, tap CREATE ACCOUNT. While the app is in invite-only
-testing, creating an account asks for an INVITE CODE: type your email + a password (6+ characters) +
-your invite code, then CREATE ACCOUNT. No code yet? Tap "Join the waitlist" right there (uses the
-email you typed) and we'll reach out. Already have an account? Just LOG IN — no code needed to log in.
-"Log in instead" switches back, "Forgot password?" resets it. The FIRST time you sign in, a short
+see it). 2) Tap LOG IN — or, if you're new, tap CREATE ACCOUNT. Outdoor Companion is invite-only right
+now: you can only create an account with an email the owner has APPROVED for you (there's no code to
+type — the email itself is your key). So sign up with that approved email + a password (6+ characters).
+Not approved yet? Tap "Join the waitlist" right there (uses the email you typed) and the owner will
+reach out. Already have an account? Just LOG IN. "Log in instead" switches back, "Forgot password?"
+resets it. The FIRST time you sign in, a short
 Tester Use Agreement pops up (the app is private property of Faison Digital Works, LLC; you agree not
 to copy or hack it, and to keep your code private) — tick the box and tap "Agree & continue" to start;
 you only see it once. 3)

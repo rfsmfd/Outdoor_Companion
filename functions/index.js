@@ -691,16 +691,18 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
   const now = Date.now();
   const DAY = 24 * 3600 * 1000;
 
-  // --- feedback + waitlist + agreements (newest first) ---
-  const [fbSnap, wlSnap, agSnap] = await Promise.all([
+  // --- feedback + waitlist + agreements + allowlist (newest first) ---
+  const [fbSnap, wlSnap, agSnap, alSnap] = await Promise.all([
     db.collection("feedback").orderBy("createdAt", "desc").limit(200).get().catch(() => ({ docs: [] })),
     db.collection("waitlist").orderBy("createdAt", "desc").limit(200).get().catch(() => ({ docs: [] })),
     db.collection("agreements").limit(2000).get().catch(() => ({ docs: [] })),
+    db.collection("allowlist").limit(2000).get().catch(() => ({ docs: [] })),
   ]);
   const feedback = fbSnap.docs.map((d) => d.data());
   const waitlist = wlSnap.docs.map((d) => d.data());
   const agreements = {};   // uid -> { acceptedAt, version }
   agSnap.docs.forEach((d) => { agreements[d.id] = d.data(); });
+  const access = alSnap.docs.map((d) => d.data());
 
   // --- telemetry aggregates (last 30 days), anonymous ---
   const telSnap = await db.collection("telemetry")
@@ -758,7 +760,13 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
   } while (pageToken);
   testers.sort((a, b) => (b.lastSignIn || 0) - (a.lastSignIn || 0));
 
-  return { generatedAt: now, feedback: feedback, waitlist: waitlist, telemetry: telemetry, testers: testers };
+  // Mark which approved emails have actually created an account yet.
+  const testerEmails = {};
+  testers.forEach((t) => { if (t.email) testerEmails[t.email.toLowerCase()] = true; });
+  access.forEach((a) => { a.signedUp = !!testerEmails[normEmail(a.email)]; });
+  access.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+
+  return { generatedAt: now, feedback: feedback, waitlist: waitlist, telemetry: telemetry, testers: testers, access: access };
 });
 
 /**
@@ -776,6 +784,64 @@ exports.recordAgreement = onCall({ region: "us-east1" }, async (request) => {
     uid: uid, email: email, version: version, acceptedAt: Date.now(),
   }, { merge: true });
   return { ok: true };
+});
+
+/**
+ * ACCESS ALLOWLIST (Option #4) — only emails the owner has approved may create an account.
+ * The owner adds/removes emails from the console; sign-up checks the list. Docs live in
+ * `allowlist/{email}` (email lower-cased as the id) = { email, active, note, addedAt }.
+ * The owner's own email is always allowed so he can never lock himself out.
+ * NOTE: `checkAccess` is a friendly UX pre-check (nice "you're not on the list" message).
+ * TRUE enforcement (rejecting an unapproved account at creation time) wants an Auth
+ * blocking function — a follow-up that needs Identity Platform enabled in the console.
+ */
+function normEmail(e) { return String(e || "").trim().toLowerCase(); }
+async function isEmailAllowed(email) {
+  email = normEmail(email);
+  if (!email) return false;
+  if (email === FOUNDER_EMAIL) return true;
+  const snap = await admin.firestore().collection("allowlist").doc(email).get();
+  return snap.exists && snap.data().active !== false;
+}
+function ownerOnly(request) {
+  const email = normEmail(request.auth && request.auth.token && request.auth.token.email);
+  if (!request.auth || email !== FOUNDER_EMAIL) throw new HttpsError("permission-denied", "This area is for the app owner.");
+}
+
+exports.checkAccess = onRequest(
+  { region: "us-east1", cors: true, memory: "256MiB", timeoutSeconds: 15 },
+  async (req, res) => {
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    if (req.method !== "POST") { res.status(405).json({ ok: false }); return; }
+    try {
+      const ok = await isEmailAllowed((req.body && req.body.email) || "");
+      res.json({ ok: ok });
+    } catch (e) {
+      console.error("checkAccess failed:", e && e.message);
+      res.status(500).json({ ok: false, error: "server" });
+    }
+  }
+);
+
+exports.grantAccess = onCall({ region: "us-east1" }, async (request) => {
+  ownerOnly(request);
+  const email = normEmail(request.data && request.data.email);
+  if (!email || email.indexOf("@") < 0) throw new HttpsError("invalid-argument", "Enter a valid email.");
+  const note = String((request.data && request.data.note) || "").slice(0, 200);
+  await admin.firestore().collection("allowlist").doc(email).set({
+    email: email, active: true, note: note, addedAt: Date.now(),
+  }, { merge: true });
+  return { ok: true, email: email };
+});
+
+exports.revokeAccess = onCall({ region: "us-east1" }, async (request) => {
+  ownerOnly(request);
+  const email = normEmail(request.data && request.data.email);
+  if (!email) throw new HttpsError("invalid-argument", "No email given.");
+  await admin.firestore().collection("allowlist").doc(email).set({
+    active: false, revokedAt: Date.now(),
+  }, { merge: true });
+  return { ok: true, email: email };
 });
 
 /**
