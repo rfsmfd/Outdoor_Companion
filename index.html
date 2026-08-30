@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 552</div>
+    <div id="buildBadge">BUILD 553</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -19104,6 +19104,7 @@
         '<div id="oc-admin-tabs">' +
           '<button type="button" class="active" data-atab="access">🔑 Access</button>' +
           '<button type="button" data-atab="testers">👥 Testers</button>' +
+          '<button type="button" data-atab="email">📣 Email</button>' +
           '<button type="button" data-atab="usage">📊 Usage</button>' +
           '<button type="button" data-atab="feedback">💡 Feedback</button>' +
           '<button type="button" data-atab="waitlist">✉ Waitlist</button>' +
@@ -19187,7 +19188,7 @@
         });
         a += '</tbody></table>';
       }
-      a += '<p class="meta" style="margin-top:12px;color:#9aa382;font-size:12.5px;">For now, tell approved folks yourself that they can sign up. (Automatic welcome emails come once the sending account is set up.)</p>';
+      a += '<p class="meta" style="margin-top:12px;color:#9aa382;font-size:12.5px;">When you Grant access, that person automatically gets a welcome email (with the agreement + the free-year offer) telling them to sign up with this address.</p>';
       body.innerHTML = a;
       var grantBtn = document.getElementById('oc-acc-grant');
       if (grantBtn) grantBtn.addEventListener('click', function(){
@@ -19199,6 +19200,44 @@
       for (var ri=0; ri<revBtns.length; ri++) revBtns[ri].addEventListener('click', function(){ adminAccess('revokeAccess', { email: this.getAttribute('data-email') }); });
       var regBtns = body.querySelectorAll('.oc-acc-regrant');
       for (var gi=0; gi<regBtns.length; gi++) regBtns[gi].addEventListener('click', function(){ adminAccess('grantAccess', { email: this.getAttribute('data-email') }); });
+      return;
+    }
+    if (_adminTab === 'email'){
+      var testerCount = (D.testers || []).length;
+      var e = '<p class="muted" style="margin-top:0;font-size:13.5px;">Send from <strong>rfaison@outdoorcompanionapp.com</strong>. Welcome emails go out automatically when you grant access — this is for testing and for news blasts.</p>';
+      e += '<div style="background:#263019;border:1px solid #3a4526;border-radius:12px;padding:14px 16px;margin-bottom:16px;">' +
+        '<p style="margin:0 0 8px;"><strong class="kind">✉ Send a test to yourself</strong></p>' +
+        '<p class="muted" style="margin:0 0 10px;font-size:13px;">Fires a sample email to your own inbox so you can check delivery anytime.</p>' +
+        '<button type="button" id="oc-em-test" style="padding:11px 16px;border:1px solid #8a9a4e;border-radius:10px;background:#4a5d3a;color:#f5f1e0;font-weight:700;font-size:14px;cursor:pointer;">Send test email to me</button>' +
+        '<span id="oc-em-test-msg" style="margin-left:10px;font-size:13px;color:#bcd18a;"></span>' +
+        '</div>';
+      e += '<div style="background:#263019;border:1px solid #3a4526;border-radius:12px;padding:14px 16px;">' +
+        '<p style="margin:0 0 4px;"><strong class="kind">📣 Update all testers</strong></p>' +
+        '<p class="muted" style="margin:0 0 10px;font-size:13px;">Emails every tester account (' + testerCount + ' right now), BCC so nobody sees each other.</p>' +
+        '<input id="oc-em-subject" type="text" placeholder="Subject — e.g. What’s new in Outdoor Companion" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:8px;border-radius:10px;border:1px solid #566637;background:rgba(15,20,11,.5);color:#efe8d1;font-size:15px;" />' +
+        '<textarea id="oc-em-body" rows="6" placeholder="What changed? Write it like you’re telling a buddy." style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:1px solid #566637;background:rgba(15,20,11,.5);color:#efe8d1;font-size:15px;resize:vertical;"></textarea>' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;"><button type="button" id="oc-em-send" style="padding:12px 18px;border:1px solid #8a9a4e;border-radius:10px;background:#79883f;color:#f5f1e0;font-weight:700;font-size:15px;cursor:pointer;">Send to all testers</button><span id="oc-em-send-msg" style="font-size:13px;color:#bcd18a;"></span></div>' +
+        '</div>';
+      body.innerHTML = e;
+      var testBtn = document.getElementById('oc-em-test');
+      if (testBtn) testBtn.addEventListener('click', async function(){
+        var m = document.getElementById('oc-em-test-msg'); testBtn.disabled = true; m.textContent = 'Sending…'; m.style.color = '#bcd18a';
+        try { await firebase.app().functions('us-east1').httpsCallable('sendTestEmail')({}); m.textContent = 'Sent — check your inbox.'; }
+        catch(err){ m.textContent = (err && err.message) ? err.message : 'Failed.'; m.style.color = '#efb097'; }
+        testBtn.disabled = false;
+      });
+      var sendBtn = document.getElementById('oc-em-send');
+      if (sendBtn) sendBtn.addEventListener('click', async function(){
+        var subj = (document.getElementById('oc-em-subject').value||'').trim();
+        var msgv = (document.getElementById('oc-em-body').value||'').trim();
+        var m = document.getElementById('oc-em-send-msg');
+        if (!subj || !msgv){ m.textContent = 'Add a subject and a message first.'; m.style.color = '#efb097'; return; }
+        if (!window.confirm('Email this to all ' + testerCount + ' testers now?')) return;
+        sendBtn.disabled = true; m.textContent = 'Sending…'; m.style.color = '#bcd18a';
+        try { var r = await firebase.app().functions('us-east1').httpsCallable('sendBroadcast')({ subject: subj, message: msgv }); var sent = (r && r.data && r.data.sent) || 0; m.textContent = 'Sent to ' + sent + ' tester' + (sent===1?'':'s') + '.'; document.getElementById('oc-em-subject').value=''; document.getElementById('oc-em-body').value=''; }
+        catch(err){ m.textContent = (err && err.message) ? err.message : 'Failed.'; m.style.color = '#efb097'; }
+        sendBtn.disabled = false;
+      });
       return;
     }
     if (_adminTab === 'testers'){

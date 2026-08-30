@@ -827,15 +827,26 @@ exports.checkAccess = onRequest(
   }
 );
 
-exports.grantAccess = onCall({ region: "us-east1" }, async (request) => {
+exports.grantAccess = onCall({ region: "us-east1", secrets: [GMAIL_APP_PASSWORD] }, async (request) => {
   ownerOnly(request);
   const email = normEmail(request.data && request.data.email);
   if (!email || email.indexOf("@") < 0) throw new HttpsError("invalid-argument", "Enter a valid email.");
   const note = String((request.data && request.data.note) || "").slice(0, 200);
-  await admin.firestore().collection("allowlist").doc(email).set({
+  const db = admin.firestore();
+  // Only send the welcome email on a FIRST grant (not when re-granting an already-active email).
+  const prior = await db.collection("allowlist").doc(email).get();
+  const wasActive = prior.exists && prior.data().active !== false;
+  await db.collection("allowlist").doc(email).set({
     email: email, active: true, note: note, addedAt: Date.now(),
   }, { merge: true });
-  return { ok: true, email: email };
+  let emailed = false;
+  if (!wasActive) {
+    try {
+      await sendMail(email, "You're in — Outdoor Companion early access", welcomeEmailText(), welcomeEmailHtml());
+      emailed = true;
+    } catch (e) { console.error("welcome email failed for", email, "-", e && e.message); }
+  }
+  return { ok: true, email: email, emailed: emailed };
 });
 
 exports.revokeAccess = onCall({ region: "us-east1" }, async (request) => {
@@ -863,9 +874,80 @@ function makeMailer() {
     auth: { user: MAIL_USER, pass: pass },
   });
 }
-async function sendMail(to, subject, text, html) {
-  return makeMailer().sendMail({ from: MAIL_FROM, to: to, subject: subject, text: text, html: html || undefined });
+async function sendMail(to, subject, text, html, bcc) {
+  const msg = { from: MAIL_FROM, to: to, subject: subject, text: text, html: html || undefined };
+  if (bcc && bcc.length) msg.bcc = bcc;
+  return makeMailer().sendMail(msg);
 }
+
+// The in-app Tester Use Agreement, mirrored here so the welcome email can include a copy.
+const AGREEMENT_LINES = [
+  "Outdoor Companion and all of its code, design, and data are the private property of Faison Digital Works, LLC. This is not open-source.",
+  "You agree not to copy, reverse-engineer, decompile, extract, redistribute, resell, or attempt to hack, break into, or tamper with the app, its code, or its data.",
+  "You'll keep your login private and use the app only for your own hunting/fishing.",
+  "This is a test version, provided as-is, with no warranty — things may change or break.",
+  "Access is granted for testing and can be ended at any time.",
+];
+const APP_URL = "https://rfsmfd.github.io/Outdoor_Companion/";
+
+function welcomeEmailHtml() {
+  const items = AGREEMENT_LINES.map((l) => "<li style=\"margin:6px 0;\">" + l + "</li>").join("");
+  return "" +
+    "<div style=\"font-family:Arial,Helvetica,sans-serif;color:#20281a;max-width:560px;line-height:1.5;\">" +
+      "<h2 style=\"color:#3a4d2a;margin-bottom:6px;\">Welcome to Outdoor Companion 🦌🎣</h2>" +
+      "<p>You're in — I've approved your email for early access. Outdoor Companion is a map-based companion for planning your hunts and fishing trips: stands, cameras, sightings, wind &amp; thermals, terrain reads, and more.</p>" +
+      "<p><strong>To get started:</strong></p>" +
+      "<ol>" +
+        "<li>Open <a href=\"" + APP_URL + "\">" + APP_URL + "</a> — on your phone, tap Share → <em>Add to Home Screen</em> so it opens like an app.</li>" +
+        "<li>Tap <strong>CREATE ACCOUNT</strong> and sign up with <strong>this same email address</strong> and a password.</li>" +
+        "<li>Say hello to <strong>Ol' Gus</strong> in the corner — tap him anytime and he'll walk you through anything.</li>" +
+      "</ol>" +
+      "<p><strong>The deal:</strong> it's free while we're testing. All I ask is that you send your honest feedback as you use it — there's a <strong>💡 Suggestion / Issue</strong> button right in the app. Testers who keep up regular, useful feedback earn a <strong>free year</strong> once we launch. 🤝</p>" +
+      "<p style=\"margin-top:18px;\"><strong>The fine print you'll agree to when you first sign in:</strong></p>" +
+      "<ul>" + items + "</ul>" +
+      "<p style=\"margin-top:18px;\">See you in the woods,<br/><strong>Outdoor Companion</strong></p>" +
+    "</div>";
+}
+function welcomeEmailText() {
+  return "Welcome to Outdoor Companion!\n\n" +
+    "You're in — I've approved your email for early access.\n\n" +
+    "To get started:\n" +
+    "1) Open " + APP_URL + " (on your phone, add it to your Home Screen so it opens like an app).\n" +
+    "2) Tap CREATE ACCOUNT and sign up with THIS same email address and a password.\n" +
+    "3) Tap Ol' Gus in the corner anytime for a hand.\n\n" +
+    "The deal: it's free while we're testing. Please send honest feedback with the in-app Suggestion/Issue button. Testers who keep up regular, useful feedback earn a free year once we launch.\n\n" +
+    "The fine print you'll agree to on first sign-in:\n- " + AGREEMENT_LINES.join("\n- ") + "\n\n" +
+    "See you in the woods,\nOutdoor Companion";
+}
+
+/**
+ * Update broadcast — owner types a "what's new" note in the console and it emails every tester
+ * account at once (BCC, so recipients don't see each other). Owner-gated.
+ */
+exports.sendBroadcast = onCall(
+  { region: "us-east1", secrets: [GMAIL_APP_PASSWORD], memory: "512MiB", timeoutSeconds: 120 },
+  async (request) => {
+    ownerOnly(request);
+    const subject = String((request.data && request.data.subject) || "").trim().slice(0, 200);
+    const message = String((request.data && request.data.message) || "").trim().slice(0, 8000);
+    if (!subject || !message) throw new HttpsError("invalid-argument", "A subject and a message are required.");
+    const emails = [];
+    let pageToken;
+    do {
+      const res = await admin.auth().listUsers(1000, pageToken);
+      res.users.forEach((u) => { if (u.email) emails.push(u.email); });
+      pageToken = res.pageToken;
+    } while (pageToken);
+    if (!emails.length) return { ok: true, sent: 0 };
+    const safe = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>");
+    const html = "<div style=\"font-family:Arial,Helvetica,sans-serif;color:#20281a;max-width:560px;line-height:1.5;\">" +
+      safe +
+      "<hr style=\"border:none;border-top:1px solid #ccc;margin:18px 0;\"/>" +
+      "<p style=\"font-size:12px;color:#888;\">You're receiving this as an Outdoor Companion tester. Reply anytime with feedback.</p></div>";
+    await sendMail(MAIL_FROM, subject, message, html, emails);   // BCC everyone
+    return { ok: true, sent: emails.length };
+  }
+);
 
 /**
  * Owner-only test send — fires a sample email to the owner so mail can be re-verified any time
