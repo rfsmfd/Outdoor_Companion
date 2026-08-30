@@ -1895,6 +1895,15 @@
   .gus-tour-label b{ color:#D4B24C; }
   .gus-tour-next{ background:#E8823F; color:#1a1204; border:none; border-radius:9px; padding:7px 13px; font-weight:700; cursor:pointer; font-size:13.5px; white-space:nowrap; }
   .gus-tour-x{ background:transparent; border:none; color:#9db0a3; font-size:17px; cursor:pointer; line-height:1; padding:0 2px; }
+  /* Ol' Gus stays hidden until you're actually in the app (signed in or demo) — never on the login screen */
+  #gusCorner{ display:none; }
+  #gusCorner.gus-live{ display:block; }
+  /* Demo-mode banner */
+  #oc-demo-banner{ position:fixed; top:0; left:0; right:0; z-index:99991; display:flex; align-items:center; justify-content:center; flex-wrap:wrap; gap:8px 14px; padding:7px 12px; background:linear-gradient(90deg,#7a4a12,#a5691c); color:#fff6e6; box-shadow:0 2px 10px rgba(0,0,0,.4); font-size:13px; }
+  #oc-demo-banner .oc-demo-tag{ font-weight:800; letter-spacing:.5px; }
+  #oc-demo-banner .oc-demo-sub{ opacity:.9; }
+  #oc-demo-banner #oc-demo-start{ background:#fff; color:#7a4a12; border:none; border-radius:14px; padding:6px 13px; font-weight:800; font-size:13px; cursor:pointer; }
+  #oc-demo-banner #oc-demo-start:hover{ background:#ffeccb; }
   .gus-inputrow{ display:flex; gap:8px; margin-top:10px; align-items:stretch; }
   .gus-inputrow input{ flex:1; font-size:14.5px; }
   .gus-iconbtn{ background:transparent; border:1px solid #35443a; color:#cfe0d4; border-radius:8px; padding:0 10px; font-size:16px; line-height:1; cursor:pointer; }
@@ -2061,7 +2070,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 546</div>
+    <div id="buildBadge">BUILD 547</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3825,13 +3834,31 @@
       hdr.addEventListener('mousedown', down); hdr.addEventListener('touchstart', down, { passive: false });
     })();
 
-    // He steps out of his corner and gives a wave once, a beat after the app opens.
-    if (gusCorner){
-      setTimeout(function(){
-        gusCorner.classList.add('gus-entrance');
-        setTimeout(function(){ gusCorner.classList.remove('gus-entrance'); }, 7000);
-      }, 1200);
-    }
+    // Ol' Gus is hidden until you're actually IN the app. __gusShow reveals him (with his wave the
+    // first time); __gusHide tucks him away on sign-out. Called from the auth handler + enterDemoMode.
+    var _gusWaved = false;
+    window.__gusShow = function(){
+      if (!gusCorner) return;
+      gusCorner.classList.add('gus-live');
+      if (!_gusWaved){
+        _gusWaved = true;
+        setTimeout(function(){
+          gusCorner.classList.add('gus-entrance');
+          setTimeout(function(){ gusCorner.classList.remove('gus-entrance'); }, 7000);
+        }, 700);
+      }
+    };
+    window.__gusHide = function(){ if (gusCorner) gusCorner.classList.remove('gus-live'); };
+    // Demo welcome: Gus greets the visitor and offers a guided walk-through of the sample farm.
+    window.__gusStartWelcomeTour = function(){
+      try {
+        gusGreeted = true;                 // replace the generic greeting with the demo one
+        gusOpen();
+        gusMsgs.innerHTML = '';
+        gusBubble("Well howdy — welcome to Cedar Creek! This is a sample farm I set up so you can see how the whole app works. Poke around all you like — nothing you do here gets saved. Want me to show you around?", 'gus');
+        gusSetShowme(['where-to-hunt','tab-cameras','tab-log','property-lines','plan-hunt']);
+      } catch(e){}
+    };
   })();
 
   // If the user zooms back out while parcels are active, turn them off automatically
@@ -7910,6 +7937,7 @@
 
   // ---------- storage (works both inside chat preview and as a standalone file) ----------
   var hasChatStorage = (typeof window.storage !== 'undefined' && window.storage !== null);
+  var demoMode = false;   // when true (the "Look around first" sample farm) ALL persistence is sealed off
   var LS_KEY = 'outdoor_companion_sites';
 
   function localLoadAll(){
@@ -7918,7 +7946,7 @@
       return raw ? JSON.parse(raw) : [];
     }catch(e){ return []; }
   }
-  function localSaveAll(list){
+  function localSaveAll(list){ if (demoMode) return;
     try{ window.localStorage.setItem(LS_KEY, JSON.stringify(list)); }catch(e){}
   }
 
@@ -7987,7 +8015,7 @@
       return raw ? JSON.parse(raw) : [];
     }catch(e){ return []; }
   }
-  function obsLocalSaveAll(list){
+  function obsLocalSaveAll(list){ if (demoMode) return;
     try{ window.localStorage.setItem(OBS_LS_KEY, JSON.stringify(list)); }catch(e){}
   }
 
@@ -8051,7 +8079,7 @@
   function buckLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(BUCK_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
   }
-  function buckLocalSaveAll(list){
+  function buckLocalSaveAll(list){ if (demoMode) return;
     try{ window.localStorage.setItem(BUCK_LS_KEY, JSON.stringify(list)); }catch(e){}
   }
   async function loadBuckProfiles(){
@@ -8252,7 +8280,7 @@
   function trailLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(TRAIL_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
   }
-  function trailLocalSaveAll(list){
+  function trailLocalSaveAll(list){ if (demoMode) return;
     try{ window.localStorage.setItem(TRAIL_LS_KEY, JSON.stringify(list)); }catch(e){}
   }
   async function loadTrails(){
@@ -8301,7 +8329,7 @@
   function loadReportEntries(){ try{ var raw = window.localStorage.getItem(REPORT_LS_KEY); reportEntries = raw ? (JSON.parse(raw) || []) : []; }catch(e){ reportEntries = []; } }
   loadReportEntries();   // restore any in-progress report immediately on load
   function savedQLocalLoadAll(){ try{ var raw = window.localStorage.getItem(SAVEDQ_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; } }
-  function savedQLocalSaveAll(list){ try{ window.localStorage.setItem(SAVEDQ_LS_KEY, JSON.stringify(list)); }catch(e){} }
+  function savedQLocalSaveAll(list){ if (demoMode) return; try{ window.localStorage.setItem(SAVEDQ_LS_KEY, JSON.stringify(list)); }catch(e){} }
   async function loadSavedQueries(){
     if (hasChatStorage){
       try{
@@ -8356,7 +8384,7 @@
   function huntLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(HUNT_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
   }
-  function huntLocalSaveAll(list){
+  function huntLocalSaveAll(list){ if (demoMode) return;
     try{ window.localStorage.setItem(HUNT_LS_KEY, JSON.stringify(list)); }catch(e){}
   }
   async function loadHuntEvents(){
@@ -8388,19 +8416,19 @@
   function camLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(CAM_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
   }
-  function camLocalSaveAll(list){
+  function camLocalSaveAll(list){ if (demoMode) return;
     try{ window.localStorage.setItem(CAM_LS_KEY, JSON.stringify(list)); }catch(e){}
   }
   function depLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(DEP_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
   }
-  function depLocalSaveAll(list){
+  function depLocalSaveAll(list){ if (demoMode) return;
     try{ window.localStorage.setItem(DEP_LS_KEY, JSON.stringify(list)); }catch(e){}
   }
   function propLocalLoadAll(){
     try{ var raw = window.localStorage.getItem(PROP_LS_KEY); return raw ? JSON.parse(raw) : []; }catch(e){ return []; }
   }
-  function propLocalSaveAll(list){
+  function propLocalSaveAll(list){ if (demoMode) return;
     try{ window.localStorage.setItem(PROP_LS_KEY, JSON.stringify(list)); }catch(e){}
   }
 
@@ -18789,6 +18817,89 @@
   }
 
   // ---- Login / sign-up screen (built in JS so it needs no page-markup changes) ----
+  // ============================ DEMO MODE ("Look around first") ============================
+  // A sealed, sample farm anyone can explore WITHOUT an account. Loads bundled data into the same
+  // in-memory arrays the app always uses, with ALL persistence turned off (demoMode guards every
+  // local save; hasChatStorage stays false so nothing hits the cloud). Nothing is saved — a reload
+  // clears it. Ol' Gus greets you and offers to show you around.
+  var DEMO_FARM_ID = 'demo-farm-cedar-creek';
+  function buildDemoData(){
+    var now = Date.now(), DAY = 86400000;
+    function d(ago){ return now - Math.round(ago * DAY); }
+    function mp(ts){ try { return getMoonPhase(new Date(ts)); } catch(e){ return null; } }
+    var pid = DEMO_FARM_ID;
+    // ONE knob to move the whole sample farm: set the center; every feature is placed relative to it.
+    var cLat = 36.2330, cLng = -80.8610;   // Yadkin Valley foothills, NC — bottomland fields + wooded ridges & points (pinch points) + relief for the LiDAR (not anyone's real ground)
+    function P(dlat,dlng){ return [cLat+dlat, cLng+dlng]; }
+    function LL(dlat,dlng){ return { lat:cLat+dlat, lng:cLng+dlng }; }
+    var boundary = [P(0.0037,-0.0047),P(0.0043,0.0033),P(0,0.0060),P(-0.0037,0.0040),P(-0.0043,-0.0027),P(-0.0010,-0.0060)];
+    var prop = { id:pid, name:'Cedar Creek (sample farm)', notes:'A demo farm — explore freely; nothing you do here is saved.',
+      createdAt:d(120), centerLat:cLat, centerLng:cLng, zoom:15, module:'hunting',
+      bounds:{ north:cLat+0.0043, south:cLat-0.0043, east:cLng+0.0060, west:cLng-0.0060 }, boundary:boundary };
+    function S(id,name,type,dlat,dlng,ago){ return { id:id, name:name, type:type, notes:'', lat:cLat+dlat, lng:cLng+dlng, createdAt:d(ago), lastActivityAt:d(Math.max(1,ago-90)), propertyId:pid }; }
+    var demoSites = [
+      S('demo-stand-1','Creek Bottom Stand','stand',0.0007,-0.0020,110),
+      S('demo-stand-2','Field Edge Ladder','stand',-0.0007,0.0023,105),
+      S('demo-cam-1','Oak Flat Cam','camera',0.0017,-0.0004,100),
+      S('demo-cam-2','Pinch Point Cam','camera',-0.0020,0.0008,98),
+      S('demo-bed-1','Cedar Thicket Bedding','bedding',0.0025,-0.0030,120),
+      S('demo-feed-1','Clover Plot','feeding',-0.0015,0.0040,120),
+      S('demo-water-1','Cedar Creek Ford','water',0,-0.0012,120),
+      S('demo-park-1','Gate / Parking','access',0.0039,-0.0042,120)
+    ];
+    var demoCams = [
+      { id:'demo-camera-1', name:'Reveal · Oak Flat', make:'Reveal', model:'X-Pro', createdAt:d(100), currentSiteId:'demo-cam-1', lastDeployedAt:d(40) },
+      { id:'demo-camera-2', name:'WiseEye · Pinch', make:'WiseEye', model:'', createdAt:d(98), currentSiteId:'demo-cam-2', lastDeployedAt:d(35) }
+    ];
+    function DEP(id,camId,siteId,dlat,dlng,ago){ var ts=d(ago); return { id:id, cameraId:camId, siteId:siteId, lat:cLat+dlat, lng:cLng+dlng, deployedAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:null, weatherStatus:'unavailable' }; }
+    var demoDeps = [ DEP('demo-dep-1','demo-camera-1','demo-cam-1',0.0017,-0.0004,40), DEP('demo-dep-2','demo-camera-2','demo-cam-2',-0.0020,0.0008,35) ];
+    var demoBucks = [
+      { id:'demo-buck-1', name:'Big Eight', notes:'Heavy main-frame 8. Cruises the creek bottom at first light.', propertyIds:[pid], createdAt:d(90) },
+      { id:'demo-buck-2', name:'Droptine', notes:'Kicker drop off the right beam. Mostly nocturnal so far.', propertyIds:[pid], createdAt:d(80) }
+    ];
+    function O(id,type,dlat,dlng,ago,extra){ var ts=d(ago); var o={ id:id, type:type, lat:cLat+dlat, lng:cLng+dlng, approx:false, siteId:null, propertyId:pid, createdAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:null, weatherStatus:'unavailable' }; if(extra){ for(var k in extra) o[k]=extra[k]; } return o; }
+    var demoObs = [
+      O('demo-o1','buck',0.0008,-0.0018,2,{ buckProfileId:'demo-buck-1', headingDir:'N', siteId:'demo-stand-1' }),
+      O('demo-o2','buck',0.0010,-0.0022,6,{ buckProfileId:'demo-buck-1', headingDir:'NE' }),
+      O('demo-o3','buck',-0.0018,0.0006,4,{ buckProfileId:'demo-buck-2', headingDir:'W' }),
+      O('demo-o4','doe',-0.0006,0.0022,3,{ siteId:'demo-stand-2' }),
+      O('demo-o5','doe',-0.0005,0.0018,8),
+      O('demo-o6','scrape',0.0005,-0.0014,10),
+      O('demo-o7','rub',0.0001,-0.0008,12),
+      O('demo-o8','buck',0.0006,-0.0017,15,{ buckProfileId:'demo-buck-1' })
+    ];
+    var demoTrails = [
+      { id:'demo-trail-1', name:'Gate → Creek Bottom', type:'access', module:'hunting',
+        points:[LL(0.0039,-0.0042),LL(0.0025,-0.0032),LL(0.0013,-0.0024),LL(0.0007,-0.0020)],
+        color:'#FF6A13', lineStyle:'dashed', createdAt:d(100), notes:'', hidden:false, propertyId:pid }
+    ];
+    return { prop:prop, sites:demoSites, cams:demoCams, deps:demoDeps, bucks:demoBucks, obs:demoObs, trails:demoTrails };
+  }
+  function enterDemoMode(){
+    if (demoMode) return;
+    demoMode = true; hasChatStorage = false;
+    var D = buildDemoData();
+    properties = [D.prop]; sites = D.sites; cameras = D.cams; deployments = D.deps;
+    buckProfiles = D.bucks; observations = D.obs; trails = D.trails;
+    try { huntEvents = []; } catch(e){}
+    try { if (typeof importedPhotos !== 'undefined') importedPhotos = []; } catch(e){}
+    activePropertyId = DEMO_FARM_ID;
+    try { hideAuthOverlay(); } catch(e){}
+    try { hideSignoutButton(); } catch(e){}
+    showDemoBanner();
+    try { renderPropertySelect(); var ps = document.getElementById('propertySelect'); if (ps) ps.value = DEMO_FARM_ID; } catch(e){}
+    try { renderAll(); } catch(e){}
+    try { map.setView([D.prop.centerLat, D.prop.centerLng], D.prop.zoom); } catch(e){}
+    try { if (typeof window.__gusShow === 'function') window.__gusShow(); } catch(e){}
+    setTimeout(function(){ try { if (typeof window.__gusStartWelcomeTour === 'function') window.__gusStartWelcomeTour(); } catch(e){} }, 1100);
+  }
+  function showDemoBanner(){
+    var ex = document.getElementById('oc-demo-banner'); if (ex){ ex.style.display = 'flex'; return; }
+    var b = document.createElement('div'); b.id = 'oc-demo-banner';
+    b.innerHTML = '<span class="oc-demo-tag">👀 DEMO — sample farm</span><span class="oc-demo-sub">Nothing here is saved — look around!</span><button type="button" id="oc-demo-start">Start my own farm →</button>';
+    document.body.appendChild(b);
+    document.getElementById('oc-demo-start').addEventListener('click', function(){ try { location.reload(); } catch(e){ window.location.href = window.location.href; } });
+  }
   function buildAuthUI(){
     if (document.getElementById('oc-auth-overlay')) return;
     var style = document.createElement('style');
@@ -18809,7 +18920,11 @@
       // (not the login form) so a returning user sees a clean loading screen, never a flash of the form.
       '#oc-auth-loading{margin-top:14px;text-align:center;color:#9aa382;font-size:13px;letter-spacing:1.5px;}' +
       '#oc-auth-overlay:not(.oc-checking) #oc-auth-loading{display:none;}' +
-      '#oc-auth-overlay.oc-checking #oc-auth-email,#oc-auth-overlay.oc-checking #oc-auth-pass-wrap,#oc-auth-overlay.oc-checking #oc-auth-btn,#oc-auth-overlay.oc-checking #oc-auth-or,#oc-auth-overlay.oc-checking #oc-auth-secondary,#oc-auth-overlay.oc-checking #oc-auth-forgot,#oc-auth-overlay.oc-checking #oc-auth-msg{display:none !important;}' +
+      '#oc-auth-overlay.oc-checking #oc-auth-email,#oc-auth-overlay.oc-checking #oc-auth-pass-wrap,#oc-auth-overlay.oc-checking #oc-auth-btn,#oc-auth-overlay.oc-checking #oc-auth-or,#oc-auth-overlay.oc-checking #oc-auth-secondary,#oc-auth-overlay.oc-checking #oc-auth-forgot,#oc-auth-overlay.oc-checking #oc-auth-msg,#oc-auth-overlay.oc-checking #oc-auth-demo,#oc-auth-overlay.oc-checking #oc-auth-demo-or{display:none !important;}' +
+      '#oc-auth-demo-or{display:flex;align-items:center;gap:12px;margin:20px 2px 0;color:#8a9270;font-size:11px;font-weight:600;letter-spacing:2px;}' +
+      '#oc-auth-demo-or::before,#oc-auth-demo-or::after{content:"";flex:1;height:1px;background:#3a4526;}' +
+      '#oc-auth-demo{width:100%;margin-top:14px;padding:14px;border:1px dashed #8a9a4e;border-radius:11px;background:rgba(121,136,63,.12);color:#e6e0c8;font-size:14px;font-weight:700;letter-spacing:.6px;cursor:pointer;}' +
+      '#oc-auth-demo:hover{background:rgba(121,136,63,.22);border-color:#c9a24a;color:#f5f1e0;}' +
       '#oc-auth-btn{width:100%;margin-top:18px;padding:15px;border:1px solid #8a9a4e;border-radius:11px;background:#79883f;color:#f5f1e0;font-size:16px;font-weight:700;letter-spacing:1.6px;cursor:pointer;}' +
       '#oc-auth-btn:hover{background:#86964a;}' +
       '#oc-auth-btn:disabled{opacity:.6;cursor:default;}' +
@@ -18843,6 +18958,8 @@
       '<div id="oc-auth-or">OR</div>' +
       '<button id="oc-auth-secondary" type="button">CREATE ACCOUNT</button>' +
       '<div id="oc-auth-forgot"><a id="oc-auth-reset">Forgot password?</a></div>' +
+      '<div id="oc-auth-demo-or">— or —</div>' +
+      '<button id="oc-auth-demo" type="button">👀 Look around first — no sign-up</button>' +
       '</div>';
     document.body.appendChild(overlay);
     overlay.classList.add('oc-checking'); // start as a clean splash; the auth check reveals the form only if signed out
@@ -18914,6 +19031,8 @@
       }catch(e){ setMsg(humanError(e)); btn.disabled = false; }
     }
     btn.addEventListener('click', submit);
+    var demoBtnEl = document.getElementById('oc-auth-demo');
+    if (demoBtnEl) demoBtnEl.addEventListener('click', function(){ try { enterDemoMode(); } catch(err){ console.error('demo enter failed', err); } });
     passEl.addEventListener('keydown', function(ev){ if (ev.key === 'Enter') submit(); });
     document.getElementById('oc-auth-reset').addEventListener('click', async function(){
       var email = emailEl.value.trim();
@@ -18954,6 +19073,7 @@
         hasChatStorage = true;
         hideAuthOverlay();
         showSignoutButton(user.email);
+        try { if (window.__gusShow) window.__gusShow(); } catch(e){}
         if (didInitForUid === user.uid){
           // Token refresh — DON'T clobber an active group scope. Rebuild the adapter for
           // whatever scope is currently in view (this was the silent data-flip bug).
@@ -18978,6 +19098,7 @@
         didInitForUid = null;
         activeScope = { type: 'user', id: null };
         hideSignoutButton();
+        try { if (window.__gusHide) window.__gusHide(); } catch(e){}
         showAuthOverlay();
       }
     });

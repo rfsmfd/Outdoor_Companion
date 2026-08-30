@@ -255,6 +255,12 @@ the TOP-RIGHT near the + button on the phone app.)
 ==================================================================================
 
 GETTING STARTED
+DEMO / "LOOK AROUND FIRST": On the sign-in screen there's a "👀 Look around first — no sign-up"
+button. Tapping it drops you onto a ready-made SAMPLE FARM ("Cedar Creek") so you can see how the
+whole app works before you make an account — nothing you do in the demo is saved. A "DEMO — sample
+farm" banner sits at the top; its "Start my own farm →" button takes you to sign-up to begin your
+own. (In the demo, Ol' Gus greets you and can walk you around with "Show me," but to type him a
+question and get an answer you need to be signed in.)
 HOW TO sign in / get started: 1) On the sign-in splash, type your Email and Password (tap the 👁 to
 see it). 2) Tap LOG IN — or, if you're new, tap CREATE ACCOUNT, enter an email + a password (6+
 characters), and CREATE ACCOUNT; "Log in instead" switches back, "Forgot password?" resets it. 3)
