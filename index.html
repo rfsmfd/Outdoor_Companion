@@ -1904,6 +1904,18 @@
   #oc-demo-banner .oc-demo-sub{ opacity:.9; }
   #oc-demo-banner #oc-demo-start{ background:#fff; color:#7a4a12; border:none; border-radius:14px; padding:6px 13px; font-weight:800; font-size:13px; cursor:pointer; }
   #oc-demo-banner #oc-demo-start:hover{ background:#ffeccb; }
+  #oc-demo-banner #oc-demo-feedback{ background:rgba(255,255,255,.18); color:#fff6e6; border:1px solid rgba(255,255,255,.55); border-radius:14px; padding:6px 12px; font-weight:700; font-size:13px; cursor:pointer; }
+  #oc-demo-banner #oc-demo-feedback:hover{ background:rgba(255,255,255,.3); }
+  #oc-signout #oc-fb-open-btn{ background:#3a4d3f; color:#ffe08a; border:none; border-radius:14px; padding:4px 9px; font-size:14px; cursor:pointer; }
+  #oc-signout #oc-fb-open-btn:hover{ background:#48604e; }
+  #oc-feedback-modal{ width:420px; max-width:94vw; }
+  #oc-feedback-modal .oc-fb-sub{ font-size:12.5px; color:var(--text-dim); margin:0 0 12px; line-height:1.45; }
+  #oc-feedback-modal textarea{ width:100%; box-sizing:border-box; margin-top:10px; padding:11px 12px; border-radius:9px; border:1px solid var(--line); background:rgba(0,0,0,.28); color:var(--text); font-size:14.5px; font-family:inherit; resize:vertical; }
+  #oc-feedback-modal .oc-fb-lbl{ display:block; margin-top:12px; font-size:12px; color:var(--text-dim); }
+  #oc-feedback-modal input[type=email]{ width:100%; box-sizing:border-box; margin-top:6px; padding:10px 12px; border-radius:9px; border:1px solid var(--line); background:rgba(0,0,0,.28); color:var(--text); font-size:14px; }
+  #oc-feedback-modal .oc-fb-msg{ min-height:16px; margin-top:10px; font-size:13px; color:var(--text-dim); }
+  #oc-feedback-modal .oc-fb-msg.ok{ color:#bcd18a; }
+  #oc-feedback-modal .oc-fb-msg.err{ color:#ffb38f; }
   .gus-inputrow{ display:flex; gap:8px; margin-top:10px; align-items:stretch; }
   .gus-inputrow input{ flex:1; font-size:14.5px; }
   .gus-iconbtn{ background:transparent; border:1px solid #35443a; color:#cfe0d4; border-radius:8px; padding:0 10px; font-size:16px; line-height:1; cursor:pointer; }
@@ -2070,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 547</div>
+    <div id="buildBadge">BUILD 548</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3604,6 +3616,7 @@
       'wind': { el:'windToggleBtn', map:true, label:'the 💨 wind button' },
       'compass': { el:'compassBtn', map:true, label:'the compass button' },
       'map-display': { el:'displayTrayToggleBtn', map:true, label:'the Map Display button' },
+      'send-feedback': { el:'oc-fb-open-btn', map:true, label:'the 💡 Suggestion / Issue button (top-right)' },
       'show-cameras': { tray:'camera', map:true, label:'the Camera Locations toggle in the Map Display tray' },
       'show-camera-icons': { tray:'camera-icons', map:true, label:'the Camera icons toggle in the Map Display tray' },
       'show-stands': { tray:'stand', map:true, label:'the Stand Locations toggle in the Map Display tray' },
@@ -3855,7 +3868,7 @@
         gusGreeted = true;                 // replace the generic greeting with the demo one
         gusOpen();
         gusMsgs.innerHTML = '';
-        gusBubble("Well howdy — welcome to Cedar Creek! This is a sample farm I set up so you can see how the whole app works. Poke around all you like — nothing you do here gets saved. Want me to show you around?", 'gus');
+        gusBubble("Well howdy — welcome to Cedar Creek! This is a sample farm so you can see how the whole app works. Poke around all you like — nothing you do here gets saved. If you're a fisherman, flip to 🎣 Fishing up top — there's a sample lake set up too. And if you spot anything to fix or wish for, tap the 💡 Suggestion button up top and tell us — we read every one. Want me to show you around?", 'gus');
         gusSetShowme(['where-to-hunt','tab-cameras','tab-log','property-lines','plan-hunt']);
       } catch(e){}
     };
@@ -18873,14 +18886,44 @@
         points:[LL(0.0039,-0.0042),LL(0.0025,-0.0032),LL(0.0013,-0.0024),LL(0.0007,-0.0020)],
         color:'#FF6A13', lineStyle:'dashed', createdAt:d(100), notes:'', hidden:false, propertyId:pid }
     ];
-    return { prop:prop, sites:demoSites, cams:demoCams, deps:demoDeps, bucks:demoBucks, obs:demoObs, trails:demoTrails };
+    // ---- Fishing demo: a sample LAKE (a cove on W. Kerr Scott Reservoir, near the farm) ----
+    var lid = 'demo-lake-kerrscott', lcLat = 36.1318, lcLng = -81.2345;
+    function LP(dlat,dlng){ return [lcLat+dlat, lcLng+dlng]; }
+    function LK(dlat,dlng){ return { lat:lcLat+dlat, lng:lcLng+dlng }; }
+    var lake = { id:lid, name:'Kerr Scott Cove (sample lake)', notes:'A demo lake — explore freely; nothing is saved.',
+      createdAt:d(120), centerLat:lcLat, centerLng:lcLng, zoom:15, module:'fishing',
+      bounds:{ north:lcLat+0.0025, south:lcLat-0.0028, east:lcLng+0.0040, west:lcLng-0.0035 },
+      boundary:[LP(0.0020,-0.0030),LP(0.0025,0.0025),LP(-0.0005,0.0040),LP(-0.0028,0.0010),LP(-0.0022,-0.0035)] };
+    function FS(id,name,type,dlat,dlng,ago){ return { id:id, name:name, type:type, notes:'', lat:lcLat+dlat, lng:lcLng+dlng, createdAt:d(ago), lastActivityAt:d(Math.max(1,ago-90)), propertyId:lid }; }
+    var fishSites = [
+      FS('demo-ramp','Public Boat Ramp','ramp',0.0018,-0.0028,120),
+      FS('demo-dock','The Dock','dock',0.0010,-0.0020,120),
+      FS('demo-hole','Sunken Roadbed','hole',0.0000,0.0005,110),
+      FS('demo-struct','Rocky Point','structure',-0.0012,0.0018,110),
+      FS('demo-brush','Brush Pile','brushpile',0.0006,0.0012,110)
+    ];
+    function C(id,type,dlat,dlng,ago,fields){ var ts=d(ago); var o={ id:id, type:type, lat:lcLat+dlat, lng:lcLng+dlng, approx:false, siteId:null, propertyId:lid, createdAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:null, weatherStatus:'unavailable' }; if(fields){ for(var k in fields) o[k]=fields[k]; } return o; }
+    var catches = [
+      C('demo-c1','bass',0.0001,0.0006,3,{ weight:4.6, length:20, lure:'spinnerbait', lureColor:'chartreuse', depthFt:8 }),
+      C('demo-c2','bass',-0.0010,0.0016,7,{ weight:2.8, length:16, lure:'plastic worm', lureColor:'green pumpkin', tagNumber:'21', depthFt:12 }),
+      C('demo-c3','crappie',0.0005,0.0011,4,{ weight:1.1, length:12, lure:'jig', lureColor:'white', depthFt:10 }),
+      C('demo-c4','catfish',-0.0014,0.0006,10,{ weight:9.2, length:28, lure:'cut bait', lureColor:'', depthFt:18 }),
+      C('demo-c5','bass',0.0000,0.0004,14,{ weight:3.4, length:17, lure:'crankbait', lureColor:'shad', tagNumber:'21', depthFt:9 })
+    ];
+    var boatTrail = { id:'demo-boat-1', name:'Ramp → the point', type:'boat', module:'fishing',
+      points:[LK(0.0018,-0.0028),LK(0.0008,-0.0010),LK(-0.0004,0.0006),LK(-0.0012,0.0018)],
+      color:'#3B9EFF', lineStyle:'solid', createdAt:d(100), notes:'', hidden:false, propertyId:lid };
+    return { prop:prop, sites:demoSites, cams:demoCams, deps:demoDeps, bucks:demoBucks, obs:demoObs, trails:demoTrails,
+             lake:lake, fishSites:fishSites, catches:catches, boatTrail:boatTrail };
   }
   function enterDemoMode(){
     if (demoMode) return;
     demoMode = true; hasChatStorage = false;
     var D = buildDemoData();
-    properties = [D.prop]; sites = D.sites; cameras = D.cams; deployments = D.deps;
-    buckProfiles = D.bucks; observations = D.obs; trails = D.trails;
+    properties = [D.prop, D.lake]; cameras = D.cams; deployments = D.deps; buckProfiles = D.bucks;
+    sites = D.sites.concat(D.fishSites);
+    observations = D.obs.concat(D.catches);
+    trails = D.trails.concat([D.boatTrail]);
     try { huntEvents = []; } catch(e){}
     try { if (typeof importedPhotos !== 'undefined') importedPhotos = []; } catch(e){}
     activePropertyId = DEMO_FARM_ID;
@@ -18896,9 +18939,64 @@
   function showDemoBanner(){
     var ex = document.getElementById('oc-demo-banner'); if (ex){ ex.style.display = 'flex'; return; }
     var b = document.createElement('div'); b.id = 'oc-demo-banner';
-    b.innerHTML = '<span class="oc-demo-tag">👀 DEMO — sample farm</span><span class="oc-demo-sub">Nothing here is saved — look around!</span><button type="button" id="oc-demo-start">Start my own farm →</button>';
+    b.innerHTML = '<span class="oc-demo-tag">👀 DEMO — sample farm</span><span class="oc-demo-sub">Nothing here is saved — look around!</span><button type="button" id="oc-demo-feedback">💡 Suggestion</button><button type="button" id="oc-demo-start">Start my own farm →</button>';
     document.body.appendChild(b);
     document.getElementById('oc-demo-start').addEventListener('click', function(){ try { location.reload(); } catch(e){ window.location.href = window.location.href; } });
+    document.getElementById('oc-demo-feedback').addEventListener('click', function(){ openFeedback('demo'); });
+  }
+
+  // ---------------- Feedback (suggestions / issues) — demo + signed-in, into one log ----------------
+  var FEEDBACK_URL = 'https://us-east1-outdoor-companion-ee5b3.cloudfunctions.net/submitFeedback';
+  function openFeedback(context){
+    if (!document.getElementById('oc-feedback-backdrop')) buildFeedbackModal();
+    var bd = document.getElementById('oc-feedback-backdrop');
+    document.getElementById('oc-fb-context').value = context || (demoMode ? 'demo' : 'app');
+    document.getElementById('oc-fb-text').value = '';
+    document.getElementById('oc-fb-msg').textContent = ''; document.getElementById('oc-fb-msg').className = 'oc-fb-msg';
+    // reset to Suggestion
+    var chips = bd.querySelectorAll('#oc-fb-kind .chip'); for (var i=0;i<chips.length;i++){ chips[i].classList.toggle('active', chips[i].getAttribute('data-kind')==='suggestion'); }
+    var emEl = document.getElementById('oc-fb-email'); emEl.value = '';
+    try { if (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser && firebase.auth().currentUser.email) emEl.value = firebase.auth().currentUser.email; } catch(e){}
+    bd.classList.add('show');
+    setTimeout(function(){ try { document.getElementById('oc-fb-text').focus(); } catch(e){} }, 60);
+  }
+  function buildFeedbackModal(){
+    var bd = document.createElement('div'); bd.className = 'oc-modal-backdrop'; bd.id = 'oc-feedback-backdrop';
+    bd.innerHTML = '<div class="oc-modal" id="oc-feedback-modal">' +
+      '<h3>💡 Suggestion / Issue <button class="close-x" id="oc-fb-close">&times;</button></h3>' +
+      '<p class="oc-fb-sub">See something to improve, or something broken? Tell me — it goes straight to the maker.</p>' +
+      '<div class="chips" id="oc-fb-kind"><button class="chip active" type="button" data-kind="suggestion">💡 Suggestion</button><button class="chip" type="button" data-kind="issue">🐞 Issue / bug</button></div>' +
+      '<textarea id="oc-fb-text" rows="5" placeholder="What would make it better? (or what went wrong, and where?)"></textarea>' +
+      '<input type="hidden" id="oc-fb-context" />' +
+      '<label class="oc-fb-lbl">Your email (optional — so I can follow up)</label>' +
+      '<input type="email" id="oc-fb-email" placeholder="you@example.com" autocomplete="email" />' +
+      '<div id="oc-fb-msg" class="oc-fb-msg"></div>' +
+      '<div class="row" style="margin-top:14px;"><button class="btn-ghost" id="oc-fb-cancel" type="button" style="flex:1;">Cancel</button><button class="btn-primary" id="oc-fb-send" type="button" style="flex:1;">Send</button></div>' +
+      '</div>';
+    document.body.appendChild(bd);
+    var chips = bd.querySelectorAll('#oc-fb-kind .chip');
+    for (var i=0;i<chips.length;i++){ chips[i].addEventListener('click', function(){ for (var j=0;j<chips.length;j++) chips[j].classList.remove('active'); this.classList.add('active'); }); }
+    function closeFb(){ bd.classList.remove('show'); }
+    document.getElementById('oc-fb-close').addEventListener('click', closeFb);
+    document.getElementById('oc-fb-cancel').addEventListener('click', closeFb);
+    bd.addEventListener('click', function(e){ if (e.target === bd) closeFb(); });
+    document.getElementById('oc-fb-send').addEventListener('click', async function(){
+      var sendBtn = this, msg = document.getElementById('oc-fb-msg');
+      var text = (document.getElementById('oc-fb-text').value || '').trim();
+      if (!text){ msg.textContent = 'Type a little something first.'; msg.className = 'oc-fb-msg err'; return; }
+      var active = bd.querySelector('#oc-fb-kind .chip.active');
+      var kind = active ? active.getAttribute('data-kind') : 'suggestion';
+      sendBtn.disabled = true; msg.textContent = 'Sending…'; msg.className = 'oc-fb-msg';
+      var uid = ''; try { if (firebase.auth && firebase.auth().currentUser) uid = firebase.auth().currentUser.uid; } catch(e){}
+      var build = ''; try { build = (document.getElementById('buildBadge').textContent || '').replace(/[^0-9]/g,''); } catch(e){}
+      var payload = { text: text, kind: kind, context: document.getElementById('oc-fb-context').value || '', email: (document.getElementById('oc-fb-email').value || '').trim(), uid: uid, build: build, demo: !!demoMode };
+      try {
+        var r = await fetch(FEEDBACK_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        var j = await r.json().catch(function(){ return {}; });
+        if (r.ok && j && j.ok){ msg.textContent = 'Thank you — got it! 🙏'; msg.className = 'oc-fb-msg ok'; setTimeout(closeFb, 1300); }
+        else { msg.textContent = 'Hmm, that didn\'t go through — try again in a bit.'; msg.className = 'oc-fb-msg err'; sendBtn.disabled = false; }
+      } catch(e){ msg.textContent = 'Network hiccup — give it another try in a minute.'; msg.className = 'oc-fb-msg err'; sendBtn.disabled = false; }
+    });
   }
   function buildAuthUI(){
     if (document.getElementById('oc-auth-overlay')) return;
@@ -18966,8 +19064,10 @@
 
     var signout = document.createElement('div');
     signout.id = 'oc-signout';
-    signout.innerHTML = '<button type="button" id="oc-refresh-btn" title="Reload the app">🔄 Refresh</button><select id="oc-scope-select" title="Switch between your private data and a shared group"></select><span id="oc-signout-email"></span><button type="button" id="oc-signout-btn">Sign out</button>';
+    signout.innerHTML = '<button type="button" id="oc-fb-open-btn" title="Send a suggestion or report an issue">💡</button><button type="button" id="oc-refresh-btn" title="Reload the app">🔄 Refresh</button><select id="oc-scope-select" title="Switch between your private data and a shared group"></select><span id="oc-signout-email"></span><button type="button" id="oc-signout-btn">Sign out</button>';
     document.body.appendChild(signout);
+    var fbOpenBtn = document.getElementById('oc-fb-open-btn');
+    if (fbOpenBtn) fbOpenBtn.addEventListener('click', function(){ openFeedback('app'); });
     var refreshBtn = document.getElementById('oc-refresh-btn');
     if (refreshBtn) refreshBtn.addEventListener('click', function(){
       // A clean reload re-inits Firebase and re-reads your saved login from storage — the same path

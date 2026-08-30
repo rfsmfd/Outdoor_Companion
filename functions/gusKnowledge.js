@@ -65,7 +65,8 @@ Cameras tab buttons: register-camera (Register Camera), deploy-camera (Deploy Ca
 Tools menu items: photo-gallery, solunar (Solunar Table), journal (Hunt Journal), trails, import
 (Import from other apps), export.
 Top toolbar / map: property-lines (the 📐 button), layers (the ⛰ Layers pill), wind (the 💨 button),
-compass, map-display (opens the show/hide pins tray), quick-log (the orange + Quick Log).
+compass, map-display (opens the show/hide pins tray), quick-log (the orange + Quick Log),
+send-feedback (the 💡 Suggestion / Issue button, top-right — point here to help folks send feedback).
 Map Display tray toggles (ALWAYS put map-display FIRST, then the toggle as step 2): show-camera-icons
 ("Camera icons" = camera-picture markers), show-cameras ("Camera Locations" = camera dots+names),
 show-stands, show-access, show-bedding, show-feeding, show-water, show-bucks, show-does, show-bears,
@@ -256,11 +257,17 @@ the TOP-RIGHT near the + button on the phone app.)
 
 GETTING STARTED
 DEMO / "LOOK AROUND FIRST": On the sign-in screen there's a "👀 Look around first — no sign-up"
-button. Tapping it drops you onto a ready-made SAMPLE FARM ("Cedar Creek") so you can see how the
-whole app works before you make an account — nothing you do in the demo is saved. A "DEMO — sample
+button. Tapping it drops you onto a ready-made SAMPLE FARM ("Cedar Creek") — and if you switch to
+🎣 Fishing mode, a sample LAKE ("Kerr Scott Cove") too — so you can see how the whole app works
+before you make an account. Nothing you do in the demo is saved. A "DEMO — sample
 farm" banner sits at the top; its "Start my own farm →" button takes you to sign-up to begin your
 own. (In the demo, Ol' Gus greets you and can walk you around with "Show me," but to type him a
 question and get an answer you need to be signed in.)
+HOW TO send a suggestion or report an issue (FEEDBACK): tap the 💡 Suggestion / Issue button — it's
+at the TOP-RIGHT of the app (by Refresh / Sign out), or the "💡 Suggestion" button in the DEMO
+banner. Pick Suggestion or Issue, type it, optionally add your email so we can follow up, and Send.
+It goes straight to the maker — every one is read. You can send feedback whether you're signed in OR
+just looking around in the demo. (Encourage folks to use it — it's how the app gets better.)
 HOW TO sign in / get started: 1) On the sign-in splash, type your Email and Password (tap the 👁 to
 see it). 2) Tap LOG IN — or, if you're new, tap CREATE ACCOUNT, enter an email + a password (6+
 characters), and CREATE ACCOUNT; "Log in instead" switches back, "Forgot password?" resets it. 3)
