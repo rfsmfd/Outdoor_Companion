@@ -708,8 +708,8 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
   const agreements = {};   // uid -> { acceptedAt, version }
   agSnap.docs.forEach((d) => { agreements[d.id] = d.data(); });
   const access = alSnap.docs.map((d) => d.data());
-  const activity = {};     // uid -> lastSeenAt (real app-open time, not just password sign-in)
-  uaSnap.docs.forEach((d) => { const v = d.data(); activity[d.id] = v.lastSeenAt || 0; });
+  const activity = {};     // uid -> { lastSeenAt, opens } (real app-open time + visit count)
+  uaSnap.docs.forEach((d) => { const v = d.data(); activity[d.id] = { lastSeenAt: v.lastSeenAt || 0, opens: v.opens || 0 }; });
 
   // --- telemetry aggregates (last 30 days), anonymous ---
   const telSnap = await db.collection("telemetry")
@@ -750,8 +750,9 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
     res.users.forEach((u) => {
       const em = (u.email || "").toLowerCase();
       const lastSignIn = u.metadata && u.metadata.lastSignInTime ? Date.parse(u.metadata.lastSignInTime) : 0;
+      const act = activity[u.uid] || { lastSeenAt: 0, opens: 0 };
       // Real "last active" = the later of a fresh sign-in and the app-open heartbeat.
-      const lastActive = Math.max(lastSignIn, activity[u.uid] || 0);
+      const lastActive = Math.max(lastSignIn, act.lastSeenAt || 0);
       const fbCount = (fbByEmail[em] || 0) + (fbByUid[u.uid] || 0);
       const ag = agreements[u.uid];
       testers.push({
@@ -760,6 +761,7 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
         createdAt: u.metadata && u.metadata.creationTime ? Date.parse(u.metadata.creationTime) : 0,
         lastSignIn: lastSignIn,
         lastActive: lastActive,
+        opens: act.opens || 0,
         daysQuiet: lastActive ? Math.floor((now - lastActive) / DAY) : null,
         feedbackCount: fbCount,
         agreedAt: ag ? (ag.acceptedAt || 0) : 0,
@@ -806,8 +808,10 @@ exports.heartbeat = onCall({ region: "us-east1" }, async (request) => {
   const uid = request.auth && request.auth.uid;
   if (!uid) return { ok: false };
   const email = (request.auth.token && request.auth.token.email) || "";
+  // The client sends this once per app-open, so `opens` counts visits (not token refreshes).
   await admin.firestore().collection("userActivity").doc(uid).set({
     uid: uid, email: email, lastSeenAt: Date.now(),
+    opens: admin.firestore.FieldValue.increment(1),
   }, { merge: true });
   return { ok: true };
 });
