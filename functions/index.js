@@ -601,6 +601,22 @@ exports.submitFeedback = onRequest(
           "</blockquote><p style=\"font-size:12px;color:#888;\">View all in the app's Admin console.</p></div>";
         await sendMail(FOUNDER_EMAIL, subj, lines.join("\n"), html);
       } catch (mailErr) { console.error("feedback notify email failed:", mailErr && mailErr.message); }
+      // Waitlist joiners get a friendly confirmation: we're in testing now, we'll email them at launch.
+      if (doc.kind === "waitlist" && doc.email && doc.email.indexOf("@") > 0) {
+        try {
+          const wtext = "Thanks for your interest in Outdoor Companion!\n\n" +
+            "We're in private testing right now with a small group of hunters and anglers, so access is invite-only for the moment. " +
+            "You're on the list — the day we open it up, we'll email you right here with your way in.\n\n" +
+            "Sit tight, and thanks for wanting to be part of it.\n\n— Outdoor Companion";
+          const whtml = "<div style=\"font-family:Arial,Helvetica,sans-serif;color:#20281a;max-width:560px;line-height:1.5;\">" +
+            "<h2 style=\"color:#3a4d2a;\">You're on the list ✅</h2>" +
+            "<p>Thanks for your interest in <strong>Outdoor Companion</strong>!</p>" +
+            "<p>We're in <strong>private testing</strong> right now with a small group of hunters and anglers, so access is invite-only for the moment. You're on the waitlist — the day we open it up, we'll email you right here with your way in.</p>" +
+            "<p>Sit tight, and thanks for wanting to be part of it.</p>" +
+            "<p>— <strong>Outdoor Companion</strong></p></div>";
+          await sendMail(doc.email, "You're on the Outdoor Companion waitlist ✅", wtext, whtml);
+        } catch (wErr) { console.error("waitlist confirm email failed:", wErr && wErr.message); }
+      }
       res.json({ ok: true });
     } catch (e) {
       console.error("submitFeedback failed:", e && e.message);
