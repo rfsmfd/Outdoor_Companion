@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 548</div>
+    <div id="buildBadge">BUILD 549</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18840,6 +18840,13 @@
     var now = Date.now(), DAY = 86400000;
     function d(ago){ return now - Math.round(ago * DAY); }
     function mp(ts){ try { return getMoonPhase(new Date(ts)); } catch(e){ return null; } }
+    function atHour(ago, hr){ var dt = new Date(now - Math.round(ago) * DAY); dt.setHours(Math.floor(hr), Math.round((hr % 1) * 60), 0, 0); return dt.getTime(); }
+    // Varied but coherent weather so the Analytics charts (wind / pressure / temp / clouds) actually
+    // show a spread and a story instead of one bar. Deterministic by seed.
+    function demoWeather(seed){ var i = Math.abs(Math.round(seed)) % 6;
+      return { tempF:[38,44,52,60,35,48][i], windDir:['NW','N','NE','W','SW','S'][i], windDirDisplay:['NW','N','NE','W','SW','S'][i],
+        windMph:[6,10,4,12,8,5][i], pressureInHg:[30.05,29.82,30.12,29.75,30.20,29.90][i], pressureTrend:['Falling','Falling','Steady','Rising','Falling','Steady'][i],
+        cloudCoverPct:[20,80,40,90,10,60][i], humidityPct:[55,70,50,80,45,65][i], uvIndex:[3,1,4,1,3,2][i], visibilityMi:10, sunPhase:null, sunProximity:null }; }
     var pid = DEMO_FARM_ID;
     // ONE knob to move the whole sample farm: set the center; every feature is placed relative to it.
     var cLat = 36.2330, cLng = -80.8610;   // Yadkin Valley foothills, NC — bottomland fields + wooded ridges & points (pinch points) + relief for the LiDAR (not anyone's real ground)
@@ -18864,22 +18871,28 @@
       { id:'demo-camera-1', name:'Reveal · Oak Flat', make:'Reveal', model:'X-Pro', createdAt:d(100), currentSiteId:'demo-cam-1', lastDeployedAt:d(40) },
       { id:'demo-camera-2', name:'WiseEye · Pinch', make:'WiseEye', model:'', createdAt:d(98), currentSiteId:'demo-cam-2', lastDeployedAt:d(35) }
     ];
-    function DEP(id,camId,siteId,dlat,dlng,ago){ var ts=d(ago); return { id:id, cameraId:camId, siteId:siteId, lat:cLat+dlat, lng:cLng+dlng, deployedAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:null, weatherStatus:'unavailable' }; }
+    function DEP(id,camId,siteId,dlat,dlng,ago){ var ts=d(ago); return { id:id, cameraId:camId, siteId:siteId, lat:cLat+dlat, lng:cLng+dlng, deployedAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:demoWeather(ago), weatherStatus:'ok' }; }
     var demoDeps = [ DEP('demo-dep-1','demo-camera-1','demo-cam-1',0.0017,-0.0004,40), DEP('demo-dep-2','demo-camera-2','demo-cam-2',-0.0020,0.0008,35) ];
     var demoBucks = [
       { id:'demo-buck-1', name:'Big Eight', notes:'Heavy main-frame 8. Cruises the creek bottom at first light.', propertyIds:[pid], createdAt:d(90) },
       { id:'demo-buck-2', name:'Droptine', notes:'Kicker drop off the right beam. Mostly nocturnal so far.', propertyIds:[pid], createdAt:d(80) }
     ];
-    function O(id,type,dlat,dlng,ago,extra){ var ts=d(ago); var o={ id:id, type:type, lat:cLat+dlat, lng:cLng+dlng, approx:false, siteId:null, propertyId:pid, createdAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:null, weatherStatus:'unavailable' }; if(extra){ for(var k in extra) o[k]=extra[k]; } return o; }
+    function O(id,type,dlat,dlng,ago,hr,extra){ var ts=atHour(ago,hr); var o={ id:id, type:type, lat:cLat+dlat, lng:cLng+dlng, approx:false, siteId:null, propertyId:pid, createdAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:demoWeather(ago), weatherStatus:'ok' }; if(extra){ for(var k in extra) o[k]=extra[k]; } return o; }
     var demoObs = [
-      O('demo-o1','buck',0.0008,-0.0018,2,{ buckProfileId:'demo-buck-1', headingDir:'N', siteId:'demo-stand-1' }),
-      O('demo-o2','buck',0.0010,-0.0022,6,{ buckProfileId:'demo-buck-1', headingDir:'NE' }),
-      O('demo-o3','buck',-0.0018,0.0006,4,{ buckProfileId:'demo-buck-2', headingDir:'W' }),
-      O('demo-o4','doe',-0.0006,0.0022,3,{ siteId:'demo-stand-2' }),
-      O('demo-o5','doe',-0.0005,0.0018,8),
-      O('demo-o6','scrape',0.0005,-0.0014,10),
-      O('demo-o7','rub',0.0001,-0.0008,12),
-      O('demo-o8','buck',0.0006,-0.0017,15,{ buckProfileId:'demo-buck-1' })
+      O('demo-o1','buck',0.0008,-0.0018,2,6.75,{ buckProfileId:'demo-buck-1', headingDir:'N', siteId:'demo-stand-1' }),
+      O('demo-o2','buck',0.0010,-0.0022,6,17.25,{ buckProfileId:'demo-buck-1', headingDir:'NE', siteId:'demo-stand-1' }),
+      O('demo-o3','buck',-0.0018,0.0006,4,6.5,{ buckProfileId:'demo-buck-2', headingDir:'W' }),
+      O('demo-o4','doe',-0.0006,0.0022,3,17.5,{ siteId:'demo-stand-2' }),
+      O('demo-o5','doe',-0.0005,0.0018,8,7.0,{ siteId:'demo-stand-2' }),
+      O('demo-o6','scrape',0.0005,-0.0014,10,12,{}),
+      O('demo-o7','rub',0.0001,-0.0008,12,12,{}),
+      O('demo-o8','buck',0.0006,-0.0017,15,6.8,{ buckProfileId:'demo-buck-1', headingDir:'N', siteId:'demo-stand-1' }),
+      O('demo-o9','buck',0.0009,-0.0019,19,17.6,{ buckProfileId:'demo-buck-1', headingDir:'NE' }),
+      O('demo-o10','doe',-0.0008,0.0020,11,6.6,{ siteId:'demo-stand-2' }),
+      O('demo-o11','buck',-0.0016,0.0008,22,2.0,{ buckProfileId:'demo-buck-2', headingDir:'S' }),
+      O('demo-o12','doe',-0.0004,0.0016,17,17.8,{ siteId:'demo-stand-2' }),
+      O('demo-o13','turkey',0.0012,-0.0010,9,8.5,{}),
+      O('demo-o14','buck',0.0007,-0.0016,26,6.9,{ buckProfileId:'demo-buck-1', headingDir:'N', siteId:'demo-stand-1' })
     ];
     var demoTrails = [
       { id:'demo-trail-1', name:'Gate → Creek Bottom', type:'access', module:'hunting',
@@ -18902,13 +18915,16 @@
       FS('demo-struct','Rocky Point','structure',-0.0012,0.0018,110),
       FS('demo-brush','Brush Pile','brushpile',0.0006,0.0012,110)
     ];
-    function C(id,type,dlat,dlng,ago,fields){ var ts=d(ago); var o={ id:id, type:type, lat:lcLat+dlat, lng:lcLng+dlng, approx:false, siteId:null, propertyId:lid, createdAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:null, weatherStatus:'unavailable' }; if(fields){ for(var k in fields) o[k]=fields[k]; } return o; }
+    function C(id,type,dlat,dlng,ago,hr,fields){ var ts=atHour(ago,hr); var o={ id:id, type:type, lat:lcLat+dlat, lng:lcLng+dlng, approx:false, siteId:null, propertyId:lid, createdAt:ts, moonPhase:mp(ts), solunarPeriod:null, weather:demoWeather(ago+1), weatherStatus:'ok' }; if(fields){ for(var k in fields) o[k]=fields[k]; } return o; }
     var catches = [
-      C('demo-c1','bass',0.0001,0.0006,3,{ weight:4.6, length:20, lure:'spinnerbait', lureColor:'chartreuse', depthFt:8 }),
-      C('demo-c2','bass',-0.0010,0.0016,7,{ weight:2.8, length:16, lure:'plastic worm', lureColor:'green pumpkin', tagNumber:'21', depthFt:12 }),
-      C('demo-c3','crappie',0.0005,0.0011,4,{ weight:1.1, length:12, lure:'jig', lureColor:'white', depthFt:10 }),
-      C('demo-c4','catfish',-0.0014,0.0006,10,{ weight:9.2, length:28, lure:'cut bait', lureColor:'', depthFt:18 }),
-      C('demo-c5','bass',0.0000,0.0004,14,{ weight:3.4, length:17, lure:'crankbait', lureColor:'shad', tagNumber:'21', depthFt:9 })
+      C('demo-c1','bass',0.0001,0.0006,3,7.0,{ weight:4.6, length:20, lure:'spinnerbait', lureColor:'chartreuse', depthFt:8 }),
+      C('demo-c2','bass',-0.0010,0.0016,7,18.0,{ weight:2.8, length:16, lure:'plastic worm', lureColor:'green pumpkin', tagNumber:'21', depthFt:12 }),
+      C('demo-c3','crappie',0.0005,0.0011,4,8.0,{ weight:1.1, length:12, lure:'jig', lureColor:'white', depthFt:10 }),
+      C('demo-c4','catfish',-0.0014,0.0006,10,20.0,{ weight:9.2, length:28, lure:'cut bait', lureColor:'', depthFt:18 }),
+      C('demo-c5','bass',0.0000,0.0004,14,6.8,{ weight:3.4, length:17, lure:'crankbait', lureColor:'shad', tagNumber:'21', depthFt:9 }),
+      C('demo-c6','bass',0.0003,0.0009,18,17.5,{ weight:5.3, length:21, lure:'jerkbait', lureColor:'chrome', depthFt:7 }),
+      C('demo-c7','crappie',0.0004,0.0013,21,7.5,{ weight:0.9, length:11, lure:'jig', lureColor:'chartreuse', depthFt:11 }),
+      C('demo-c8','bluegill',0.0006,0.0010,12,10.0,{ weight:0.4, length:8, lure:'cricket', lureColor:'', depthFt:5 })
     ];
     var boatTrail = { id:'demo-boat-1', name:'Ramp → the point', type:'boat', module:'fishing',
       points:[LK(0.0018,-0.0028),LK(0.0008,-0.0010),LK(-0.0004,0.0006),LK(-0.0012,0.0018)],
@@ -18924,6 +18940,7 @@
     sites = D.sites.concat(D.fishSites);
     observations = D.obs.concat(D.catches);
     trails = D.trails.concat([D.boatTrail]);
+    try { analyticsSource = 'both'; } catch(e){}   // demo has sightings/catches (no photos) — show them in Analytics
     try { huntEvents = []; } catch(e){}
     try { if (typeof importedPhotos !== 'undefined') importedPhotos = []; } catch(e){}
     activePropertyId = DEMO_FARM_ID;
