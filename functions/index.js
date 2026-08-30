@@ -15,10 +15,14 @@ const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https")
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const Anthropic = require("@anthropic-ai/sdk");
+const nodemailer = require("nodemailer");
 
 admin.initializeApp();
 
 const ANTHROPIC_API_KEY = defineSecret("ANTHROPIC_API_KEY");
+// App password for the Outdoor Companion sending mailbox (Google Workspace: rfaison@outdoorcompanionapp.com).
+// Set by the owner via `firebase functions:secrets:set GMAIL_APP_PASSWORD` — never in source.
+const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
 
 // The photo's project storage bucket (public identifier, not a secret).
 const STORAGE_BUCKET = "outdoor-companion-ee5b3.firebasestorage.app";
@@ -843,6 +847,43 @@ exports.revokeAccess = onCall({ region: "us-east1" }, async (request) => {
   }, { merge: true });
   return { ok: true, email: email };
 });
+
+/**
+ * EMAIL — sends from the Outdoor Companion Workspace mailbox via Gmail SMTP + an app password
+ * (secret GMAIL_APP_PASSWORD). Base plumbing for welcome / access-granted / update-broadcast mail.
+ */
+const MAIL_FROM = "Outdoor Companion <rfaison@outdoorcompanionapp.com>";
+const MAIL_USER = "rfaison@outdoorcompanionapp.com";
+function makeMailer() {
+  // Strip any whitespace — Gmail shows app passwords as "abcd efgh ijkl mnop" and it's easy to
+  // paste the spaces in; SMTP wants the bare 16 characters.
+  const pass = String(GMAIL_APP_PASSWORD.value() || "").replace(/\s+/g, "");
+  return nodemailer.createTransport({
+    host: "smtp.gmail.com", port: 465, secure: true,
+    auth: { user: MAIL_USER, pass: pass },
+  });
+}
+async function sendMail(to, subject, text, html) {
+  return makeMailer().sendMail({ from: MAIL_FROM, to: to, subject: subject, text: text, html: html || undefined });
+}
+
+/**
+ * Owner-only test send — fires a sample email to the owner so mail can be re-verified any time
+ * (wired to a "Send test email" button in the console). Owner-gated; sends only to the owner.
+ */
+exports.sendTestEmail = onCall(
+  { region: "us-east1", secrets: [GMAIL_APP_PASSWORD], memory: "256MiB", timeoutSeconds: 30 },
+  async (request) => {
+    ownerOnly(request);
+    const info = await sendMail(
+      FOUNDER_EMAIL,
+      "Outdoor Companion — test email ✅",
+      "This is a test from Outdoor Companion. If you're reading this, sending from rfaison@outdoorcompanionapp.com works.",
+      "<p>This is a test from <strong>Outdoor Companion</strong>.</p><p>If you're reading this, sending from <strong>rfaison@outdoorcompanionapp.com</strong> works. 🤠</p>"
+    );
+    return { ok: true, messageId: info && info.messageId, accepted: info && info.accepted };
+  }
+);
 
 /**
  * Group sharing — membership mutations that clients can't do safely.
