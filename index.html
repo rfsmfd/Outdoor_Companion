@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 550</div>
+    <div id="buildBadge">BUILD 551</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -19055,6 +19055,158 @@
       } catch(e){ msg.textContent = 'Network hiccup — give it another try in a minute.'; msg.className = 'oc-fb-msg err'; sendBtn.disabled = false; }
     });
   }
+
+  // ---------------- Owner console (🛠 Admin) — testers, usage, feedback, waitlist ----------------
+  function ocEsc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]; }); }
+  function ocAgo(ts){
+    if (!ts) return '—';
+    var s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return 'just now';
+    var m = Math.floor(s/60); if (m < 60) return m + 'm ago';
+    var h = Math.floor(m/60); if (h < 24) return h + 'h ago';
+    var d = Math.floor(h/24); if (d < 30) return d + 'd ago';
+    var mo = Math.floor(d/30); return mo + 'mo ago';
+  }
+  function ocDate(ts){ if (!ts) return '—'; try { return new Date(ts).toLocaleDateString(); } catch(e){ return '—'; } }
+  function buildAdminModal(){
+    if (document.getElementById('oc-admin-backdrop')) return;
+    var st = document.createElement('style');
+    st.textContent =
+      '#oc-admin-backdrop{position:fixed;inset:0;z-index:100060;background:rgba(10,14,8,.72);display:none;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 12px;}' +
+      '#oc-admin-backdrop.show{display:flex;}' +
+      '#oc-admin-modal{width:100%;max-width:760px;background:#20281a;border:1px solid #46532f;border-radius:16px;color:#eae4cf;box-shadow:0 18px 50px rgba(0,0,0,.5);overflow:hidden;}' +
+      '#oc-admin-modal .oc-adm-head{display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid #3a4526;background:#263019;}' +
+      '#oc-admin-modal .oc-adm-head h3{margin:0;font-size:19px;flex:1;color:#f3eed6;}' +
+      '#oc-admin-modal .oc-adm-head button{background:#3a4d3f;color:#ffe08a;border:none;border-radius:10px;padding:8px 12px;font-size:15px;cursor:pointer;}' +
+      '#oc-admin-tabs{display:flex;gap:4px;padding:10px 12px 0;flex-wrap:wrap;}' +
+      '#oc-admin-tabs button{flex:1;min-width:120px;background:transparent;border:1px solid #46532f;color:#cfc9ad;border-radius:10px 10px 0 0;padding:11px 8px;font-size:14px;font-weight:700;cursor:pointer;}' +
+      '#oc-admin-tabs button.active{background:#33401f;color:#f5f1e0;border-color:#8a9a4e;}' +
+      '#oc-admin-body{padding:16px 18px 22px;min-height:220px;font-size:15px;line-height:1.5;}' +
+      '#oc-admin-body .oc-cards{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:16px;}' +
+      '#oc-admin-body .oc-card{flex:1;min-width:120px;background:#263019;border:1px solid #3a4526;border-radius:12px;padding:12px 14px;}' +
+      '#oc-admin-body .oc-card b{display:block;font-size:26px;color:#dbe6a6;line-height:1.1;}' +
+      '#oc-admin-body .oc-card span{font-size:12.5px;color:#a9b18c;}' +
+      '#oc-admin-body table{width:100%;border-collapse:collapse;font-size:14px;}' +
+      '#oc-admin-body th,#oc-admin-body td{text-align:left;padding:9px 8px;border-bottom:1px solid #333f22;vertical-align:top;}' +
+      '#oc-admin-body th{color:#a9b18c;font-size:12px;text-transform:uppercase;letter-spacing:.5px;}' +
+      '#oc-admin-body .pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:700;}' +
+      '#oc-admin-body .pill.on{background:#31481f;color:#c6e08a;} #oc-admin-body .pill.mid{background:#4a4520;color:#e6d187;} #oc-admin-body .pill.off{background:#4a2c22;color:#efb097;}' +
+      '#oc-admin-body .oc-row{padding:11px 0;border-bottom:1px solid #333f22;}' +
+      '#oc-admin-body .oc-row .meta{font-size:12.5px;color:#9aa382;margin-top:3px;}' +
+      '#oc-admin-body .kind{font-weight:700;color:#dbe6a6;}' +
+      '#oc-admin-body .muted{color:#9aa382;} #oc-admin-body .empty{color:#9aa382;padding:26px 0;text-align:center;}';
+    document.head.appendChild(st);
+    var bd = document.createElement('div'); bd.id = 'oc-admin-backdrop';
+    bd.innerHTML =
+      '<div id="oc-admin-modal">' +
+        '<div class="oc-adm-head"><h3>🛠 Owner Console</h3><button type="button" id="oc-adm-refresh" title="Reload">↻</button><button type="button" id="oc-adm-close" title="Close">&times;</button></div>' +
+        '<div id="oc-admin-tabs">' +
+          '<button type="button" class="active" data-atab="testers">👥 Testers</button>' +
+          '<button type="button" data-atab="usage">📊 Usage</button>' +
+          '<button type="button" data-atab="feedback">💡 Feedback</button>' +
+          '<button type="button" data-atab="waitlist">✉ Waitlist</button>' +
+        '</div>' +
+        '<div id="oc-admin-body"><div class="empty">Loading…</div></div>' +
+      '</div>';
+    document.body.appendChild(bd);
+    function close(){ bd.classList.remove('show'); }
+    document.getElementById('oc-adm-close').addEventListener('click', close);
+    document.getElementById('oc-adm-refresh').addEventListener('click', function(){ loadAdminData(true); });
+    bd.addEventListener('click', function(e){ if (e.target === bd) close(); });
+    var tabBtns = bd.querySelectorAll('#oc-admin-tabs button');
+    for (var i=0;i<tabBtns.length;i++){ tabBtns[i].addEventListener('click', function(){
+      for (var j=0;j<tabBtns.length;j++) tabBtns[j].classList.remove('active');
+      this.classList.add('active');
+      renderAdminTab(this.getAttribute('data-atab'));
+    }); }
+  }
+  var _adminData = null, _adminTab = 'testers';
+  function openAdminConsole(){
+    buildAdminModal();
+    document.getElementById('oc-admin-backdrop').classList.add('show');
+    if (!_adminData) loadAdminData(false); else renderAdminTab(_adminTab);
+  }
+  async function loadAdminData(force){
+    var body = document.getElementById('oc-admin-body');
+    if (force || !_adminData) body.innerHTML = '<div class="empty">Loading…</div>';
+    try {
+      if (typeof firebase === 'undefined' || !firebase.functions || !firebase.auth().currentUser){ body.innerHTML = '<div class="empty">Sign in as the owner to view this.</div>'; return; }
+      var callable = firebase.app().functions('us-east1').httpsCallable('adminData');
+      var res = await callable({});
+      _adminData = (res && res.data) || {};
+      renderAdminTab(_adminTab);
+    } catch(e){
+      var m = (e && e.message) ? e.message : 'Could not load.';
+      body.innerHTML = '<div class="empty">' + ocEsc(m) + '</div>';
+    }
+  }
+  function renderAdminTab(tab){
+    _adminTab = tab || 'testers';
+    var body = document.getElementById('oc-admin-body'); if (!body) return;
+    var D = _adminData || {};
+    if (_adminTab === 'testers'){
+      var ts = D.testers || [];
+      if (!ts.length){ body.innerHTML = '<div class="empty">No accounts yet. Testers show up here once they sign up.</div>'; return; }
+      var active = 0, quiet = 0, contributing = 0;
+      ts.forEach(function(t){ if (t.daysQuiet != null && t.daysQuiet <= 7) active++; else quiet++; if (t.feedbackCount > 0) contributing++; });
+      var h = '<div class="oc-cards">' +
+        '<div class="oc-card"><b>' + ts.length + '</b><span>tester accounts</span></div>' +
+        '<div class="oc-card"><b>' + active + '</b><span>active (7 days)</span></div>' +
+        '<div class="oc-card"><b>' + contributing + '</b><span>have sent feedback</span></div>' +
+        '</div>';
+      h += '<table><thead><tr><th>Tester</th><th>Last sign-in</th><th>Feedback</th><th>Agreed</th><th>Status</th></tr></thead><tbody>';
+      ts.forEach(function(t){
+        var status, cls;
+        if (t.lastSignIn == null || !t.lastSignIn){ status='Never signed in'; cls='off'; }
+        else if (t.daysQuiet <= 7){ status='Active'; cls='on'; }
+        else if (t.daysQuiet <= 30){ status='Quiet ' + t.daysQuiet + 'd'; cls='mid'; }
+        else { status='Gone ' + t.daysQuiet + 'd'; cls='off'; }
+        var agreed = t.agreedAt ? '<span class="pill on" title="' + ocDate(t.agreedAt) + '">✓ v' + (t.agreedVersion||1) + '</span>' : '<span class="pill off">—</span>';
+        h += '<tr><td>' + ocEsc(t.email) + '<div class="meta" style="font-size:11.5px;">signed up ' + ocDate(t.createdAt) + '</div></td><td>' + ocAgo(t.lastSignIn) + '</td><td>' + (t.feedbackCount||0) + '</td><td>' + agreed + '</td><td><span class="pill ' + cls + '">' + status + '</span></td></tr>';
+      });
+      h += '</tbody></table><p class="meta" style="margin-top:12px;color:#9aa382;font-size:12.5px;">“Feedback” counts suggestions/bugs each tester sent. Anonymous usage (below, in 📊 Usage) is group-wide and not tied to names — by design.</p>';
+      body.innerHTML = h;
+    } else if (_adminTab === 'usage'){
+      var u = D.telemetry || {};
+      if (!u.totalEvents){ body.innerHTML = '<div class="empty">No usage recorded yet (last 30 days).</div>'; return; }
+      var g = '<p class="muted" style="margin-top:0;font-size:13px;">Anonymous — last ' + (u.windowDays||30) + ' days. Counts activity, never who.</p>';
+      g += '<div class="oc-cards">' +
+        '<div class="oc-card"><b>' + (u.uniqueInstalls||0) + '</b><span>unique devices</span></div>' +
+        '<div class="oc-card"><b>' + (u.activeInstalls7d||0) + '</b><span>active (7 days)</span></div>' +
+        '<div class="oc-card"><b>' + (u.appOpens||0) + '</b><span>app opens</span></div>' +
+        '<div class="oc-card"><b>' + (u.demoStarts||0) + '</b><span>demo tries</span></div>' +
+        '</div>';
+      var pf = u.platform || {};
+      g += '<p><b class="kind">Platform:</b> ' + (pf.mobile||0) + ' mobile · ' + (pf.desktop||0) + ' desktop</p>';
+      function kvList(obj, label){
+        var keys = Object.keys(obj||{}); if (!keys.length) return '';
+        keys.sort(function(a,b){ return obj[b]-obj[a]; });
+        var s = '<p style="margin-bottom:4px;"><b class="kind">' + label + '</b></p><table><tbody>';
+        keys.forEach(function(k){ s += '<tr><td>' + ocEsc(k) + '</td><td style="text-align:right;">' + obj[k] + '</td></tr>'; });
+        return s + '</tbody></table>';
+      }
+      g += kvList(u.byTab, 'Most-used tabs');
+      g += '<div style="height:12px;"></div>' + kvList(u.byEvent, 'All events');
+      body.innerHTML = g;
+    } else if (_adminTab === 'feedback'){
+      var fb = D.feedback || [];
+      if (!fb.length){ body.innerHTML = '<div class="empty">No feedback yet. It lands here the moment someone taps 💡.</div>'; return; }
+      var f = '';
+      fb.forEach(function(x){
+        var icon = x.kind === 'issue' ? '🐞' : (x.kind === 'waitlist' ? '✉' : '💡');
+        f += '<div class="oc-row"><span class="kind">' + icon + ' ' + ocEsc(x.kind||'suggestion') + '</span> ' + ocEsc(x.text||'') +
+          '<div class="meta">' + (x.email ? ocEsc(x.email) + ' · ' : '') + (x.context ? ocEsc(x.context) + ' · ' : '') + (x.demo ? 'demo · ' : '') + (x.build ? 'B' + ocEsc(x.build) + ' · ' : '') + ocAgo(x.createdAt) + '</div></div>';
+      });
+      body.innerHTML = f;
+    } else if (_adminTab === 'waitlist'){
+      var wl = D.waitlist || [];
+      if (!wl.length){ body.innerHTML = '<div class="empty">No one on the waitlist yet.</div>'; return; }
+      var w = '<table><thead><tr><th>Email</th><th>When</th><th>Build</th></tr></thead><tbody>';
+      wl.forEach(function(x){ w += '<tr><td>' + ocEsc(x.email||'(none)') + '</td><td>' + ocAgo(x.createdAt) + '</td><td class="muted">' + (x.build ? 'B'+ocEsc(x.build) : '—') + '</td></tr>'; });
+      body.innerHTML = w + '</tbody></table>';
+    }
+  }
+
   function buildAuthUI(){
     if (document.getElementById('oc-auth-overlay')) return;
     var style = document.createElement('style');
@@ -19124,10 +19276,12 @@
 
     var signout = document.createElement('div');
     signout.id = 'oc-signout';
-    signout.innerHTML = '<button type="button" id="oc-fb-open-btn" title="Send a suggestion or report an issue">💡</button><button type="button" id="oc-refresh-btn" title="Reload the app">🔄 Refresh</button><select id="oc-scope-select" title="Switch between your private data and a shared group"></select><span id="oc-signout-email"></span><button type="button" id="oc-signout-btn">Sign out</button>';
+    signout.innerHTML = '<button type="button" id="oc-fb-open-btn" title="Send a suggestion or report an issue">💡</button><button type="button" id="oc-admin-btn" title="Owner console — testers &amp; usage" style="display:none;background:#3a4d3f;color:#ffe08a;border:none;border-radius:14px;padding:4px 9px;font-size:14px;cursor:pointer;">🛠 Admin</button><button type="button" id="oc-refresh-btn" title="Reload the app">🔄 Refresh</button><select id="oc-scope-select" title="Switch between your private data and a shared group"></select><span id="oc-signout-email"></span><button type="button" id="oc-signout-btn">Sign out</button>';
     document.body.appendChild(signout);
     var fbOpenBtn = document.getElementById('oc-fb-open-btn');
     if (fbOpenBtn) fbOpenBtn.addEventListener('click', function(){ openFeedback('app'); });
+    var adminBtn = document.getElementById('oc-admin-btn');
+    if (adminBtn) adminBtn.addEventListener('click', function(){ openAdminConsole(); });
     var refreshBtn = document.getElementById('oc-refresh-btn');
     if (refreshBtn) refreshBtn.addEventListener('click', function(){
       // A clean reload re-inits Firebase and re-reads your saved login from storage — the same path
@@ -19244,7 +19398,72 @@
 
   function showAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o){ o.classList.remove('oc-checking'); o.style.display = 'flex'; var b=document.getElementById('oc-auth-btn'); if(b) b.disabled=false; } }
   function hideAuthOverlay(){ var o = document.getElementById('oc-auth-overlay'); if (o) o.style.display = 'none'; }
-  function showSignoutButton(email){ var s = document.getElementById('oc-signout'); if (s){ s.style.display = 'flex'; var e=document.getElementById('oc-signout-email'); if(e) e.textContent = email || ''; } }
+
+  // ---------------- First-login use agreement (testers agree before the app opens) ----------------
+  var TERMS_VERSION = 1;
+  function termsAccepted(uid){ try { return localStorage.getItem('oc_terms_v' + TERMS_VERSION + '_' + uid) === '1'; } catch(e){ return false; } }
+  function maybeShowTermsGate(user){ if (user && user.uid && !termsAccepted(user.uid)) showTermsGate(user); }
+  function showTermsGate(user){
+    if (document.getElementById('oc-terms-overlay')) return;
+    var st = document.createElement('style');
+    st.textContent =
+      '#oc-terms-overlay{position:fixed;inset:0;z-index:100070;background:#20281a;display:flex;align-items:center;justify-content:center;padding:20px;overflow-y:auto;font-family:inherit;}' +
+      '#oc-terms-card{width:100%;max-width:520px;background:#263019;border:1px solid #46532f;border-radius:16px;color:#eae4cf;padding:24px 24px 22px;box-shadow:0 18px 50px rgba(0,0,0,.5);}' +
+      '#oc-terms-card h2{margin:0 0 4px;font-size:22px;color:#f3eed6;}' +
+      '#oc-terms-card .oc-terms-sub{color:#a9b18c;font-size:14px;margin:0 0 16px;}' +
+      '#oc-terms-card .oc-terms-body{font-size:15.5px;line-height:1.6;background:#20281a;border:1px solid #3a4526;border-radius:12px;padding:14px 16px;max-height:40vh;overflow-y:auto;}' +
+      '#oc-terms-card .oc-terms-body li{margin:6px 0;}' +
+      '#oc-terms-agree{display:flex;align-items:flex-start;gap:11px;margin:16px 2px;font-size:15.5px;line-height:1.45;cursor:pointer;}' +
+      '#oc-terms-agree input{width:22px;height:22px;margin-top:1px;flex:0 0 auto;accent-color:#79883f;cursor:pointer;}' +
+      '#oc-terms-actions{display:flex;gap:10px;}' +
+      '#oc-terms-continue{flex:2;padding:15px;border:1px solid #8a9a4e;border-radius:12px;background:#79883f;color:#f5f1e0;font-size:16px;font-weight:700;letter-spacing:.6px;cursor:pointer;}' +
+      '#oc-terms-continue:disabled{opacity:.45;cursor:default;}' +
+      '#oc-terms-decline{flex:1;padding:15px;border:1px solid #566637;border-radius:12px;background:transparent;color:#cdc7ac;font-size:14px;font-weight:700;cursor:pointer;}';
+    document.head.appendChild(st);
+    var ov = document.createElement('div'); ov.id = 'oc-terms-overlay';
+    ov.innerHTML =
+      '<div id="oc-terms-card">' +
+        '<h2>Welcome — one quick thing</h2>' +
+        '<p class="oc-terms-sub">You\'re getting early access to test Outdoor Companion. Please read and agree before you start.</p>' +
+        '<div class="oc-terms-body">' +
+          '<strong>Tester Use Agreement</strong>' +
+          '<ul>' +
+            '<li>Outdoor Companion and all of its code, design, and data are the private property of <strong>Faison Digital Works, LLC</strong>. This is not open-source.</li>' +
+            '<li>You agree <strong>not to copy, reverse-engineer, decompile, extract, redistribute, resell, or attempt to hack, break into, or tamper with</strong> the app, its code, or its data.</li>' +
+            '<li>You\'ll keep your invite code and login <strong>private</strong> and use the app only for your own hunting/fishing.</li>' +
+            '<li>This is a <strong>test version, provided as-is</strong>, with no warranty — things may change or break.</li>' +
+            '<li>Access is granted for testing and can be ended at any time.</li>' +
+          '</ul>' +
+        '</div>' +
+        '<label id="oc-terms-agree"><input type="checkbox" id="oc-terms-check" /> <span>I understand and agree to these terms.</span></label>' +
+        '<div id="oc-terms-actions">' +
+          '<button type="button" id="oc-terms-continue" disabled>Agree &amp; continue</button>' +
+          '<button type="button" id="oc-terms-decline">Decline</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    var chk = document.getElementById('oc-terms-check');
+    var cont = document.getElementById('oc-terms-continue');
+    chk.addEventListener('change', function(){ cont.disabled = !chk.checked; });
+    cont.addEventListener('click', function(){
+      if (!chk.checked) return;
+      try { localStorage.setItem('oc_terms_v' + TERMS_VERSION + '_' + user.uid, '1'); } catch(e){}
+      // Record acceptance server-side (proof of who agreed, when, to which version). Fire-and-forget.
+      try {
+        if (firebase && firebase.functions){
+          firebase.app().functions('us-east1').httpsCallable('recordAgreement')({ version: TERMS_VERSION }).catch(function(){});
+        }
+      } catch(e){}
+      try { track('terms_accepted'); } catch(e){}
+      var o = document.getElementById('oc-terms-overlay'); if (o) o.parentNode.removeChild(o);
+    });
+    document.getElementById('oc-terms-decline').addEventListener('click', function(){
+      var o = document.getElementById('oc-terms-overlay'); if (o) o.parentNode.removeChild(o);
+      try { firebase.auth().signOut(); } catch(e){}
+    });
+  }
+  var OC_OWNER_EMAIL = 'rfsmfd@gmail.com';   // only this account sees the 🛠 Admin console
+  function showSignoutButton(email){ var s = document.getElementById('oc-signout'); if (s){ s.style.display = 'flex'; var e=document.getElementById('oc-signout-email'); if(e) e.textContent = email || ''; var a=document.getElementById('oc-admin-btn'); if(a) a.style.display = ((email||'').toLowerCase() === OC_OWNER_EMAIL) ? 'inline-block' : 'none'; } }
   function hideSignoutButton(){ var s = document.getElementById('oc-signout'); if (s) s.style.display = 'none'; }
 
   // ---- Boot: gate the app behind sign-in when Firebase is available ----
@@ -19271,6 +19490,7 @@
         hideAuthOverlay();
         showSignoutButton(user.email);
         try { if (window.__gusShow) window.__gusShow(); } catch(e){}
+        try { maybeShowTermsGate(user); } catch(e){}
         if (didInitForUid === user.uid){
           // Token refresh — DON'T clobber an active group scope. Rebuild the adapter for
           // whatever scope is currently in view (this was the silent data-flip bug).

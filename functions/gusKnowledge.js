@@ -275,7 +275,10 @@ see it). 2) Tap LOG IN — or, if you're new, tap CREATE ACCOUNT. While the app 
 testing, creating an account asks for an INVITE CODE: type your email + a password (6+ characters) +
 your invite code, then CREATE ACCOUNT. No code yet? Tap "Join the waitlist" right there (uses the
 email you typed) and we'll reach out. Already have an account? Just LOG IN — no code needed to log in.
-"Log in instead" switches back, "Forgot password?" resets it. 3)
+"Log in instead" switches back, "Forgot password?" resets it. The FIRST time you sign in, a short
+Tester Use Agreement pops up (the app is private property of Faison Digital Works, LLC; you agree not
+to copy or hack it, and to keep your code private) — tick the box and tap "Agree & continue" to start;
+you only see it once. 3)
 Signed in, your data lives in your cloud account and syncs across phone + desktop on its own. 4) The
 app works offline (map, GPS, your farms cached), but sign in BEFORE you lose signal. 5) Sign out from
 the pill at the top-right of the map (the 🔄 there reloads the app).
