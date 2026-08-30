@@ -2082,7 +2082,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 555</div>
+    <div id="buildBadge">BUILD 556</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -19297,10 +19297,45 @@
       body.innerHTML = f;
     } else if (_adminTab === 'waitlist'){
       var wl = D.waitlist || [];
-      if (!wl.length){ body.innerHTML = '<div class="empty">No one on the waitlist yet.</div>'; return; }
-      var w = '<table><thead><tr><th>Email</th><th>When</th><th>Build</th></tr></thead><tbody>';
-      wl.forEach(function(x){ w += '<tr><td>' + ocEsc(x.email||'(none)') + '</td><td>' + ocAgo(x.createdAt) + '</td><td class="muted">' + (x.build ? 'B'+ocEsc(x.build) : '—') + '</td></tr>'; });
-      body.innerHTML = w + '</tbody></table>';
+      var waiting = 0; wl.forEach(function(x){ if (!x.invited && !x.joined) waiting++; });
+      var w = '<p class="muted" style="margin-top:0;font-size:13.5px;">People who asked to be notified. <strong>Grant access</strong> to invite someone (they get the welcome email automatically), or email everyone at launch.</p>';
+      // Mass launch blast
+      w += '<div style="background:#263019;border:1px solid #3a4526;border-radius:12px;padding:14px 16px;margin-bottom:16px;">' +
+        '<p style="margin:0 0 4px;"><strong class="kind">📣 Email the whole waitlist</strong></p>' +
+        '<p class="muted" style="margin:0 0 10px;font-size:13px;">Sends to all ' + wl.length + ' on the list (BCC). Use this for your “we’re live!” announcement.</p>' +
+        '<input id="oc-wl-subject" type="text" placeholder="Subject — e.g. Outdoor Companion is open!" style="width:100%;box-sizing:border-box;padding:11px 12px;margin-bottom:8px;border-radius:10px;border:1px solid #566637;background:rgba(15,20,11,.5);color:#efe8d1;font-size:15px;" />' +
+        '<textarea id="oc-wl-body" rows="5" placeholder="Tell them it’s open and how to get in." style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:10px;border:1px solid #566637;background:rgba(15,20,11,.5);color:#efe8d1;font-size:15px;resize:vertical;"></textarea>' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-top:10px;"><button type="button" id="oc-wl-send" style="padding:12px 18px;border:1px solid #8a9a4e;border-radius:10px;background:#79883f;color:#f5f1e0;font-weight:700;font-size:15px;cursor:pointer;">Email the whole waitlist</button><span id="oc-wl-send-msg" style="font-size:13px;color:#bcd18a;"></span></div>' +
+        '</div>';
+      if (!wl.length){ w += '<div class="empty">No one on the waitlist yet.</div>'; }
+      else {
+        w += '<p class="meta" style="margin:0 0 4px;color:#a9b18c;">' + wl.length + ' on the list · ' + waiting + ' still waiting</p>';
+        w += '<table><thead><tr><th>Email</th><th>Asked</th><th>Emailed</th><th>Status</th><th></th></tr></thead><tbody>';
+        wl.forEach(function(x){
+          var st, cls;
+          if (x.joined){ st='Joined'; cls='on'; }
+          else if (x.invited){ st='Invited'; cls='mid'; }
+          else { st='Waiting'; cls='off'; }
+          var emailed = x.notifiedAt ? '<span class="pill on" title="' + ocDate(x.notifiedAt) + '">✓</span>' : '<span class="muted">—</span>';
+          var act = (x.invited || x.joined) ? '' : '<button type="button" class="oc-wl-grant" data-email="' + ocEsc(x.email) + '" style="background:#31481f;color:#c6e08a;border:none;border-radius:8px;padding:6px 11px;font-size:12.5px;cursor:pointer;">Grant access</button>';
+          w += '<tr><td>' + ocEsc(x.email||'(none)') + '</td><td>' + ocAgo(x.createdAt) + '</td><td>' + emailed + '</td><td><span class="pill ' + cls + '">' + st + '</span></td><td style="text-align:right;">' + act + '</td></tr>';
+        });
+        w += '</tbody></table>';
+      }
+      body.innerHTML = w;
+      var wlSend = document.getElementById('oc-wl-send');
+      if (wlSend) wlSend.addEventListener('click', async function(){
+        var subj = (document.getElementById('oc-wl-subject').value||'').trim();
+        var msgv = (document.getElementById('oc-wl-body').value||'').trim();
+        var m = document.getElementById('oc-wl-send-msg');
+        if (!subj || !msgv){ m.textContent = 'Add a subject and a message first.'; m.style.color = '#efb097'; return; }
+        if (!window.confirm('Email this to everyone on the waitlist (' + wl.length + ')?')) return;
+        wlSend.disabled = true; m.textContent = 'Sending…'; m.style.color = '#bcd18a';
+        try { var r = await firebase.app().functions('us-east1').httpsCallable('broadcastWaitlist')({ subject: subj, message: msgv }); var sent = (r && r.data && r.data.sent) || 0; _adminData = null; await loadAdminData(true); var m2 = document.getElementById('oc-wl-send-msg'); if (m2){ m2.textContent = 'Sent to ' + sent + '.'; m2.style.color = '#bcd18a'; } }
+        catch(err){ m.textContent = (err && err.message) ? err.message : 'Failed.'; m.style.color = '#efb097'; wlSend.disabled = false; }
+      });
+      var wlGrant = body.querySelectorAll('.oc-wl-grant');
+      for (var wi=0; wi<wlGrant.length; wi++) wlGrant[wi].addEventListener('click', function(){ adminAccess('grantAccess', { email: this.getAttribute('data-email') }); });
     }
   }
 

@@ -818,8 +818,55 @@ exports.adminData = onCall({ region: "us-east1", memory: "512MiB", timeoutSecond
   access.forEach((a) => { a.signedUp = !!testerEmails[normEmail(a.email)]; });
   access.sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
 
-  return { generatedAt: now, feedback: feedback, waitlist: waitlist, telemetry: telemetry, testers: testers, access: access };
+  // Waitlist: dedupe by email + derive status (waiting → invited → joined).
+  const allowActive = {};
+  access.forEach((a) => { if (a.active !== false) allowActive[normEmail(a.email)] = true; });
+  const wlMap = {};
+  waitlist.forEach((w) => {
+    const e = normEmail(w.email); if (!e) return;
+    if (!wlMap[e]) wlMap[e] = { email: w.email, createdAt: w.createdAt || 0, notifiedAt: w.notifiedAt || 0 };
+    else { wlMap[e].notifiedAt = Math.max(wlMap[e].notifiedAt, w.notifiedAt || 0); if ((w.createdAt || 0) < wlMap[e].createdAt) wlMap[e].createdAt = w.createdAt; }
+  });
+  const waitlistOut = Object.keys(wlMap).map((e) => {
+    const w = wlMap[e]; w.invited = !!allowActive[e]; w.joined = !!testerEmails[e]; return w;
+  });
+  waitlistOut.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  return { generatedAt: now, feedback: feedback, waitlist: waitlistOut, telemetry: telemetry, testers: testers, access: access };
 });
+
+/**
+ * Email everyone on the waitlist at once (the launch/announcement blast). Owner-gated. BCC, and
+ * stamps notifiedAt on each waitlist doc so the console can show who's been emailed.
+ */
+exports.broadcastWaitlist = onCall(
+  { region: "us-east1", secrets: [GMAIL_APP_PASSWORD], memory: "512MiB", timeoutSeconds: 180 },
+  async (request) => {
+    ownerOnly(request);
+    const subject = String((request.data && request.data.subject) || "").trim().slice(0, 200);
+    const message = String((request.data && request.data.message) || "").trim().slice(0, 8000);
+    if (!subject || !message) throw new HttpsError("invalid-argument", "A subject and a message are required.");
+    const db = admin.firestore();
+    const snap = await db.collection("waitlist").limit(5000).get();
+    const emailSet = {};
+    snap.docs.forEach((d) => { const e = normEmail(d.data().email); if (e) emailSet[e] = true; });
+    const emails = Object.keys(emailSet);
+    if (!emails.length) return { ok: true, sent: 0 };
+    const safe = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>");
+    const html = "<div style=\"font-family:Arial,Helvetica,sans-serif;color:#20281a;max-width:560px;line-height:1.5;\">" +
+      safe + "<hr style=\"border:none;border-top:1px solid #ccc;margin:18px 0;\"/>" +
+      "<p style=\"font-size:12px;color:#888;\">You're getting this because you joined the Outdoor Companion waitlist.</p></div>";
+    await sendMail(MAIL_FROM, subject, message, html, emails);
+    // Stamp notifiedAt (chunked so we never exceed Firestore's 500-op batch limit).
+    const nowTs = Date.now();
+    for (let i = 0; i < snap.docs.length; i += 400) {
+      const batch = db.batch();
+      snap.docs.slice(i, i + 400).forEach((d) => batch.set(d.ref, { notifiedAt: nowTs }, { merge: true }));
+      await batch.commit();
+    }
+    return { ok: true, sent: emails.length };
+  }
+);
 
 /**
  * Records a tester's acceptance of the use agreement (shown on first sign-in).
