@@ -11,7 +11,7 @@
  * never shipped to the browser or committed to the repo.
  */
 
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const admin = require("firebase-admin");
 const Anthropic = require("@anthropic-ai/sdk");
@@ -427,7 +427,11 @@ const GUS_SYSTEM =
   "POINTABLE TARGETS tokens in the knowledge — the app then lights each one up on screen as you " +
   "talk them through it. Match the token to the control you named (e.g. Cameras tab = tab-cameras, " +
   "Deploy Camera = deploy-camera, the + Add Site button = add-site). Leave it empty for answers " +
-  "that aren't a tap-here walkthrough. \n\n=== OUTDOOR COMPANION KNOWLEDGE ===\n" + GUS_KB;
+  "that aren't a tap-here walkthrough. (7) You're also how folks send FEEDBACK. When someone reports " +
+  "a bug, wishes for a feature, seems stuck or frustrated, or when you've just finished helping — " +
+  "warmly point them to the 💡 Suggestion / Issue button (top-right of the app, or in the demo " +
+  "banner) so it goes straight to the maker; set 'send-feedback' in highlights when you do. Don't " +
+  "nag — just mention it when it genuinely fits. \n\n=== OUTDOOR COMPANION KNOWLEDGE ===\n" + GUS_KB;
 
 // The on-screen controls Gus can point at (the client lights each one up in order). Keep in sync
 // with GUS_TARGETS in index.html and the POINTABLE TARGETS list in gusKnowledge.js.
@@ -435,7 +439,7 @@ const GUS_TARGET_TOKENS = [
   "add-site", "my-location", "plan-hunt", "where-to-hunt", "field-card", "hunt-mode", "walk-in",
   "log-sit", "scout-mode", "camera-plan", "terrain-read", "tab-sites", "tab-log", "tab-cameras",
   "tab-analytics", "register-camera", "deploy-camera", "batch-qr", "import-photos", "quick-log",
-  "property-lines", "layers", "wind", "compass", "map-display", "show-cameras", "show-camera-icons",
+  "property-lines", "layers", "wind", "compass", "map-display", "send-feedback", "show-cameras", "show-camera-icons",
   "show-stands", "show-access", "show-bedding", "show-feeding", "show-water", "show-bucks", "show-does",
   "show-bears", "show-turkeys", "show-scrapes", "show-rubs", "show-tracks", "show-deer-trails",
   "show-hunts", "show-camera-history", "show-scout-board", "show-camera-coverage",
@@ -537,6 +541,42 @@ exports.askGus = onCall(
     const u = response.usage || {};
     console.log("askGus ok:", "in=" + (u.input_tokens || 0), "out=" + (u.output_tokens || 0), "cacheRead=" + (u.cache_read_input_tokens || 0));
     return { answer: answer, followups: followups, highlights: highlights, model: MODEL_CHEAP, answeredAt: Date.now() };
+  }
+);
+
+/**
+ * submitFeedback — collect tester suggestions & issue reports into one Firestore log the founder can
+ * watch. An HTTP endpoint (not callable) so it works for DEMO visitors who have NO account, as well as
+ * signed-in testers. cors:true handles the browser preflight. Writes go through the admin SDK so no
+ * security rule is needed; the collection is never read by the client.
+ */
+exports.submitFeedback = onRequest(
+  { region: "us-east1", cors: true, memory: "256MiB", timeoutSeconds: 20 },
+  async (req, res) => {
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }   // cors:true also handles this
+    if (req.method !== "POST") { res.status(405).json({ ok: false, error: "POST only" }); return; }
+    try {
+      const b = req.body || {};
+      const text = String(b.text || "").trim().slice(0, 4000);
+      if (!text) { res.status(400).json({ ok: false, error: "empty" }); return; }
+      const doc = {
+        text: text,
+        kind: String(b.kind || "suggestion").slice(0, 40),      // "suggestion" | "issue"
+        context: String(b.context || "").slice(0, 200),          // where they were (e.g. "demo", "Where to Hunt")
+        email: String(b.email || "").slice(0, 200),
+        uid: String(b.uid || "").slice(0, 128),
+        build: String(b.build || "").slice(0, 20),
+        demo: !!b.demo,
+        userAgent: String(req.headers["user-agent"] || "").slice(0, 300),
+        createdAt: Date.now(),
+      };
+      await admin.firestore().collection("feedback").add(doc);
+      console.log("feedback:", doc.kind, "build=" + doc.build, "from=" + (doc.email || doc.uid || (doc.demo ? "demo" : "anon")), "|", text.slice(0, 80));
+      res.json({ ok: true });
+    } catch (e) {
+      console.error("submitFeedback failed:", e && e.message);
+      res.status(500).json({ ok: false, error: "server" });
+    }
   }
 );
 
