@@ -555,7 +555,7 @@ exports.askGus = onCall(
  * security rule is needed; the collection is never read by the client.
  */
 exports.submitFeedback = onRequest(
-  { region: "us-east1", cors: true, memory: "256MiB", timeoutSeconds: 20 },
+  { region: "us-east1", cors: true, secrets: [GMAIL_APP_PASSWORD], memory: "256MiB", timeoutSeconds: 20 },
   async (req, res) => {
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }   // cors:true also handles this
     if (req.method !== "POST") { res.status(405).json({ ok: false, error: "POST only" }); return; }
@@ -577,6 +577,30 @@ exports.submitFeedback = onRequest(
       const coll = doc.kind === "waitlist" ? "waitlist" : "feedback";   // waitlist sign-ups get their own list
       await admin.firestore().collection(coll).add(doc);
       console.log(coll + ":", doc.kind, "build=" + doc.build, "from=" + (doc.email || doc.uid || (doc.demo ? "demo" : "anon")), "|", text.slice(0, 80));
+      // Ping the owner's inbox so nothing gets missed without opening the console. Never block the
+      // submission on it — a mail hiccup must not lose the feedback (it's already saved above).
+      try {
+        const from = doc.email || (doc.demo ? "a demo visitor" : "a tester");
+        const subj = doc.kind === "waitlist" ? "✉ New waitlist signup — Outdoor Companion"
+          : doc.kind === "issue" ? "🐞 New issue reported — Outdoor Companion"
+          : "💡 New suggestion — Outdoor Companion";
+        const lines = [
+          "Kind: " + doc.kind,
+          "From: " + from,
+          doc.context ? "Where: " + doc.context : "",
+          doc.build ? "Build: " + doc.build : "",
+          "",
+          doc.text,
+          "",
+          "— view all in the app's 🛠 Admin console.",
+        ].filter(function (x) { return x !== ""; });
+        const html = "<div style=\"font-family:Arial,Helvetica,sans-serif;color:#20281a;max-width:560px;\">" +
+          "<p style=\"margin:0 0 6px;\"><strong>" + doc.kind + "</strong> from " + from + (doc.context ? " · " + doc.context : "") + (doc.build ? " · B" + doc.build : "") + "</p>" +
+          "<blockquote style=\"margin:8px 0;padding:10px 14px;border-left:3px solid #79883f;background:#f3f4ec;\">" +
+          doc.text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>") +
+          "</blockquote><p style=\"font-size:12px;color:#888;\">View all in the app's Admin console.</p></div>";
+        await sendMail(FOUNDER_EMAIL, subj, lines.join("\n"), html);
+      } catch (mailErr) { console.error("feedback notify email failed:", mailErr && mailErr.message); }
       res.json({ ok: true });
     } catch (e) {
       console.error("submitFeedback failed:", e && e.message);
