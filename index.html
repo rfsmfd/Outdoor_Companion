@@ -2087,7 +2087,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 559</div>
+    <div id="buildBadge">BUILD 560</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3541,7 +3541,7 @@
         window.speechSynthesis.cancel();
         var u = new SpeechSynthesisUtterance(text);
         if (gusVoice) u.voice = gusVoice;
-        u.rate = 0.92; u.pitch = 0.8;   // slow & deep — the old-timer by the fire
+        u.rate = 0.85; u.pitch = 0.8;   // slow & deep — an unhurried old-timer's drawl (less robotic)
         window.speechSynthesis.speak(u);
       } catch(e){}
     }
@@ -3688,7 +3688,7 @@
         window.speechSynthesis.cancel();
         var u = new SpeechSynthesisUtterance(text);
         if (gusVoice) u.voice = gusVoice;
-        u.rate = 0.95; u.pitch = 0.82;
+        u.rate = 0.88; u.pitch = 0.82;   // unhurried tour narration — matches Gus's slower drawl
         var done = false; function fin(){ if (done) return; done = true; if (onDone) onDone(); }
         u.onend = fin; u.onerror = fin;
         window.speechSynthesis.speak(u);
