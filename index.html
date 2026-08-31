@@ -2087,7 +2087,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 560</div>
+    <div id="buildBadge">BUILD 561</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3676,9 +3676,20 @@
     var gusPointEl = null, gusTourBar = null, gusTourTimer = null, gusTourGen = 0;
     function gusClearTourTimer(){ if (gusTourTimer){ clearTimeout(gusTourTimer); gusTourTimer = null; } }
     function gusClearPoint(){ if (gusPointEl){ gusPointEl.classList.remove('oc-gus-point'); gusPointEl = null; } }
-    function gusEndTour(){ gusTourGen++; gusClearTourTimer(); gusClearPoint(); gusStopSpeaking(); if (gusTourBar && gusTourBar.parentNode) gusTourBar.parentNode.removeChild(gusTourBar); gusTourBar = null; }
-    // When the walk-through wraps up (Done or ✕), just end it — leave whatever Gus opened (like the
-    // Map Display tray) usable, and let his always-on-top corner face bring the chat back in one tap.
+    function gusEndTour(){
+      gusTourGen++; gusClearTourTimer(); gusClearPoint(); gusStopSpeaking();
+      if (gusTourBar && gusTourBar.parentNode) gusTourBar.parentNode.removeChild(gusTourBar); gusTourBar = null;
+      // ON PHONES the sidebar + Map Display tray the tour opened FILL the screen — if we leave them
+      // open when the walk-through ends, they sit over the map and lock the user out (the reported bug).
+      // Close them on end so you land back on the map; the ☰ / corner face reopen them in one tap.
+      try {
+        if (window.innerWidth <= 820){
+          var sb = document.getElementById('sidebar'); if (sb) sb.classList.remove('open');
+          gusCloseDisplayTray();
+        }
+      } catch(e){}
+    }
+    // When the walk-through wraps up (Done or ✕), end it and (on phones) tuck the panels away so the map's usable.
     function gusFinishTour(){ gusEndTour(); }
     // Gus talks each step aloud as it lights up. Forced during a tour — tapping "Show me" is an
     // explicit ask for a guided walk-through — but only when the browser can actually speak.
@@ -18960,12 +18971,18 @@
     setTimeout(function(){ try { if (typeof window.__gusStartWelcomeTour === 'function') window.__gusStartWelcomeTour(); } catch(e){} }, 1100);
     try { track('demo_start'); } catch(e){}
   }
+  var _demoFromOwner = false;   // true when the OWNER launched the demo from the console (vs a visitor)
   function showDemoBanner(){
     var ex = document.getElementById('oc-demo-banner'); if (ex){ ex.style.display = 'flex'; return; }
     var b = document.createElement('div'); b.id = 'oc-demo-banner';
-    b.innerHTML = '<span class="oc-demo-tag">👀 DEMO — sample farm</span><span class="oc-demo-sub">Nothing here is saved — look around!</span><button type="button" id="oc-demo-feedback">💡 Suggestion</button><button type="button" id="oc-demo-start">Start my own farm →</button>';
+    // Owner previewing from the console gets "← Exit demo" (back to the console); a visitor gets "Start my own farm →".
+    var exitLabel = _demoFromOwner ? '← Exit demo' : 'Start my own farm →';
+    b.innerHTML = '<span class="oc-demo-tag">👀 DEMO — sample farm</span><span class="oc-demo-sub">Nothing here is saved — look around!</span><button type="button" id="oc-demo-feedback">💡 Suggestion</button><button type="button" id="oc-demo-start">' + exitLabel + '</button>';
     document.body.appendChild(b);
-    document.getElementById('oc-demo-start').addEventListener('click', function(){ try { location.reload(); } catch(e){ window.location.href = window.location.href; } });
+    document.getElementById('oc-demo-start').addEventListener('click', function(){
+      try { if (_demoFromOwner) sessionStorage.setItem('oc_reopen_admin', '1'); } catch(e){}   // land back in the console
+      try { location.reload(); } catch(e){ window.location.href = window.location.href; }
+    });
     document.getElementById('oc-demo-feedback').addEventListener('click', function(){ openFeedback('demo'); });
   }
 
@@ -19166,9 +19183,10 @@
     var admDemo = document.getElementById('oc-adm-demo');
     if (admDemo) admDemo.addEventListener('click', function(){
       close();
-      // Launch the demo in place — enterDemoMode seals all saving, so your real account is untouched.
-      // "Start my own farm →" in the demo banner reloads you right back to your account.
-      try { enterDemoMode(); } catch(e){ console.error('demo launch failed', e); }
+      // Reload straight into the demo (so Gus's welcome plays like it does for a visitor). Your real
+      // account is untouched — the demo seals all saving, and "← Exit demo" brings you right back here.
+      try { sessionStorage.setItem('oc_force_demo', '1'); } catch(e){}
+      try { location.reload(); } catch(e){ window.location.href = window.location.href; }
     });
     bd.addEventListener('click', function(e){ if (e.target === bd) close(); });
     var tabBtns = bd.querySelectorAll('#oc-admin-tabs button');
@@ -19697,6 +19715,18 @@
     var didInitForUid = null;
     firebase.auth().onAuthStateChanged(function(user){
       if (user){
+        if (demoMode) return;   // already previewing the demo — ignore any auth churn
+        // Owner tapped "👀 Demo" in the console → the reload landed here with a flag. Show the demo
+        // exactly like a visitor gets it (Gus's welcome plays), and DON'T touch the real account.
+        try {
+          if (sessionStorage.getItem('oc_force_demo') === '1'){
+            sessionStorage.removeItem('oc_force_demo');
+            _demoFromOwner = true;
+            hideAuthOverlay();
+            enterDemoMode();
+            return;
+          }
+        } catch(e){}
         // Provisional private adapter so window.storage is ready synchronously; the async
         // block below swaps in the real (possibly group) scope once membership is known.
         window.storage = makeCloudStorage({ type: 'user', id: user.uid });
@@ -19731,6 +19761,8 @@
           // Contribute this account's sightings/catches to the anonymized movement dataset (after a
           // beat so weather has resolved). Coarsened on-device; skips demo & anything already sent.
           try { setTimeout(function(){ try { syncAggregate(); } catch(e){} }, 6000); } catch(e){}
+          // Owner just exited the demo preview → drop them right back into the console.
+          try { if (sessionStorage.getItem('oc_reopen_admin') === '1'){ sessionStorage.removeItem('oc_reopen_admin'); setTimeout(function(){ try { openAdminConsole(); } catch(e){} }, 900); } } catch(e){}
         })();
       } else {
         hasChatStorage = false;
