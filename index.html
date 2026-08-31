@@ -1906,6 +1906,11 @@
   #oc-demo-banner #oc-demo-start:hover{ background:#ffeccb; }
   #oc-demo-banner #oc-demo-feedback{ background:rgba(255,255,255,.18); color:#fff6e6; border:1px solid rgba(255,255,255,.55); border-radius:14px; padding:6px 12px; font-weight:700; font-size:13px; cursor:pointer; }
   #oc-demo-banner #oc-demo-feedback:hover{ background:rgba(255,255,255,.3); }
+  @media(max-width:560px){
+    #oc-demo-banner{ font-size:12px; gap:6px 8px; padding:6px 8px; }
+    #oc-demo-banner .oc-demo-sub{ display:none; }   /* drop the long line on phones so the buttons fit */
+    #oc-demo-banner #oc-demo-start, #oc-demo-banner #oc-demo-feedback{ padding:6px 10px; font-size:12px; }
+  }
   #oc-signout #oc-fb-open-btn{ background:#3a4d3f; color:#ffe08a; border:none; border-radius:14px; padding:4px 9px; font-size:14px; cursor:pointer; }
   #oc-signout #oc-fb-open-btn:hover{ background:#48604e; }
   #oc-feedback-modal{ width:420px; max-width:94vw; }
@@ -2082,7 +2087,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 558</div>
+    <div id="buildBadge">BUILD 559</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -15008,7 +15013,7 @@
     if (typeof contourLayer !== 'undefined' && contourOn){ map.removeLayer(contourLayer); contourLayer.addTo(map); } // contour LINES above relief
     if (typeof hydroLayer !== 'undefined' && hydroOn){ map.removeLayer(hydroLayer); hydroLayer.addTo(map); } // streams above terrain
     if (roadsOn){ map.removeLayer(roadsOverlay); roadsOverlay.addTo(map); } // roads above terrain
-    Object.keys(markers).forEach(function(id){ if (markers[id]) markers[id].bringToFront(); });
+    Object.keys(markers).forEach(function(id){ var m = markers[id]; if (m && typeof m.bringToFront === 'function') m.bringToFront(); });
   }
   document.getElementById('roadsToggleBtn').addEventListener('click', function(){
     roadsOn = !roadsOn;
@@ -19142,7 +19147,7 @@
     var bd = document.createElement('div'); bd.id = 'oc-admin-backdrop';
     bd.innerHTML =
       '<div id="oc-admin-modal">' +
-        '<div class="oc-adm-head"><h3>🛠 Owner Console</h3><button type="button" id="oc-adm-refresh" title="Reload">↻</button><button type="button" id="oc-adm-close" title="Close">&times;</button></div>' +
+        '<div class="oc-adm-head"><h3>🛠 Owner Console</h3><button type="button" id="oc-adm-demo" title="Preview the demo from the top (your account stays put)" style="background:#3a4d3f;color:#ffe08a;border:none;border-radius:10px;padding:8px 12px;font-size:14px;cursor:pointer;">👀 Demo</button><button type="button" id="oc-adm-refresh" title="Reload">↻</button><button type="button" id="oc-adm-close" title="Close">&times;</button></div>' +
         '<div id="oc-admin-tabs">' +
           '<button type="button" class="active" data-atab="access">🔑 Access</button>' +
           '<button type="button" data-atab="testers">👥 Testers</button>' +
@@ -19158,6 +19163,13 @@
     function close(){ bd.classList.remove('show'); }
     document.getElementById('oc-adm-close').addEventListener('click', close);
     document.getElementById('oc-adm-refresh').addEventListener('click', function(){ loadAdminData(true); });
+    var admDemo = document.getElementById('oc-adm-demo');
+    if (admDemo) admDemo.addEventListener('click', function(){
+      close();
+      // Launch the demo in place — enterDemoMode seals all saving, so your real account is untouched.
+      // "Start my own farm →" in the demo banner reloads you right back to your account.
+      try { enterDemoMode(); } catch(e){ console.error('demo launch failed', e); }
+    });
     bd.addEventListener('click', function(e){ if (e.target === bd) close(); });
     var tabBtns = bd.querySelectorAll('#oc-admin-tabs button');
     for (var i=0;i<tabBtns.length;i++){ tabBtns[i].addEventListener('click', function(){
