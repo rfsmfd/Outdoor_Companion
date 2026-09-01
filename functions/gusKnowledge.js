@@ -59,11 +59,15 @@ WHERE THINGS ARE — THE APP LAYOUT (ALWAYS tell folks which panel/tab and the e
 - SWITCH HUNTING <-> FISHING: the 🏹 Hunting / 🎣 Fishing buttons at the top of the LEFT PANEL.
 
 POINTABLE TARGETS (tokens for the 'highlights' list — the app lights these up on screen)
-Left panel — arranged so it's not cluttered: at the top, always, are add-site (+ Add Site), my-location
-(My Location), and the DURING-HUNT tools you use in the field: hunt-mode (Hunt Mode), walk-in (Walk-In),
-log-sit (Log a Sit). The PRE-HUNT tools are tucked under a "🗓 Plan & Scout" drop-down (tap to open):
-where-to-hunt (Where to Hunt), plan-hunt (Plan a Hunt), field-card (Field Card), scout-mode (Scout Mode),
-terrain-read (Terrain Read), camera-plan (Camera Plan). Below that is the "🧰 Tools & Data" drop-down.
+Left panel — laid out top-to-bottom the way a hunt actually goes, so it's not cluttered:
+1) At the very top: the FARM/PROPERTY picker (the dropdown + its ⚙ Manage button) — you pick the ground
+   you're hunting first. Then add-site (+ Add Site) and my-location (My Location).
+2) A "🗓 Plan & Scout" drop-down (tap to open) — the PRE-HUNT tools, done ahead of time (often at the
+   computer): where-to-hunt (Where to Hunt), plan-hunt (Plan a Hunt), field-card (Field Card),
+   scout-mode (Scout Mode), terrain-read (Terrain Read), camera-plan (Camera Plan).
+3) A "🎯 Hunt" drop-down (tap to open) — the DURING-HUNT tools you reach for in the field:
+   hunt-mode (Hunt Mode), walk-in (Walk-In), log-sit (Log a Sit).
+4) Below those, the "🧰 Tools & Data" drop-down.
 NOTE: these hunt tools show on the SITES tab; switch to Sites first if you're on Cameras/Log/Analytics.
 Tabs: tab-sites, tab-log, tab-cameras, tab-analytics.
 Cameras tab buttons: scan-register (🏷 Scan Register — scan a tag; make/print tag sheets live under it),
@@ -347,7 +351,7 @@ way?" row on Confirm Location — the pin gets a heading arrow.
 HOW TO start/end a Hunt or Trip: tap the "🏹 Start Hunt" pill at the top-center of the map (🎣 Start
 Trip in fishing); confirm the property if asked; a live bar tracks time + count; tap "End Hunt" to
 finish (a summary toast shows).
-HOW TO Log a Sit: tap "End Hunt" (the sheet auto-pops) or "📓 Log a Sit" in the left panel. Pick the
+HOW TO Log a Sit: tap "End Hunt" (the sheet auto-pops) or LEFT PANEL -> open "🎯 Hunt" -> "📓 Log a Sit". Pick the
 stand, tap the movement (💤 Dead / 🐾 Slow / 🦌 Steady / 🔥 Hot), bump doe/buck counts and tap chips
 for named bucks seen, optionally mark a harvest/shot + note, Save. (If you Quick-Logged during the
 sit, counts pre-fill — just top up; it saves only the difference.)
@@ -424,11 +428,11 @@ recent activity), and the "🦌 Bucks in play" list.
 HOW TO switch hunting style: in "🎯 Where to Hunt", the "🏹 How do you hunt?" row — "🌞 Daylight
 zones" (rank the best daylight-activity areas across all your bucks) or "🎯 Target a buck" (lock on
 one). It re-ranks instantly and is remembered.
-HOW TO use the Walk-In planner: LEFT PANEL -> "🚶 Walk-In". Pick the stand; set "Getting there on"
+HOW TO use the Walk-In planner: LEFT PANEL -> open "🎯 Hunt" -> "🚶 Walk-In". Pick the stand; set "Getting there on"
 (Walk / eBike / UTV / Truck); choose "🕶 Stealth" or "➡ Direct"; use the "🚶 Walk In / 🌙 Walk Out"
 toggle (Walk Out keeps you off the fields leaving an evening sit); where a field's in the way pick
 "✂ Cut the field" or "🌲 Edge around".
-HOW TO use Hunt Mode (HUD): LEFT PANEL -> "🎯 Hunt Mode" -> pick your stand -> read the shooting-light
+HOW TO use Hunt Mode (HUD): LEFT PANEL -> open "🎯 Hunt" -> "🎯 Hunt Mode" -> pick your stand -> read the shooting-light
 countdown, the scent line for that stand (clean vs swirling), and the raw wind + thermal underneath.
 
 READ THE LAND
