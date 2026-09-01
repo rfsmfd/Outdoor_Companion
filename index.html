@@ -367,6 +367,21 @@
     gap:8px;
     border-bottom:1px solid var(--line);
   }
+  /* The three drop-down section headers (Plan & Scout / Hunt / Tools & Data). Warm light-brown bar so
+     they pick right out from the buttons under them and read as the panel's main sections. */
+  #actions .oc-section-hdr {
+    color:#E6B871 !important;
+    font-weight:800;
+    font-size:1.02rem;
+    letter-spacing:.4px;
+    text-align:left;
+    background:#241B10 !important;
+    border:1px solid #6b4f2a !important;
+    border-radius:8px;
+    padding:9px 12px;
+    margin-top:2px;
+  }
+  #actions .oc-section-hdr:hover { background:#2f2415 !important; border-color:#8a6733 !important; }
   /* Each tab is its own world: the hunt-flow tools + Tools&Data show only on the SITES tab, and fold
      away on Cameras/Log/Analytics so that tab's list gets the full screen. Add Site + My Location stay. */
   #actions.oc-hide-hunttools #forecastBtn,
@@ -1983,7 +1998,7 @@
       <!-- Natural progression: Farm -> PLAN & SCOUT (pre-hunt) -> HUNT (go hunt it). Each a tuck-away group. -->
       <!-- PLAN & SCOUT — pre-hunt work; remembers open/closed -->
       <div id="planScoutDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
-      <button class="btn-ghost" id="planScoutToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🗓 Plan &amp; Scout ▾</button>
+      <button class="btn-ghost oc-section-hdr" id="planScoutToggleBtn" style="flex:1 1 100%;" aria-expanded="false">🗓 Plan &amp; Scout ▾</button>
       <div id="planScoutGroup" style="display:none;">
         <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt</button>
         <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:700;">🗓 Plan a Hunt — when &amp; where</button>
@@ -1997,7 +2012,7 @@
       </div>
       <!-- HUNT — the during-hunt tools; remembers open/closed -->
       <div id="huntDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
-      <button class="btn-ghost" id="huntToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🎯 Hunt ▾</button>
+      <button class="btn-ghost oc-section-hdr" id="huntToggleBtn" style="flex:1 1 100%;" aria-expanded="false">🎯 Hunt ▾</button>
       <div id="huntGroup" style="display:none;">
         <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
         <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
@@ -2005,7 +2020,7 @@
       </div>
       <!-- TOOLS & DATA -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
-      <button class="btn-ghost" id="toolsToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
+      <button class="btn-ghost oc-section-hdr" id="toolsToggleBtn" style="flex:1 1 100%;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
       <div id="toolsGroup" style="display:none;">
         <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
         <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
