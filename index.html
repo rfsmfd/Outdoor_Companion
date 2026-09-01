@@ -1054,7 +1054,10 @@
      compact — more room for the list below. */
   #siteCatTabs{
     display:grid;
-    grid-template-columns:repeat(3, 1fr);
+    /* minmax(0,1fr) — NOT 1fr — so the columns stay EQUAL and fixed no matter the counts. Plain 1fr
+       lets a wide chip (e.g. a farm with a two-digit "Stands 13") push its column past its share and
+       reflow the whole row when you switch farms (founder-reported resize). minmax(0,…) clamps it. */
+    grid-template-columns:repeat(3, minmax(0, 1fr));
     gap:5px;
     padding:2px 8px 8px;
   }
@@ -2260,7 +2263,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 577</div>
+    <div id="buildBadge">BUILD 578</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
