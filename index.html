@@ -68,6 +68,10 @@
     flex-direction:column;
     z-index:10;
     overflow-y:auto;
+    /* Always reserve the scrollbar's width so it never appears/disappears between farms — otherwise a farm
+       with a long site list adds a scrollbar that steals ~15px and reflows the whole panel (the category
+       tabs and everything else "resizing" depending on the property selected — founder). */
+    scrollbar-gutter:stable;
   }
 
   #mobileMenuBtn{
@@ -236,9 +240,11 @@
     #projTimeCtrl span{ font-size:11px !important; }
     /* --- top strip declutter (founder's phone tuning) --- */
     /* account/login band: drop the email, narrow, SHRINK, and center at the very top so the stack below clears it */
-    /* Right-align the 💡/👤 band (was centered) so it's clear of the "Outdoor Companion" wordmark on the
-       open panel (founder: move the login button right off the badge). */
-    #oc-signout{ right:8px !important; left:auto !important; transform:none !important; top:6px !important; padding:3px 8px !important; gap:6px !important; }
+    /* The 💡/👤 band can't sit in one spot: CENTERED when the panel's closed clears the Quick Log "+" on
+       the right; RIGHT when the panel's open clears the "Outdoor Companion" wordmark (and Quick Log is
+       hidden behind the open panel anyway). openSidebar/closeSidebar toggle .oc-panel-open. */
+    #oc-signout{ left:50% !important; right:auto !important; transform:translateX(-50%) !important; top:6px !important; padding:3px 8px !important; gap:6px !important; }
+    #oc-signout.oc-panel-open{ left:auto !important; right:8px !important; transform:none !important; }
     #oc-signout-email{ display:none !important; }
     #oc-scope-select{ padding:3px 7px !important; max-width:118px !important; }
     #oc-signout>button{ padding:3px 9px !important; font-size:11px !important; }
@@ -2283,7 +2289,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 584</div>
+    <div id="buildBadge">BUILD 585</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18340,11 +18346,13 @@
     document.getElementById('sidebar').classList.add('open');
     document.getElementById('sidebarBackdrop').classList.add('show');
     var hb = document.getElementById('huntBar'); if (hb) hb.classList.add('oc-hb-shift');   // slide Start Hunt clear of the mode toggle while the panel's open
+    var so = document.getElementById('oc-signout'); if (so) so.classList.add('oc-panel-open');   // slide the account band right, clear of the wordmark
   }
   function closeSidebar(){
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('sidebarBackdrop').classList.remove('show');
     var hb = document.getElementById('huntBar'); if (hb) hb.classList.remove('oc-hb-shift');
+    var so = document.getElementById('oc-signout'); if (so) so.classList.remove('oc-panel-open');   // back to center, clear of Quick Log
   }
   document.getElementById('mobileMenuBtn').addEventListener('click', function(){
     if (document.getElementById('sidebar').classList.contains('open')) closeSidebar(); else openSidebar();
