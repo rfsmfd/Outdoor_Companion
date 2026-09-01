@@ -381,6 +381,9 @@
   #actions.oc-hide-hunttools #scoutReportBtn,
   #actions.oc-hide-hunttools #cameraPlanBtn,
   #actions.oc-hide-hunttools #terrainReadBtn,
+  #actions.oc-hide-hunttools #planScoutDivider,
+  #actions.oc-hide-hunttools #planScoutToggleBtn,
+  #actions.oc-hide-hunttools #planScoutGroup,
   #actions.oc-hide-hunttools #toolsDivider,
   #actions.oc-hide-hunttools #toolsToggleBtn,
   #actions.oc-hide-hunttools #toolsGroup{ display:none !important; }
@@ -1968,19 +1971,24 @@
     <div id="actions">
       <button class="btn-primary" id="addSiteBtn">+ Add Site</button>
       <button class="btn-primary" id="gpsSiteBtn" style="background:#3B9EFF;color:#0A1A2E;">📍 My Location</button>
-      <!-- FIELD FLOW — the daily-drivers up front (hunting only; hidden in fishing) -->
-      <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:700;">🗓 Plan a Hunt — when &amp; where</button>
-      <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt</button>
-      <button class="btn-ghost" id="fieldCardBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">📋 Field Card — this farm at a glance</button>
+      <!-- IN THE FIELD — the during-hunt daily-drivers, up front (hunting only; hidden in fishing) -->
       <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
       <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
       <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
-      <button class="btn-ghost" id="scoutModeBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:700;">🔍 Scout Mode — off (tap to show the board)</button>
-      <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">➕ Add a Mark — pinch, rub, possible stand…</button>
-      <button class="btn-ghost" id="scoutDrawBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">✏️ Draw a Line — rub line, corridor, route</button>
-      <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
-      <button class="btn-ghost" id="cameraPlanBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">📸 Camera Plan — is each cam earning its spot?</button>
-      <button class="btn-ghost" id="terrainReadBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🗺 Terrain Read — a second set of eyes on your map</button>
+      <!-- PLAN & SCOUT — mostly pre-hunt work; tucked one tap away (remembers open/closed) -->
+      <div id="planScoutDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
+      <button class="btn-ghost" id="planScoutToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🗓 Plan &amp; Scout ▾</button>
+      <div id="planScoutGroup" style="display:none;">
+        <button class="btn-ghost" id="huntTodayBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">🎯 Where to Hunt</button>
+        <button class="btn-ghost" id="forecastBtn" style="flex:1 1 100%;display:none;background:#2E4636;color:#dff0e4;border-color:#3c6d42;font-weight:700;">🗓 Plan a Hunt — when &amp; where</button>
+        <button class="btn-ghost" id="fieldCardBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c4d42;font-weight:600;">📋 Field Card — this farm at a glance</button>
+        <button class="btn-ghost" id="scoutModeBtn" style="flex:1 1 100%;display:none;background:#241E2E;color:#e9ddf5;border-color:#5a3e78;font-weight:700;">🔍 Scout Mode — off (tap to show the board)</button>
+        <button class="btn-ghost" id="scoutSpotBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">➕ Add a Mark — pinch, rub, possible stand…</button>
+        <button class="btn-ghost" id="scoutDrawBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">✏️ Draw a Line — rub line, corridor, route</button>
+        <button class="btn-ghost" id="scoutReportBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🔍 Scouting Report — what the ground shows</button>
+        <button class="btn-ghost" id="terrainReadBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">🗺 Terrain Read — a second set of eyes on your map</button>
+        <button class="btn-ghost" id="cameraPlanBtn" style="flex:1 1 100%;display:none;background:#1c1726;color:#e9ddf5;border-color:#4a3565;font-weight:600;">📸 Camera Plan — is each cam earning its spot?</button>
+      </div>
       <!-- TOOLS & DATA — tucked one tap away so the field flow stays up top -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
       <button class="btn-ghost" id="toolsToggleBtn" style="flex:1 1 100%;color:#9db0a3;font-weight:600;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
@@ -2106,7 +2114,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 567</div>
+    <div id="buildBadge">BUILD 568</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3611,21 +3619,21 @@
     }
 
     // ---- "Show me" — Gus opens the right tab/panel and pulses a glow on each control, in order ----
-    // el = DOM id to point at; tab = open this left-panel tab first; tools = expand the Tools group;
-    // mod = a mode button; map = a map/toolbar control (not in the sidebar). Keep tokens in sync with
+    // el = DOM id to point at; tab = open this left-panel tab first; plan = expand the Plan & Scout group;
+    // tools = expand the Tools group; mod = a mode button; map = a map/toolbar control. Keep tokens in sync with
     // GUS_TARGET_TOKENS in functions/index.js.
     var GUS_TARGETS = {
       'add-site': { el:'addSiteBtn', label:'the "+ Add Site" button' },
       'my-location': { el:'gpsSiteBtn', label:'the "My Location" button' },
-      'plan-hunt': { tab:'sites', el:'forecastBtn', label:'"Plan a Hunt"' },
-      'where-to-hunt': { tab:'sites', el:'huntTodayBtn', label:'"Where to Hunt"' },
-      'field-card': { tab:'sites', el:'fieldCardBtn', label:'"Field Card"' },
+      'plan-hunt': { tab:'sites', plan:true, el:'forecastBtn', label:'"Plan a Hunt" (in the 🗓 Plan & Scout drop-down)' },
+      'where-to-hunt': { tab:'sites', plan:true, el:'huntTodayBtn', label:'"Where to Hunt" (in the 🗓 Plan & Scout drop-down)' },
+      'field-card': { tab:'sites', plan:true, el:'fieldCardBtn', label:'"Field Card" (in the 🗓 Plan & Scout drop-down)' },
       'hunt-mode': { tab:'sites', el:'huntModeBtn', label:'"Hunt Mode"' },
       'walk-in': { tab:'sites', el:'walkInBtn', label:'"Walk-In"' },
       'log-sit': { tab:'sites', el:'sitLogBtn', label:'"Log a Sit"' },
-      'scout-mode': { tab:'sites', el:'scoutModeBtn', label:'"Scout Mode"' },
-      'camera-plan': { tab:'sites', el:'cameraPlanBtn', label:'"Camera Plan"' },
-      'terrain-read': { tab:'sites', el:'terrainReadBtn', label:'"Terrain Read"' },
+      'scout-mode': { tab:'sites', plan:true, el:'scoutModeBtn', label:'"Scout Mode" (in the 🗓 Plan & Scout drop-down)' },
+      'camera-plan': { tab:'sites', plan:true, el:'cameraPlanBtn', label:'"Camera Plan" (in the 🗓 Plan & Scout drop-down)' },
+      'terrain-read': { tab:'sites', plan:true, el:'terrainReadBtn', label:'"Terrain Read" (in the 🗓 Plan & Scout drop-down)' },
       'tab-sites': { tab:'sites', label:'the Sites tab' },
       'tab-log': { tab:'log', label:'the Log tab' },
       'tab-cameras': { tab:'cameras', label:'the Cameras tab' },
@@ -3677,6 +3685,7 @@
         var sb = document.getElementById('sidebar');
         if (sb && window.innerWidth <= 820){ if (t.map) sb.classList.remove('open'); else sb.classList.add('open'); }
         if (t.tab){ var tb = document.querySelector('#tabs .tab-btn[data-tab="' + t.tab + '"]'); if (tb && !tb.classList.contains('active')) tb.click(); }
+        if (t.plan){ var pg = document.getElementById('planScoutGroup'), pt = document.getElementById('planScoutToggleBtn'); if (pg && pt && getComputedStyle(pg).display === 'none') pt.click(); }
         if (t.tools){ var tg = document.getElementById('toolsGroup'), tt = document.getElementById('toolsToggleBtn'); if (tg && tt && getComputedStyle(tg).display === 'none') tt.click(); }
         if (t.tray){   // open the Map Display tray (its rows are pre-built) so the toggle is visible to point at
           try { if (typeof renderChips === 'function') renderChips(); } catch(e2){}
@@ -16292,6 +16301,18 @@
     function setOpen(open){ tg.style.display = open ? 'contents' : 'none'; tb.setAttribute('aria-expanded', open ? 'true' : 'false'); tb.innerHTML = '🧰 Tools &amp; Data ' + (open ? '▴' : '▾'); }
     tb.addEventListener('click', function(){ setOpen(tg.style.display === 'none'); });
     setOpen(window.innerWidth > 820);   // desktop: expanded as before · phone: tucked
+  })();
+
+  // "🗓 Plan & Scout" drop-down — the pre-hunt tools, tucked one tap away. REMEMBERS your last choice
+  // (open it once at the computer and it stays; in the field it stays tucked). Default: open on desktop,
+  // collapsed on phone.
+  (function(){
+    var tb = document.getElementById('planScoutToggleBtn'), tg = document.getElementById('planScoutGroup');
+    if (!tb || !tg) return;
+    function setOpen(open){ tg.style.display = open ? 'contents' : 'none'; tb.setAttribute('aria-expanded', open ? 'true' : 'false'); tb.innerHTML = '🗓 Plan &amp; Scout ' + (open ? '▴' : '▾'); try{ localStorage.setItem('oc_planscout_open', open ? '1' : '0'); }catch(e){} }
+    tb.addEventListener('click', function(){ setOpen(tg.style.display === 'none'); });
+    var saved = null; try{ saved = localStorage.getItem('oc_planscout_open'); }catch(e){}
+    setOpen(saved != null ? (saved === '1') : (window.innerWidth > 820));
   })();
 
   // Resilience: some networks (ISP/router-level filtering, certain mobile carriers or
