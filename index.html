@@ -214,8 +214,14 @@
       width:72px; height:72px; font-size:36px;
     }
     #quickLogFab .fab-label{ top:80px; }
-    #buildBadge{ top:165px; font-size:12px; padding:5px 10px; }
+    #buildBadge{ top:170px !important; font-size:12px; padding:5px 10px; }   /* !important so it beats the base top:85 (defined later in the file) and drops BELOW the property row instead of covering it */
     #huntBar{ top:42px !important; }
+    /* Start Hunt/Trip only collides with the mode toggle when the panel is OPEN (it floats over it), so
+       shift it right ONLY then — stays centered on the map when the panel's closed. */
+    #huntBar.oc-hb-shift{ left:calc(50% + 64px) !important; }
+    /* Property picker sits in the clear lane between the ☰ (left) and the right-side controls — shift it
+       right past the hamburger and shorten it so it's not tucked behind them (founder phone tuning). */
+    #propertyRow{ padding-left:74px !important; padding-right:64px !important; }
     #layerDock{ bottom:24px; }
     /* Field screens: the layer tray hides behind the ⛰ Layers pill so the map keeps the screen */
     #layersToggleBtn{ display:inline-flex; align-items:center; font-size:15px; padding:13px 20px; }
@@ -232,8 +238,8 @@
     #oc-scope-select{ padding:3px 7px !important; max-width:118px !important; }
     #oc-signout>button{ padding:3px 9px !important; font-size:11px !important; }
     #oc-signout #oc-acct-btn{ width:30px !important; height:30px !important; padding:0 !important; font-size:16px !important; }   /* keep 👤 a readable circle on phones */
-    /* 🗺 right slide button up under the (temporary) build badge, opposite the ☰ menu on the left */
-    #displayTrayToggleBtn{ top:116px; bottom:auto; }
+    /* 🗺 right slide button opposite the ☰ menu on the left — a tad bigger so it's an easy thumb target */
+    #displayTrayToggleBtn{ top:116px; bottom:auto; width:48px; height:48px; font-size:21px; }
     /* 📐 parcel + 💨 wind nudge up the right side so the bottom Now scrubber is clear */
     #parcelToggleBtn{ bottom:172px !important; top:auto !important; }
     #windToggleBtn{ bottom:120px !important; top:auto !important; }
@@ -512,6 +518,7 @@
      Plan & Scout / Hunt / Tools & Data (.oc-section-hdr), just left where it is at the top. */
   #propertySelect{
     flex:1;
+    min-width:0;   /* let it shrink within the row (esp. the indented phone layout) instead of overflowing */
     background:#241B10;
     border:1px solid #6b4f2a;
     color:#E6B871;
@@ -2265,7 +2272,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 582</div>
+    <div id="buildBadge">BUILD 583</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9017,8 +9024,10 @@
     if (activePropertyId){
       var prop = properties.filter(function(p){ return p.id === activePropertyId; })[0];
       if (prop && typeof prop.centerLat === 'number'){
+        // Recenter the map to the farm BEHIND the panel — but stay in the panel so you can see what's on
+        // this farm (the category tabs + list refollow it). Going to the map is a deliberate tap on the
+        // "🗺 Show Map" button, not an automatic fling (founder: jumping straight to the map is a pain).
         map.flyTo([prop.centerLat, prop.centerLng], prop.zoom || 15);
-        if (window.innerWidth <= 820) closeSidebar();
       }
     }
   });
@@ -18319,10 +18328,12 @@
   function openSidebar(){
     document.getElementById('sidebar').classList.add('open');
     document.getElementById('sidebarBackdrop').classList.add('show');
+    var hb = document.getElementById('huntBar'); if (hb) hb.classList.add('oc-hb-shift');   // slide Start Hunt clear of the mode toggle while the panel's open
   }
   function closeSidebar(){
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('sidebarBackdrop').classList.remove('show');
+    var hb = document.getElementById('huntBar'); if (hb) hb.classList.remove('oc-hb-shift');
   }
   document.getElementById('mobileMenuBtn').addEventListener('click', function(){
     if (document.getElementById('sidebar').classList.contains('open')) closeSidebar(); else openSidebar();
