@@ -155,28 +155,6 @@
   #magBar #magCancelBtn{ background:transparent; color:#cfc9ad; border:1px solid #46532f; }
   #magBar #magGpsBtn{ background:#1c3327; color:#cfe6d5; border:1px solid #3c6d42; font-weight:600; }
 
-  /* ↩ Undo pill — top-left of the MAP (after the 320px sidebar on desktop). Shows only when there's
-     something to reverse. */
-  #undoBtn{
-    position:fixed;
-    top:14px; left:334px;
-    z-index:2450;
-    display:none;
-    align-items:center;
-    gap:6px;
-    background:#2b1c0e;
-    border:1px solid #c9a24a;
-    color:#f0dca0;
-    font-size:13px;
-    font-weight:700;
-    padding:9px 14px;
-    border-radius:12px;
-    box-shadow:0 3px 12px rgba(0,0,0,.45);
-    cursor:pointer;
-  }
-  #undoBtn.show{ display:inline-flex; }
-  #undoBtn:hover{ background:#3a2712; border-color:#e0bd5e; }
-
   .display-tray-section{ margin-bottom:22px; }
   .display-tray-section-title{
     font-family:'Oswald',sans-serif;
@@ -259,7 +237,6 @@
     /* Start Hunt/Trip only collides with the mode toggle when the panel is OPEN (it floats over it), so
        shift it right ONLY then — stays centered on the map when the panel's closed. */
     #huntBar.oc-hb-shift{ left:calc(50% + 64px) !important; }
-    #undoBtn{ top:150px !important; left:14px !important; }   /* below the ☰ menu on phones */
     /* Property picker sits in the clear lane between the ☰ (left) and the right-side controls — shift it
        right past the hamburger and shorten it so it's not tucked behind them (founder phone tuning). */
     #propertyRow{ padding-left:74px !important; padding-right:64px !important; }
@@ -286,6 +263,7 @@
     #oc-scope-select{ padding:3px 7px !important; max-width:118px !important; }
     #oc-signout>button{ padding:3px 9px !important; font-size:11px !important; }
     #oc-signout #oc-acct-btn{ width:30px !important; height:30px !important; padding:0 !important; font-size:16px !important; }   /* keep 👤 a readable circle on phones */
+    #oc-signout .oc-ur-btn{ width:30px !important; height:30px !important; padding:0 !important; font-size:17px !important; }   /* keep ↩ ↪ circular on phones */
     /* 🗺 right slide button opposite the ☰ menu on the left — a tad bigger so it's an easy thumb target */
     #displayTrayToggleBtn{ top:116px; bottom:auto; width:48px; height:48px; font-size:21px; }
     /* 📐 parcel + 💨 wind nudge up the right side so the bottom Now scrubber is clear */
@@ -2348,11 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 592</div>
-    <!-- ↩ Undo — steps back your last actions (add / delete / move a site, log a sighting, deploy a
-         camera, reset a date…). Shows only when there's something to reverse; each tap undoes one more. -->
-    <button id="undoBtn" type="button" title="Undo the last action">↩ Undo</button>
-
+    <div id="buildBadge">BUILD 593</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12912,7 +12886,10 @@
         activeSiteId = null; highlightSiteOnMap(null);
         var _restore = JSON.parse(JSON.stringify(s));   // snapshot to bring it back on Undo
         try { await removeSite(s.id); } catch (e) { console.error('Outdoor Companion: site delete failed', e); }
-        pushUndo('delete', async function(){ sites.push(_restore); try { await saveSite(_restore); } catch(e){} renderAll(); });
+        pushUndo('delete',
+          async function(){ sites.push(_restore); try { await saveSite(_restore); } catch(e){} renderAll(); },
+          async function(){ await removeSite(_restore.id); }
+        );
         showToast('Deleted "' + s.name + '".');
       });
       list.appendChild(row);
@@ -13237,7 +13214,10 @@
       var _ro = observations.filter(function(o){ return o.id === id; })[0];
       _ro = _ro ? JSON.parse(JSON.stringify(_ro)) : null;
       try { await removeObservation(id); } catch (err) { console.error('Outdoor Companion: delete sighting failed', err); }
-      if (_ro) pushUndo('delete', async function(){ observations.push(_ro); try { await saveObservation(_ro); } catch(e){} renderObsMarkers(); renderActiveList(); });
+      if (_ro) pushUndo('delete',
+        async function(){ observations.push(_ro); try { await saveObservation(_ro); } catch(e){} renderObsMarkers(); renderActiveList(); },
+        async function(){ await removeObservation(_ro.id); }
+      );
       showToast('Sighting deleted');
     });
 
@@ -15363,35 +15343,35 @@
     renderAll();
   }
 
-  // ---------- ↩ Undo — step back the last actions ----------
-  // Each undoable action registers HOW to reverse itself (a closure) with a short label. The ↩ Undo pill
-  // appears whenever the stack isn't empty; each tap steps back one more action.
-  var undoStack = [];
-  function pushUndo(label, undoFn){
+  // ---------- ↩ Undo / ↪ Redo — step back & forward through your actions ----------
+  // Each undoable action registers HOW to reverse itself (undo) AND how to re-apply itself (redo), with a
+  // short label. The ↩ / ↪ arrows live up top by the 👤 account + 💡 help buttons, dimmed when there's
+  // nothing to step to. A brand-new action clears the redo chain (standard undo/redo).
+  var undoStack = [], redoStack = [];
+  function pushUndo(label, undoFn, redoFn){
     if (typeof undoFn !== 'function') return;
-    undoStack.push({ label: label || '', undo: undoFn });
-    if (undoStack.length > 40) undoStack.shift();
-    updateUndoBtn();
+    undoStack.push({ label: label || '', undo: undoFn, redo: redoFn });
+    if (undoStack.length > 50) undoStack.shift();
+    redoStack = [];
+    updateUndoRedoBtns();
   }
-  function updateUndoBtn(){
-    var b = document.getElementById('undoBtn'); if (!b) return;
-    if (undoStack.length){
-      var last = undoStack[undoStack.length - 1];
-      b.classList.add('show');
-      b.textContent = '↩ Undo' + (last.label ? ' ' + last.label : '');
-      b.title = 'Undo: ' + (last.label || 'last action');
-    } else {
-      b.classList.remove('show');
-    }
+  function updateUndoRedoBtns(){
+    var u = document.getElementById('undoBtn'), r = document.getElementById('redoBtn');
+    if (u){ u.disabled = !undoStack.length; u.style.opacity = undoStack.length ? '1' : '0.32'; u.title = undoStack.length ? ('Undo: ' + (undoStack[undoStack.length-1].label || 'last action')) : 'Nothing to undo'; }
+    if (r){ r.disabled = !redoStack.length; r.style.opacity = redoStack.length ? '1' : '0.32'; r.title = redoStack.length ? ('Redo: ' + (redoStack[redoStack.length-1].label || '')) : 'Nothing to redo'; }
   }
   async function performUndo(){
-    var a = undoStack.pop();
-    updateUndoBtn();
-    if (!a) return;
+    var a = undoStack.pop(); if (!a){ updateUndoRedoBtns(); return; }
+    redoStack.push(a); updateUndoRedoBtns();
     try { await a.undo(); showToast('Undone' + (a.label ? ': ' + a.label : '')); }
     catch(e){ console.error('Outdoor Companion: undo failed', e); showToast('Could not undo that'); }
   }
-  (function(){ var b = document.getElementById('undoBtn'); if (b) b.addEventListener('click', performUndo); })();
+  async function performRedo(){
+    var a = redoStack.pop(); if (!a){ updateUndoRedoBtns(); return; }
+    undoStack.push(a); updateUndoRedoBtns();
+    try { if (a.redo) await a.redo(); showToast('Redone' + (a.label ? ': ' + a.label : '')); }
+    catch(e){ console.error('Outdoor Companion: redo failed', e); showToast('Could not redo that'); }
+  }
 
   // ---------- add-site flow ----------
   var addBtn = document.getElementById('addSiteBtn');
@@ -15512,7 +15492,10 @@
           console.error('Outdoor Companion: failed to save site', err);
         }
         autoShareToPropertyGroups('site', site.id, site.propertyId);   // new stand on a shared farm → shared too
-        (function(_sid){ pushUndo('add', async function(){ await removeSite(_sid); }); })(site.id);
+        (function(_site){ pushUndo('add',
+          async function(){ await removeSite(_site.id); },
+          async function(){ if (!sites.some(function(x){ return x.id === _site.id; })){ sites.push(_site); try { await saveSite(_site); } catch(e){} renderAll(); } }
+        ); })(site);
         if (tempMarker){ map.removeLayer(tempMarker); tempMarker = null; }
         map.closePopup();
         exitPlacing();
@@ -18241,7 +18224,10 @@
     observations.push(obs);
     try{ await saveObservation(obs); }catch(e){ console.error('Outdoor Companion: failed to save observation', e); }
     autoShareToPropertyGroups('obs', obs.id, obs.propertyId);   // if this farm is shared, the new sighting/catch is too
-    (function(_oid){ pushUndo('log', async function(){ await removeObservation(_oid); }); })(obs.id);
+    (function(_obs){ pushUndo('log',
+      async function(){ await removeObservation(_obs.id); },
+      async function(){ if (!observations.some(function(x){ return x.id === _obs.id; })){ observations.push(_obs); try { await saveObservation(_obs); } catch(e){} renderObsMarkers(); renderActiveList(); } }
+    ); })(obs);
 
     // Dual-linking: this observation keeps its own real map location (set above,
     // independent of the hunter's position) AND separately gets tagged to whichever
@@ -18618,13 +18604,18 @@
       if (typeof renderCameraList === 'function' && activeTab === 'cameras') renderCameraList();
       if (activeSiteId === s.id) highlightSiteOnMap(s.id);
       showToast(_movedCam ? 'Camera spot moved' : 'Stand moved');
-      pushUndo('move', async function(){
-        var t = sites.filter(function(x){ return x.id === _sid; })[0]; if (!t) return;
-        t.lat = _prevLat; t.lng = _prevLng; t.propertyId = _prevProp; t.lastActivityAt = Date.now();
-        try { await saveSite(t); } catch(e){}
-        (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId === _sid && !d.pickedUpAt; }).forEach(function(d){ d.lat = _prevLat; d.lng = _prevLng; saveDeployment(d).catch(function(e){}); });
+      var _newLat = lat, _newLng = lng, _newProp = s.propertyId;
+      function _placeSite(la, ln, pr){
+        var t = sites.filter(function(x){ return x.id === _sid; })[0]; if (!t) return Promise.resolve();
+        t.lat = la; t.lng = ln; t.propertyId = pr; t.lastActivityAt = Date.now();
+        (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId === _sid && !d.pickedUpAt; }).forEach(function(d){ d.lat = la; d.lng = ln; saveDeployment(d).catch(function(e){}); });
         renderAll(); if (typeof renderCameraList === 'function' && activeTab === 'cameras') renderCameraList();
-      });
+        return saveSite(t).catch(function(e){});
+      }
+      pushUndo('move',
+        async function(){ await _placeSite(_prevLat, _prevLng, _prevProp); },
+        async function(){ await _placeSite(_newLat, _newLng, _newProp); }
+      );
     }
     pendingRepositionSiteId = null;
   }
@@ -20178,6 +20169,10 @@
       /* Bright cream 👤 so it stands out on the dark band (founder: it was too dark on a dark bg). */
       '#oc-signout #oc-acct-btn{background:#EDE7D6;color:#1A1204;border:1px solid #cfc6ad;border-radius:50%;width:28px;height:28px;padding:0;font-size:15px;line-height:1;display:inline-flex;align-items:center;justify-content:center;}' +
       '#oc-signout #oc-acct-btn:hover{background:#fff;}' +
+      /* ↩ / ↪ undo-redo arrows in the top band, by 👤 and 💡 (founder placement). Dimmed when nothing to do. */
+      '#oc-signout .oc-ur-btn{background:#2f3a31;color:#f0dca0;border:1px solid #46532f;border-radius:50%;width:28px;height:28px;padding:0;font-size:16px;line-height:1;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;}' +
+      '#oc-signout .oc-ur-btn:disabled{cursor:default;}' +
+      '#oc-signout .oc-ur-btn:not(:disabled):hover{background:#3a4735;border-color:#8a9a4e;}' +
       '#oc-signout #oc-acct-menu{display:none;position:absolute;top:calc(100% + 7px);right:0;min-width:190px;flex-direction:column;gap:5px;background:#20281a;border:1px solid #46532f;border-radius:12px;padding:9px;box-shadow:0 14px 34px rgba(0,0,0,.55);z-index:100001;}' +
       '#oc-signout #oc-acct-menu.open{display:flex;}' +
       '#oc-signout #oc-acct-menu #oc-signout-email{color:#9db0a3;font-size:11.5px;padding:2px 4px 7px;border-bottom:1px solid #35443a;margin-bottom:3px;word-break:break-all;}' +
@@ -20219,7 +20214,10 @@
     // The old top band stacked 💡 · Admin · Refresh · My Data · Sign out in a row — cluttered, and it
     // collided with Start Hunt. Now: 💡 Suggestion stays one-tap, and everything else folds behind a
     // single bright 👤 account button that opens a little menu (founder cleanup, B581).
-    signout.innerHTML = '<button type="button" id="oc-fb-open-btn" title="Send a suggestion or report an issue">💡</button>' +
+    signout.innerHTML =
+      '<button type="button" id="undoBtn" class="oc-ur-btn" title="Undo" aria-label="Undo" disabled>↩</button>' +
+      '<button type="button" id="redoBtn" class="oc-ur-btn" title="Redo" aria-label="Redo" disabled>↪</button>' +
+      '<button type="button" id="oc-fb-open-btn" title="Send a suggestion or report an issue">💡</button>' +
       '<button type="button" id="oc-acct-btn" title="Account &amp; settings" aria-label="Account" aria-haspopup="true" aria-expanded="false">👤</button>' +
       '<div id="oc-acct-menu" role="menu">' +
         '<div id="oc-signout-email"></div>' +
@@ -20239,6 +20237,10 @@
     document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeAcctMenu(); });
     var fbOpenBtn = document.getElementById('oc-fb-open-btn');
     if (fbOpenBtn) fbOpenBtn.addEventListener('click', function(){ openFeedback('app'); });
+    var _undoB = document.getElementById('undoBtn'), _redoB = document.getElementById('redoBtn');
+    if (_undoB) _undoB.addEventListener('click', function(){ if (typeof performUndo === 'function') performUndo(); });
+    if (_redoB) _redoB.addEventListener('click', function(){ if (typeof performRedo === 'function') performRedo(); });
+    if (typeof updateUndoRedoBtns === 'function') updateUndoRedoBtns();   // set initial dimmed state
     var adminBtn = document.getElementById('oc-admin-btn');
     if (adminBtn) adminBtn.addEventListener('click', function(){ openAdminConsole(); });
     var refreshBtn = document.getElementById('oc-refresh-btn');
