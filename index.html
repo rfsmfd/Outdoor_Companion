@@ -1994,13 +1994,13 @@
       <button class="tab-btn" data-tab="analytics">📊 Analytics</button>
     </div>
 
-    <div id="cameraTip">📸 <strong>This is the way in:</strong> point your phone's regular <strong>Camera app</strong> at a printed tag and tap the link that pops up. No need to open anything in this app first.</div>
     <div id="cameraToolbar" style="display:none;">
-      <button class="btn-primary" id="registerCamBtn" style="flex:1 1 45%;background:#8FA05C;color:#14201A;">🏷 Register Camera</button>
-      <button class="btn-primary" id="scanDeployBtn" style="flex:1 1 45%;background:#3B9EFF;color:#0A1A2E;">📷 Deploy Camera</button>
-      <button class="btn-primary" id="batchAddBtn" style="flex:1 1 45%;background:#B8AF9C;color:#1A1204;">🖶 Batch Generate QR Codes</button>
-      <button class="btn-ghost" id="printAllBtn" style="flex:1 1 45%;">Print / Re-print Sheet</button>
-      <button class="btn-primary" id="importPhotosBtn" style="flex:1 1 100%;background:#6B8F5C;color:#0F1A0C;">🗂 Import Photos</button>
+      <button class="btn-primary" id="scanRegisterBtn" style="flex:1 1 30%;background:#8FA05C;color:#14201A;">🏷 Scan Register</button>
+      <button class="btn-primary" id="registerCamBtn" style="flex:1 1 30%;background:#B8AF9C;color:#1A1204;">✍ Register by Hand</button>
+      <button class="btn-primary" id="importPhotosBtn" style="flex:1 1 30%;background:#6B8F5C;color:#0F1A0C;">🗂 Import Photos</button>
+      <!-- Kept in the DOM (hidden) so their existing handlers/logic still wire up; reached from the Scan Register menu. -->
+      <button id="batchAddBtn" style="display:none;">Batch Generate QR Codes</button>
+      <button id="printAllBtn" style="display:none;">Print / Re-print Sheet</button>
     </div>
 
     <button id="tagHistoryBtn" style="display:none;">🏷 Search Tag History</button>
@@ -2089,7 +2089,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 565</div>
+    <div id="buildBadge">BUILD 566</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3613,9 +3613,10 @@
       'tab-log': { tab:'log', label:'the Log tab' },
       'tab-cameras': { tab:'cameras', label:'the Cameras tab' },
       'tab-analytics': { tab:'analytics', label:'the Analytics tab' },
-      'register-camera': { tab:'cameras', el:'registerCamBtn', label:'"Register Camera"' },
-      'deploy-camera': { tab:'cameras', el:'scanDeployBtn', label:'"Deploy Camera"' },
-      'batch-qr': { tab:'cameras', el:'batchAddBtn', label:'"Batch QR Codes"' },
+      'scan-register': { tab:'cameras', el:'scanRegisterBtn', label:'"🏷 Scan Register"' },
+      'register-camera': { tab:'cameras', el:'registerCamBtn', label:'"✍ Register by Hand"' },
+      'deploy-camera': { tab:'cameras', label:'the Cameras tab, then "📍 Deploy here" on the camera\'s row' },
+      'batch-qr': { tab:'cameras', el:'scanRegisterBtn', label:'"🏷 Scan Register" (then "Make QR tag sheet")' },
       'import-photos': { tab:'cameras', el:'importPhotosBtn', label:'"Import Photos"' },
       'quick-log': { el:'quickLogFab', map:true, label:'the orange "+" Quick Log button' },
       'property-lines': { el:'parcelToggleBtn', map:true, label:'the 📐 property-lines button' },
@@ -13130,7 +13131,7 @@
       btn.classList.add('active');
       document.getElementById('filters').style.display = (activeTab === 'sites') ? '' : 'none';
       document.getElementById('cameraToolbar').style.display = (activeTab === 'cameras') ? 'flex' : 'none';
-      document.getElementById('cameraTip').style.display = (activeTab === 'cameras') ? 'block' : 'none';
+      var _camTip = document.getElementById('cameraTip'); if (_camTip) _camTip.style.display = (activeTab === 'cameras') ? 'block' : 'none';
       updateTagHistoryButtonVisibility();
       updateBuckGalleryButtonVisibility();
       // Analytics adds its own layout class to this shared list container for its
@@ -24045,9 +24046,43 @@
     openScanModal();
   });
 
-  document.getElementById('registerCamBtn').addEventListener('click', function(){
-    showUseCameraAppReminder('register');
-  });
+  // "✍ Register by Hand" — add a camera with no tag: name it, then fill optional make/model/notes.
+  async function registerByHand(){
+    var name = await showPrompt('New camera name (e.g. "Cam 12" or "Reveal — North Line"):', '');
+    if (name == null) return; name = name.trim(); if (!name) return;
+    var cam = { id: uid(), name: name, createdAt: Date.now(), currentSiteId: null, lastDeployedAt: null, make:'', model:'', notes:'' };
+    cameras.push(cam);
+    try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: register-by-hand save failed', e); }
+    renderCameraList();
+    showToast(name + ' added — deploy it from the list');
+    openEditCameraModal(cam);   // walk them into make/model/notes; already saved, so closing is fine
+  }
+  document.getElementById('registerCamBtn').addEventListener('click', registerByHand);
+
+  // "🏷 Scan Register" — the tagged workflow lives here: scan a tag to register, plus make/print tag sheets.
+  function showScanRegisterMenu(){
+    var ex = document.getElementById('oc-scanreg-menu'); if (ex) ex.parentNode.removeChild(ex);
+    var bd = document.createElement('div'); bd.id = 'oc-scanreg-menu';
+    bd.style.cssText = 'position:fixed;inset:0;z-index:100040;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
+    bd.innerHTML =
+      '<div style="width:100%;max-width:420px;background:#1E2B23;border:1px solid #35443A;border-radius:14px;padding:18px;color:#eaf3e2;">' +
+        '<div style="font-size:19px;font-weight:700;margin-bottom:4px;">Scan Register</div>' +
+        '<div style="font-size:14px;color:#9db0a3;margin-bottom:14px;">Tags are a one-time thing — scan one to tie it to a camera. First time? Make a sheet of tags and print them.</div>' +
+        '<button class="oc-sr-scan" style="display:block;width:100%;margin:0 0 8px;padding:15px 16px;border:1px solid #8FA05C;border-radius:11px;background:#26331d;color:#eaf3e2;font-size:17px;font-weight:600;cursor:pointer;">📷 Scan a tag to register</button>' +
+        '<button class="oc-sr-make" style="display:block;width:100%;margin:0 0 8px;padding:15px 16px;border:1px solid #4a5a34;border-radius:11px;background:#26331d;color:#eaf3e2;font-size:17px;font-weight:600;cursor:pointer;">🖶 Make QR tag sheet</button>' +
+        '<button class="oc-sr-print" style="display:block;width:100%;margin:0 0 0;padding:15px 16px;border:1px solid #4a5a34;border-radius:11px;background:#26331d;color:#eaf3e2;font-size:17px;font-weight:600;cursor:pointer;">🖨 Reprint a tag sheet</button>' +
+        '<button class="oc-sr-cancel" style="display:block;width:100%;margin:10px 0 0;padding:12px;border:none;border-radius:11px;background:transparent;color:#9db0a3;font-size:15px;cursor:pointer;">Cancel</button>' +
+      '</div>';
+    document.body.appendChild(bd);
+    function close(){ if (bd.parentNode) bd.parentNode.removeChild(bd); }
+    bd.addEventListener('click', function(e){ if (e.target === bd) close(); });
+    bd.querySelector('.oc-sr-scan').addEventListener('click', function(){ close(); showUseCameraAppReminder('register'); });
+    bd.querySelector('.oc-sr-make').addEventListener('click', function(){ close(); var b = document.getElementById('batchAddBtn'); if (b) b.click(); });
+    bd.querySelector('.oc-sr-print').addEventListener('click', function(){ close(); var b = document.getElementById('printAllBtn'); if (b) b.click(); });
+    bd.querySelector('.oc-sr-cancel').addEventListener('click', close);
+  }
+  var _scanRegBtn = document.getElementById('scanRegisterBtn');
+  if (_scanRegBtn) _scanRegBtn.addEventListener('click', showScanRegisterMenu);
 
   // ---------- Batch camera generation ----------
   document.getElementById('batchAddBtn').addEventListener('click', async function(){
@@ -24246,7 +24281,8 @@
     if (e.target === this) stopScanner();
   });
 
-  document.getElementById('scanDeployBtn').addEventListener('click', function(){ showUseCameraAppReminder('deploy'); });
+  var _scanDeployBtn = document.getElementById('scanDeployBtn');   // removed from the toolbar (deploy is per-camera now); guard for safety
+  if (_scanDeployBtn) _scanDeployBtn.addEventListener('click', function(){ showUseCameraAppReminder('deploy'); });
 
   function handleScannedCode(data){
     if (typeof data !== 'string' || data.indexOf(QR_PREFIX) !== 0){

@@ -431,7 +431,7 @@ const GUS_SYSTEM =
   "controls, ALSO fill 'highlights' with those controls' tokens IN TAP ORDER, using ONLY the " +
   "POINTABLE TARGETS tokens in the knowledge — the app then lights each one up on screen as you " +
   "talk them through it. Match the token to the control you named (e.g. Cameras tab = tab-cameras, " +
-  "Deploy Camera = deploy-camera, the + Add Site button = add-site). Leave it empty for answers " +
+  "Scan Register = scan-register, the + Add Site button = add-site). Leave it empty for answers " +
   "that aren't a tap-here walkthrough. (7) You're also how folks send FEEDBACK. When someone reports " +
   "a bug, wishes for a feature, seems stuck or frustrated, or when you've just finished helping — " +
   "warmly point them to the 💡 Suggestion / Issue button (top-right of the app, or in the demo " +
@@ -443,7 +443,7 @@ const GUS_SYSTEM =
 const GUS_TARGET_TOKENS = [
   "add-site", "my-location", "plan-hunt", "where-to-hunt", "field-card", "hunt-mode", "walk-in",
   "log-sit", "scout-mode", "camera-plan", "terrain-read", "tab-sites", "tab-log", "tab-cameras",
-  "tab-analytics", "register-camera", "deploy-camera", "batch-qr", "import-photos", "quick-log",
+  "tab-analytics", "scan-register", "register-camera", "deploy-camera", "batch-qr", "import-photos", "quick-log",
   "property-lines", "layers", "wind", "compass", "map-display", "send-feedback", "show-cameras", "show-camera-icons",
   "show-stands", "show-access", "show-bedding", "show-feeding", "show-water", "show-bucks", "show-does",
   "show-bears", "show-turkeys", "show-scrapes", "show-rubs", "show-tracks", "show-deer-trails",
