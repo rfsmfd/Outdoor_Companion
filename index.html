@@ -367,6 +367,23 @@
     gap:8px;
     border-bottom:1px solid var(--line);
   }
+  /* Each tab is its own world: the hunt-flow tools + Tools&Data show only on the SITES tab, and fold
+     away on Cameras/Log/Analytics so that tab's list gets the full screen. Add Site + My Location stay. */
+  #actions.oc-hide-hunttools #forecastBtn,
+  #actions.oc-hide-hunttools #huntTodayBtn,
+  #actions.oc-hide-hunttools #fieldCardBtn,
+  #actions.oc-hide-hunttools #huntModeBtn,
+  #actions.oc-hide-hunttools #walkInBtn,
+  #actions.oc-hide-hunttools #sitLogBtn,
+  #actions.oc-hide-hunttools #scoutModeBtn,
+  #actions.oc-hide-hunttools #scoutSpotBtn,
+  #actions.oc-hide-hunttools #scoutDrawBtn,
+  #actions.oc-hide-hunttools #scoutReportBtn,
+  #actions.oc-hide-hunttools #cameraPlanBtn,
+  #actions.oc-hide-hunttools #terrainReadBtn,
+  #actions.oc-hide-hunttools #toolsDivider,
+  #actions.oc-hide-hunttools #toolsToggleBtn,
+  #actions.oc-hide-hunttools #toolsGroup{ display:none !important; }
   button{
     font-family:'IBM Plex Sans',sans-serif;
     cursor:pointer;
@@ -2089,7 +2106,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 566</div>
+    <div id="buildBadge">BUILD 567</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3600,15 +3617,15 @@
     var GUS_TARGETS = {
       'add-site': { el:'addSiteBtn', label:'the "+ Add Site" button' },
       'my-location': { el:'gpsSiteBtn', label:'the "My Location" button' },
-      'plan-hunt': { el:'forecastBtn', label:'"Plan a Hunt"' },
-      'where-to-hunt': { el:'huntTodayBtn', label:'"Where to Hunt"' },
-      'field-card': { el:'fieldCardBtn', label:'"Field Card"' },
-      'hunt-mode': { el:'huntModeBtn', label:'"Hunt Mode"' },
-      'walk-in': { el:'walkInBtn', label:'"Walk-In"' },
-      'log-sit': { el:'sitLogBtn', label:'"Log a Sit"' },
-      'scout-mode': { el:'scoutModeBtn', label:'"Scout Mode"' },
-      'camera-plan': { el:'cameraPlanBtn', label:'"Camera Plan"' },
-      'terrain-read': { el:'terrainReadBtn', label:'"Terrain Read"' },
+      'plan-hunt': { tab:'sites', el:'forecastBtn', label:'"Plan a Hunt"' },
+      'where-to-hunt': { tab:'sites', el:'huntTodayBtn', label:'"Where to Hunt"' },
+      'field-card': { tab:'sites', el:'fieldCardBtn', label:'"Field Card"' },
+      'hunt-mode': { tab:'sites', el:'huntModeBtn', label:'"Hunt Mode"' },
+      'walk-in': { tab:'sites', el:'walkInBtn', label:'"Walk-In"' },
+      'log-sit': { tab:'sites', el:'sitLogBtn', label:'"Log a Sit"' },
+      'scout-mode': { tab:'sites', el:'scoutModeBtn', label:'"Scout Mode"' },
+      'camera-plan': { tab:'sites', el:'cameraPlanBtn', label:'"Camera Plan"' },
+      'terrain-read': { tab:'sites', el:'terrainReadBtn', label:'"Terrain Read"' },
       'tab-sites': { tab:'sites', label:'the Sites tab' },
       'tab-log': { tab:'log', label:'the Log tab' },
       'tab-cameras': { tab:'cameras', label:'the Cameras tab' },
@@ -3646,12 +3663,12 @@
       'show-camera-coverage': { tray:'camera-coverage', map:true, label:'the Camera coverage toggle in the Map Display tray' },
       'mode-hunting': { mod:'hunting', label:'the 🏹 Hunting button' },
       'mode-fishing': { mod:'fishing', label:'the 🎣 Fishing button' },
-      'photo-gallery': { tools:true, el:'photoGalleryBtn', label:'"Photo Gallery"' },
-      'solunar': { tools:true, el:'solunarBtn', label:'"Solunar Table"' },
-      'journal': { tools:true, el:'huntLogBtn', label:'"Hunt Journal"' },
-      'trails': { tools:true, el:'manageTrailsBtn', label:'"Trails"' },
-      'import': { tools:true, el:'importWaypointsBtn', label:'"Import from other apps"' },
-      'export': { tools:true, el:'exportBtn', label:'"Export"' }
+      'photo-gallery': { tab:'sites', tools:true, el:'photoGalleryBtn', label:'"Photo Gallery"' },
+      'solunar': { tab:'sites', tools:true, el:'solunarBtn', label:'"Solunar Table"' },
+      'journal': { tab:'sites', tools:true, el:'huntLogBtn', label:'"Hunt Journal"' },
+      'trails': { tab:'sites', tools:true, el:'manageTrailsBtn', label:'"Trails"' },
+      'import': { tab:'sites', tools:true, el:'importWaypointsBtn', label:'"Import from other apps"' },
+      'export': { tab:'sites', tools:true, el:'exportBtn', label:'"Export"' }
     };
     function gusResolveTarget(tok){
       var t = GUS_TARGETS[tok]; if (!t) return null;
@@ -13132,6 +13149,8 @@
       document.getElementById('filters').style.display = (activeTab === 'sites') ? '' : 'none';
       document.getElementById('cameraToolbar').style.display = (activeTab === 'cameras') ? 'flex' : 'none';
       var _camTip = document.getElementById('cameraTip'); if (_camTip) _camTip.style.display = (activeTab === 'cameras') ? 'block' : 'none';
+      // Each tab = its own tools: fold the hunt-flow stack + Tools&Data away on every tab but Sites.
+      var _actionsEl = document.getElementById('actions'); if (_actionsEl) _actionsEl.classList.toggle('oc-hide-hunttools', activeTab !== 'sites');
       updateTagHistoryButtonVisibility();
       updateBuckGalleryButtonVisibility();
       // Analytics adds its own layout class to this shared list container for its
