@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 593</div>
+    <div id="buildBadge">BUILD 594</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -22903,18 +22903,32 @@
     if (pos){ lastKnownPos = pos; }
     else { pos = lastKnownPos || (function(){ var c = map.getCenter(); return { lat:c.lat, lng:c.lng, accuracy:null }; })(); }
     if (!pos || pos.lat == null){ showToast('No GPS fix yet — try again in a moment.'); return; }
+    deployCameraAtPos(cam, pos);
+  }
 
-    // Only NAMED camera spots (real places you've named) are offered — unnamed quick-drops stay quiet.
-    // (Existing/older spots have no autoNamed flag → treated as named, which is right.)
+  // Shared deploy tail (used by "Deploy here" GPS and "Deploy map"): near a NAMED spot? offer to reuse it;
+  // else drop a fresh spot. Only real named spots are offered (unnamed quick-drops stay quiet).
+  function deployCameraAtPos(cam, pos){
+    if (!pos || pos.lat == null){ showToast('No location chosen.'); return; }
     var named = [];
     sites.filter(function(s){ return s.type === 'camera' && !s.autoNamed && s.name; }).forEach(function(s){
       var dM = distMeters(pos.lat, pos.lng, s.lat, s.lng);
       if (dM != null && dM <= 23){ named.push({ site:s, d:dM }); }   // ~23m ≈ 25 yards
     });
     named.sort(function(a,b){ return a.d - b.d; });
-
     if (named.length){ showDeploySpotChooser(cam, pos, named); }
     else { finishDeploy(cam, null, pos); }
+  }
+
+  // "🗺 Deploy map" — place the camera by eye on the FULL map with the magnifier (no GPS needed). Starts
+  // on WHATEVER THE MAP IS SHOWING right now — you've panned roughly to the spot, which may be miles from
+  // where you're standing (founder). Pan the crosshair onto the exact spot (or ⌖ GPS), then "📍 Here".
+  function deployCameraOnMap(cam){
+    if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();   // reveal the map first
+    var c = map.getCenter();
+    enterMagnifier(c.lat, c.lng, map.getZoom(), 'Place ' + cam.name + ' — pan to the spot', function(chosen){
+      deployCameraAtPos(cam, { lat: chosen.lat, lng: chosen.lng, accuracy: null });
+    });
   }
 
   // You're near known named spot(s) — reuse one, or drop a new spot. Shows all in range.
@@ -23004,7 +23018,8 @@
       // Primary field button: not deployed → drop it at your GPS; deployed → undeploy (frees it, stamps the date).
       var primaryBtn = site
         ? '<button data-act="pickup-cam" data-id="'+cam.id+'" style="background:#D94A2E;color:#fff;border-color:#D94A2E;">Undeploy</button>'
-        : '<button data-act="deploy-cam" data-id="'+cam.id+'" style="background:#4A9E4F;color:#fff;border-color:#4A9E4F;">📍 Deploy here</button>';
+        : '<button data-act="deploy-cam" data-id="'+cam.id+'" style="background:#4A9E4F;color:#fff;border-color:#4A9E4F;">📍 Deploy here</button>' +
+          '<button data-act="deploy-map-cam" data-id="'+cam.id+'" title="Place it by eye on the map (no GPS needed)" style="background:#3B9EFF;color:#0A1A2E;border-color:#3B9EFF;">🗺 Deploy map</button>';
       // Deployed to a not-yet-named quick-drop → let him name the spot whenever (never forced in the field).
       var nameSpotBtn = (site && site.autoNamed) ? '<button class="btn-ghost" data-act="name-spot" data-id="'+cam.id+'" style="color:#c9a24a;border-color:#5a5327;">✏ Name spot</button>' : '';
       // Deploy-here grabs your CURRENT GPS — right in the field, but wrong when you register from home. For a
@@ -23041,6 +23056,8 @@
       // Deploy = one tap, drops it at your GPS (no scan, no map, no signal needed).
       var deployBtn = row.querySelector('[data-act="deploy-cam"]');
       if (deployBtn) deployBtn.addEventListener('click', function(){ deployCameraHere(cam, this); });
+      var deployMapBtn = row.querySelector('[data-act="deploy-map-cam"]');
+      if (deployMapBtn) deployMapBtn.addEventListener('click', function(){ deployCameraOnMap(cam); });
 
       // Undeploy = one tap, stamps the pickup date + frees the camera (redeploy anytime).
       var pickupBtn = row.querySelector('[data-act="pickup-cam"]');
