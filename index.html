@@ -468,24 +468,29 @@
     padding:12px 16px;
     border-bottom:1px solid var(--line);
   }
+  /* The property picker is the panel's FIRST section header — same warm light-brown bar as
+     Plan & Scout / Hunt / Tools & Data (.oc-section-hdr), just left where it is at the top. */
   #propertySelect{
     flex:1;
-    background:var(--panel-alt);
-    border:1px solid var(--line);
-    color:var(--text);
-    font-size:12.5px;
-    padding:8px 10px;
-    border-radius:4px;
+    background:#241B10;
+    border:1px solid #6b4f2a;
+    color:#E6B871;
+    font-size:16px;
+    font-weight:800;
+    letter-spacing:.4px;
+    padding:9px 12px;
+    border-radius:8px;
     font-family:'IBM Plex Sans',sans-serif;
   }
   #managePropertiesBtn{
     width:38px;
-    background:var(--panel-alt);
-    border:1px solid var(--line);
-    color:var(--text-dim);
-    border-radius:4px;
+    background:#241B10;
+    border:1px solid #6b4f2a;
+    color:#E6B871;
+    border-radius:8px;
     font-size:16px;
   }
+  #managePropertiesBtn:hover{ background:#2f2415; border-color:#8a6733; }
   .property-row{
     display:flex;
     align-items:center;
@@ -2138,7 +2143,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 569</div>
+    <div id="buildBadge">BUILD 570</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
