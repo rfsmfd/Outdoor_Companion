@@ -2289,7 +2289,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 585</div>
+    <div id="buildBadge">BUILD 586</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8134,6 +8134,34 @@
     var d = new Date(ms);
     var pad = function(n){ return String(n).padStart(2,'0'); };
     return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+  // Small reusable date+time picker modal → resolves to a timestamp (ms) or null if cancelled.
+  function promptDateTime(title, ms){
+    return new Promise(function(resolve){
+      var back = document.createElement('div');
+      back.className = 'oc-modal-backdrop show';
+      back.style.cssText = 'position:fixed;inset:0;z-index:100060;display:flex;align-items:center;justify-content:center;background:rgba(10,14,8,.72);padding:20px;';
+      back.innerHTML =
+        '<div style="background:#20281a;border:1px solid #46532f;border-radius:14px;padding:18px;max-width:360px;width:100%;color:#eae4cf;box-shadow:0 18px 50px rgba(0,0,0,.55);">' +
+          '<h3 style="margin:0 0 12px;font-size:17px;color:#f3eed6;">'+escapeHtml(title)+'</h3>' +
+          '<input type="datetime-local" id="oc-dt-input" style="width:100%;padding:11px;font-size:16px;background:#1a2116;border:1px solid #46532f;border-radius:9px;color:#eae4cf;" />' +
+          '<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">' +
+            '<button type="button" id="oc-dt-cancel" style="background:transparent;border:1px solid #46532f;color:#cfc9ad;border-radius:9px;padding:10px 14px;font-size:14px;cursor:pointer;">Cancel</button>' +
+            '<button type="button" id="oc-dt-save" style="background:#4A9E4F;border:none;color:#fff;border-radius:9px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;">Save</button>' +
+          '</div>' +
+        '</div>';
+      document.body.appendChild(back);
+      var input = back.querySelector('#oc-dt-input');
+      input.value = dateTimeToLocalInputValue(ms || Date.now());
+      function done(val){ if (back.parentNode) back.parentNode.removeChild(back); resolve(val); }
+      back.querySelector('#oc-dt-cancel').addEventListener('click', function(){ done(null); });
+      back.querySelector('#oc-dt-save').addEventListener('click', function(){
+        if (!input.value){ done(null); return; }
+        var t = new Date(input.value).getTime();
+        done(isNaN(t) ? null : t);
+      });
+      back.addEventListener('click', function(e){ if (e.target === back) done(null); });
+    });
   }
 
   // ---------- storage (works both inside chat preview and as a standalone file) ----------
@@ -18296,9 +18324,17 @@
     if (s){
       s.lat = lat; s.lng = lng; s.lastActivityAt = Date.now();
       try { await saveSite(s); } catch (e) { console.error('Outdoor Companion: failed to save moved stand', e); }
+      // If a camera is deployed here, keep its OPEN deployment's coords in sync with the moved spot
+      // (a camera registered from home lands at the wrong GPS; moving the spot corrects the record too).
+      var _movedCam = false;
+      (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId === s.id && !d.pickedUpAt; }).forEach(function(d){
+        d.lat = lat; d.lng = lng; _movedCam = true;
+        saveDeployment(d).catch(function(e){ console.error('Outdoor Companion: failed to sync moved deployment', e); });
+      });
       renderAll();
+      if (typeof renderCameraList === 'function' && activeTab === 'cameras') renderCameraList();
       if (activeSiteId === s.id) highlightSiteOnMap(s.id);
-      showToast('Stand moved');
+      showToast(_movedCam ? 'Camera spot moved' : 'Stand moved');
     }
     pendingRepositionSiteId = null;
   }
@@ -22661,6 +22697,11 @@
         : '<button data-act="deploy-cam" data-id="'+cam.id+'" style="background:#4A9E4F;color:#fff;border-color:#4A9E4F;">📍 Deploy here</button>';
       // Deployed to a not-yet-named quick-drop → let him name the spot whenever (never forced in the field).
       var nameSpotBtn = (site && site.autoNamed) ? '<button class="btn-ghost" data-act="name-spot" data-id="'+cam.id+'" style="color:#c9a24a;border-color:#5a5327;">✏ Name spot</button>' : '';
+      // Deploy-here grabs your CURRENT GPS — right in the field, but wrong when you register from home. For a
+      // deployed camera, "🗺 Map" jumps to its spot on a mini-map so you can drag it to the real location, and
+      // "📅 Date" resets the deploy date/time (founder: adding yesterday's cameras from the computer).
+      var mapBtn = site ? '<button class="btn-ghost" data-act="map-cam" data-id="'+cam.id+'" title="Show it on the map & move it to the right spot">🗺 Map</button>' : '';
+      var dateBtn = site ? '<button class="btn-ghost" data-act="date-cam" data-id="'+cam.id+'" title="Fix the deploy date &amp; time">📅 Date</button>' : '';
       row.innerHTML =
         '<div class="cam-qr-thumb" id="'+qrDivId+'" data-cam="'+cam.id+'"></div>' +
         '<div class="cam-meta">' +
@@ -22670,6 +22711,8 @@
         '<div class="cam-actions">' +
           primaryBtn +
           nameSpotBtn +
+          mapBtn +
+          dateBtn +
           '<button class="btn-ghost" data-act="edit-cam" data-id="'+cam.id+'">Edit</button>' +
           '<button class="btn-ghost" data-act="history-cam" data-id="'+cam.id+'">📜 History</button>' +
           '<button class="btn-ghost" data-act="delete-cam" data-id="'+cam.id+'" style="color:#D94A2E;">Delete</button>' +
@@ -22704,6 +22747,24 @@
         try{ await saveSite(s); }catch(e){ console.error('Outdoor Companion: name spot save failed', e); }
         renderCameraList(); renderAll();
         showToast('Spot named "' + nm + '"');
+      });
+
+      // 🗺 Map → mini-map centered on where it sits now; drag it to the real spot (fixes a from-home deploy).
+      var mapB = row.querySelector('[data-act="map-cam"]');
+      if (mapB) mapB.addEventListener('click', function(){ if (cam.currentSiteId) repositionSite(cam.currentSiteId); });
+
+      // 📅 Date → reset the deploy date/time on the current (open) deployment.
+      var dateB = row.querySelector('[data-act="date-cam"]');
+      if (dateB) dateB.addEventListener('click', async function(){
+        var curDep = deployments.filter(function(d){ return d.cameraId === cam.id && !d.pickedUpAt; })
+          .sort(function(a,b){ return b.deployedAt - a.deployedAt; })[0];
+        if (!curDep){ showToast('This camera isn’t deployed.'); return; }
+        var newMs = await promptDateTime('Deploy date & time — ' + cam.name, curDep.deployedAt);
+        if (newMs == null) return;
+        curDep.deployedAt = newMs;
+        try{ await saveDeployment(curDep); }catch(e){ console.error('Outdoor Companion: deploy-date save failed', e); }
+        renderCameraList();
+        showToast('Deploy date set to ' + new Date(newMs).toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}));
       });
 
       row.querySelector('[data-act="edit-cam"]').addEventListener('click', function(){
