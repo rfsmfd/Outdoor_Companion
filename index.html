@@ -2325,7 +2325,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 590</div>
+    <div id="buildBadge">BUILD 591</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8179,27 +8179,71 @@
   // Small reusable date+time picker modal → resolves to a timestamp (ms) or null if cancelled.
   function promptDateTime(title, ms){
     return new Promise(function(resolve){
+      function pad(n){ return String(n).padStart(2, '0'); }
+      var MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+      var DOW = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+      var sel = new Date(ms || Date.now()); sel.setSeconds(0, 0);
+      var viewYear = sel.getFullYear(), viewMonth = sel.getMonth();
+
       var back = document.createElement('div');
       back.className = 'oc-modal-backdrop show';
       back.style.cssText = 'position:fixed;inset:0;z-index:100060;display:flex;align-items:center;justify-content:center;background:rgba(10,14,8,.72);padding:20px;';
-      back.innerHTML =
-        '<div style="background:#20281a;border:1px solid #46532f;border-radius:14px;padding:18px;max-width:360px;width:100%;color:#eae4cf;box-shadow:0 18px 50px rgba(0,0,0,.55);">' +
-          '<h3 style="margin:0 0 12px;font-size:17px;color:#f3eed6;">'+escapeHtml(title)+'</h3>' +
-          '<input type="datetime-local" id="oc-dt-input" style="width:100%;padding:11px;font-size:16px;background:#1a2116;border:1px solid #46532f;border-radius:9px;color:#eae4cf;" />' +
-          '<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">' +
-            '<button type="button" id="oc-dt-cancel" style="background:transparent;border:1px solid #46532f;color:#cfc9ad;border-radius:9px;padding:10px 14px;font-size:14px;cursor:pointer;">Cancel</button>' +
-            '<button type="button" id="oc-dt-save" style="background:#4A9E4F;border:none;color:#fff;border-radius:9px;padding:10px 16px;font-size:14px;font-weight:600;cursor:pointer;">Save</button>' +
-          '</div>' +
+      var card = document.createElement('div');
+      card.style.cssText = 'background:#20281a;border:1px solid #46532f;border-radius:16px;padding:16px;max-width:340px;width:100%;color:#eae4cf;box-shadow:0 18px 50px rgba(0,0,0,.55);';
+      var navStyle = 'background:#2a3420;border:1px solid #46532f;color:#eae4cf;border-radius:9px;width:34px;height:34px;font-size:18px;line-height:1;cursor:pointer;';
+      card.innerHTML =
+        '<h3 style="margin:0 0 12px;font-size:16px;color:#f3eed6;">'+escapeHtml(title)+'</h3>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">' +
+          '<button type="button" id="ocDtPrev" style="'+navStyle+'">‹</button>' +
+          '<div id="ocDtMonth" style="font-weight:700;font-size:15px;"></div>' +
+          '<button type="button" id="ocDtNext" style="'+navStyle+'">›</button>' +
+        '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:4px;font-size:11px;color:#9db0a3;text-align:center;">' + DOW.map(function(d){ return '<div>'+d+'</div>'; }).join('') + '</div>' +
+        '<div id="ocDtGrid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px;"></div>' +
+        '<div style="display:flex;align-items:center;gap:10px;margin-top:14px;">' +
+          '<span style="font-size:13px;color:#cfe6d5;white-space:nowrap;">🕐 Time</span>' +
+          '<input type="time" id="ocDtTime" style="flex:1;padding:10px;font-size:16px;background:#1a2116;border:1px solid #46532f;border-radius:9px;color:#eae4cf;" />' +
+        '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">' +
+          '<button type="button" id="ocDtCancel" style="background:transparent;border:1px solid #46532f;color:#cfc9ad;border-radius:9px;padding:10px 14px;font-size:14px;cursor:pointer;">Cancel</button>' +
+          '<button type="button" id="ocDtSave" style="background:#4A9E4F;border:none;color:#fff;border-radius:9px;padding:10px 20px;font-size:14px;font-weight:700;cursor:pointer;">Save</button>' +
         '</div>';
+      back.appendChild(card);
       document.body.appendChild(back);
-      var input = back.querySelector('#oc-dt-input');
-      input.value = dateTimeToLocalInputValue(ms || Date.now());
+
+      var timeInput = card.querySelector('#ocDtTime');
+      timeInput.value = pad(sel.getHours()) + ':' + pad(sel.getMinutes());
+
+      function renderCal(){
+        card.querySelector('#ocDtMonth').textContent = MONTHS[viewMonth] + ' ' + viewYear;
+        var grid = card.querySelector('#ocDtGrid'); grid.innerHTML = '';
+        var startDow = new Date(viewYear, viewMonth, 1).getDay();
+        var daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+        var today = new Date(); today.setHours(0,0,0,0);
+        for (var i = 0; i < startDow; i++){ grid.appendChild(document.createElement('div')); }
+        for (var d = 1; d <= daysInMonth; d++){
+          (function(day){
+            var isSel = (day === sel.getDate() && viewMonth === sel.getMonth() && viewYear === sel.getFullYear());
+            var isToday = new Date(viewYear, viewMonth, day).getTime() === today.getTime();
+            var cell = document.createElement('button');
+            cell.type = 'button'; cell.textContent = day;
+            cell.style.cssText = 'padding:9px 0;font-size:14px;border-radius:8px;cursor:pointer;border:1px solid ' + (isToday && !isSel ? '#5a6b3a' : 'transparent') + ';background:' + (isSel ? '#4A9E4F' : 'transparent') + ';color:' + (isSel ? '#fff' : '#eae4cf') + ';font-weight:' + (isSel ? '700' : '400') + ';';
+            cell.addEventListener('click', function(){ sel.setFullYear(viewYear, viewMonth, day); renderCal(); });
+            grid.appendChild(cell);
+          })(d);
+        }
+      }
+      card.querySelector('#ocDtPrev').addEventListener('click', function(){ viewMonth--; if (viewMonth < 0){ viewMonth = 11; viewYear--; } renderCal(); });
+      card.querySelector('#ocDtNext').addEventListener('click', function(){ viewMonth++; if (viewMonth > 11){ viewMonth = 0; viewYear++; } renderCal(); });
+      renderCal();
+
       function done(val){ if (back.parentNode) back.parentNode.removeChild(back); resolve(val); }
-      back.querySelector('#oc-dt-cancel').addEventListener('click', function(){ done(null); });
-      back.querySelector('#oc-dt-save').addEventListener('click', function(){
-        if (!input.value){ done(null); return; }
-        var t = new Date(input.value).getTime();
-        done(isNaN(t) ? null : t);
+      card.querySelector('#ocDtCancel').addEventListener('click', function(){ done(null); });
+      card.querySelector('#ocDtSave').addEventListener('click', function(){
+        var parts = (timeInput.value || '00:00').split(':');
+        var out = new Date(sel);
+        out.setHours(parseInt(parts[0], 10) || 0, parseInt(parts[1], 10) || 0, 0, 0);
+        done(out.getTime());
       });
       back.addEventListener('click', function(e){ if (e.target === back) done(null); });
     });
