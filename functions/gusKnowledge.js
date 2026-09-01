@@ -76,8 +76,8 @@ is per-camera in the list (deploy-camera points there → tap "📍 Deploy here"
 points at Scan Register.
 Tools menu items: photo-gallery, solunar (Solunar Table), journal (Hunt Journal), import
 (Import from other apps), export.
-Sites-folder category tabs (points token 'trails' at the Trails tab): 🎯 Stands, 📷 Cameras,
-🌾 Feeding, 🅿 Parking, 🥾 Trails, 📌 Other (fishing: 🎣 Spots, ⛵ Access, 🪱 Bait, 🥾 Trails, 📌 Other).
+Sites-folder category tabs (text labels; points token 'trails' at the Trails tab): Stands, Cameras,
+Feeding, Parking, Trails, Other (fishing: Spots, Access, Bait, Trails, Other).
 Each shows a live count; pick one and the list follows. (Trails moved OUT of Tools & Data to this tab.)
 Top toolbar / map: property-lines (the 📐 button), layers (the ⛰ Layers pill), wind (the 💨 button),
 compass, map-display (opens the show/hide pins tray), quick-log (the orange + Quick Log),
@@ -330,11 +330,11 @@ don't pick a Property it auto-links to the farm it sits inside).
 HOW TO add a site where you're standing: LEFT PANEL -> "📍 My Location" grabs a fresh GPS fix and
 opens Add Site right there; fill Name/Type and Save Site.
 HOW TO find a site in your list: on the SITES folder the list is split into category tabs across the
-top — 🎯 Stands, 📷 Cameras, 🌾 Feeding, 🅿 Parking, 🥾 Trails, 📌 Other (fishing: 🎣 Spots, ⛵ Access,
-🪱 Bait, 🥾 Trails, 📌 Other). Each tab shows a COUNT so you can see at a glance how many stands, cameras
-or trails this farm has. Tap a tab and the list below shows just that kind. Everything follows the farm
-picked at the very top, so the counts are per-farm. Tap a row to ring that pin on the map (then Move or
-Delete it from the row). Bedding and Water live under 📌 Other; 🥾 Trails is your access paths & routes.
+top — Stands, Cameras, Feeding, Parking, Trails, Other (fishing: Spots, Access, Bait, Trails, Other).
+Each tab shows a COUNT so you can see at a glance how many stands, cameras or trails this farm has. Tap
+a tab and the list below shows just that kind. Everything follows the farm picked at the very top, so
+the counts are per-farm. Tap a row to ring that pin on the map (then Move or Delete it from the row).
+Bedding and Water live under Other; Trails is your access paths & routes.
 HOW TO record a trail as you walk: 1) Tap the ⚫ Record Trail button (left side of the map, above 🧭
 Follow Me). 2) Walk it — a live line and distance/time show. 3) Tap ⚫ again to stop. 4) Name it, pick
 a Type (Access Trail / Boat Route / Game Trail / Custom), color, and line style (Solid/Dashed/Dotted).
