@@ -246,6 +246,7 @@
     #actions .btn-primary, #cameraToolbar .btn-primary, #cameraToolbar .btn-ghost{ font-size:16px; padding:16px 10px; }
 
     .tab-btn{ font-size:16px; padding:15px 0; }
+    #filters #showMapBtn{ display:inline-flex; }   /* phone: the list is primary; this hops to the map (specificity beats the base display:none defined later in the file) */
     .flabel{ font-size:13.5px; }
     .chip{ font-size:14.5px; padding:9px 14px; }
 
@@ -433,8 +434,12 @@
   }
   .btn-ghost:hover{color:var(--text);border-color:var(--text-dim);}
 
-  /* The date filter sits inside the green folder body (Sites & Log only). */
+  /* The date filter sits inside the green folder body (Sites & Log only), with a compact "Show Map"
+     button to its right on phones (the list is primary there; the map is a deliberate tap away). */
   #filters{
+    display:flex;
+    align-items:stretch;
+    gap:6px;
     padding:8px 8px 4px;
   }
   #filters .flabel{
@@ -445,7 +450,8 @@
     margin-bottom:8px;
   }
   #dateFilterBtn{
-    width:100%;
+    flex:1 1 auto;
+    min-width:0;
     background:#1c3327;
     border:1px solid #3c6d42;
     color:#cfe6d5;
@@ -453,7 +459,24 @@
     padding:8px 10px;
     border-radius:6px;
     text-align:left;
+    white-space:normal;
+    line-height:1.25;
   }
+  /* Phone only — on desktop the map is always visible beside the list, so this would be redundant. */
+  #showMapBtn{
+    display:none;
+    flex:0 0 auto;
+    align-items:center;
+    background:#2E4636;
+    border:1px solid #4a7d53;
+    color:#eaf7ee;
+    font-size:12px;
+    font-weight:600;
+    padding:8px 12px;
+    border-radius:6px;
+    white-space:nowrap;
+  }
+  #showMapBtn:active{ background:#3a5a44; }
   /* Lit up when a range is actually on, so you never forget the list is being trimmed. */
   #dateFilterBtn.filtered{
     background:var(--accent);
@@ -2074,7 +2097,9 @@
       <!-- The date filter lives INSIDE the folder — it only shows on Sites & Log (the two lists it
            actually trims); hidden on Cameras & Analytics. Lights up when a range is on. -->
       <div id="filters">
-        <button id="dateFilterBtn">📅 Dates: <span id="dateFilterLabel">All Time</span></button>
+        <button id="dateFilterBtn">🔍 Filter — Date range: <span id="dateFilterLabel">All Time</span></button>
+        <!-- Phone only: the list is what you're working; tap to hop over to the map when YOU want it. -->
+        <button id="showMapBtn" title="Show these on the map">🗺 Show Map</button>
       </div>
 
       <div id="cameraToolbar" style="display:none;">
@@ -2173,7 +2198,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 571</div>
+    <div id="buildBadge">BUILD 572</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10510,16 +10535,26 @@
     renderActiveList();
   }
 
+  // Leaving the date-range picker on a phone should drop you back into the LIST you were filtering —
+  // NOT out to the map. (Opening the picker closes the sidebar drawer via closeAllModals; this puts it
+  // back.) On desktop the list is always visible, so this is a no-op there.
+  function reopenListOnPhone(){ if (window.innerWidth <= 820 && typeof openSidebar === 'function') openSidebar(); }
+
   document.getElementById('dateFilterBtn').addEventListener('click', function(){
     closeAllModals();
     document.getElementById('dateFilterModalBackdrop').classList.add('show');
   });
   document.getElementById('dateFilterClose').addEventListener('click', function(){
     document.getElementById('dateFilterModalBackdrop').classList.remove('show');
+    reopenListOnPhone();
   });
   document.getElementById('dateFilterModalBackdrop').addEventListener('click', function(e){
-    if (e.target === this) this.classList.remove('show');
+    if (e.target === this){ this.classList.remove('show'); reopenListOnPhone(); }
   });
+
+  // "🗺 Show Map" (phone only) — the deliberate hop from the list out to the map.
+  var _showMapBtn = document.getElementById('showMapBtn');
+  if (_showMapBtn) _showMapBtn.addEventListener('click', function(){ if (typeof closeSidebar === 'function') closeSidebar(); });
 
   document.querySelectorAll('.date-preset-btn').forEach(function(btn){
     btn.addEventListener('click', function(){
@@ -10533,6 +10568,7 @@
         setDateFilter({from: from, to: to, label: 'Last ' + days + ' Days'});
       }
       document.getElementById('dateFilterModalBackdrop').classList.remove('show');
+      reopenListOnPhone();
     });
   });
 
@@ -10552,6 +10588,7 @@
     var label = fromStr + ' to ' + toStr;
     setDateFilter({from: from, to: to, label: label});
     document.getElementById('dateFilterModalBackdrop').classList.remove('show');
+    reopenListOnPhone();
   });
 
   function passesDateFilter(timestamp){
