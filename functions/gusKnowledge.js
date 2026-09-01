@@ -398,8 +398,13 @@ you pick which, or "New spot." On fresh ground it just drops a spot; name it whe
 HOW TO name a camera spot later: a fresh drop starts unnamed (shown by the camera + date). When you're
 ready, Cameras tab -> that camera's row -> "✏ Name spot" -> type a name (e.g. "Oak Flat"). From then on
 GPS recognizes that place and offers it next time you deploy nearby.
-HOW TO move a camera: undeploy it at the old spot (or just Deploy here at the new one — the old
-deployment closes automatically) — every past spot is kept forever in Deployment History.
+HOW TO move a deployed camera to the right spot (e.g. you registered it from the computer at home, so
+"Deploy here" dropped it at the house): Cameras tab -> that camera's row -> "🗺 Map". A little map opens
+centered on where it thinks the camera is — drag/recenter it to the REAL spot and Save. The camera pin
+(and its deployment record) move to the right place. (You can also undeploy at the old spot and Deploy
+here at the new one — the old deployment closes automatically; every past spot is kept in History.)
+HOW TO fix a camera's deploy date/time (adding yesterday's cameras today): Cameras tab -> that camera's
+row -> "📅 Date" -> pick the real date and time it went out -> Save.
 HOW TO undeploy (pick up) a camera: Cameras tab -> the camera's row -> tap "Undeploy". One tap — it
 stamps the pickup date, frees the camera to redeploy, and keeps the spot on the map (no re-registration).
 HOW TO see deployment history: Cameras tab -> the camera's row -> "📜 History" (date/GPS/weather/moon
