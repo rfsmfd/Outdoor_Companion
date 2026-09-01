@@ -2325,7 +2325,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 588</div>
+    <div id="buildBadge">BUILD 589</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18457,6 +18457,20 @@
     var s = sites.filter(function(x){ return x.id === pendingRepositionSiteId; })[0];
     if (s){
       s.lat = lat; s.lng = lng; s.lastActivityAt = Date.now();
+      // The spot may now sit inside a farm it wasn't linked to — a camera registered from home lands at
+      // the house (no farm), so after you move it ONTO the property it must re-attach, or the property
+      // filter keeps it hidden when that farm is selected (founder: camera 17 didn't show after moving).
+      // Reassign whenever the new location lands inside a farm; if it's outside every farm, leave it as-is.
+      try {
+        var _farm = (typeof farmForPoint === 'function') ? farmForPoint(lat, lng) : null;
+        // Prefer the farm the point actually falls inside; else, if it isn't linked to any farm yet and
+        // you're viewing a specific farm, attach it to that one (covers farms without a drawn boundary).
+        var _fid = (_farm && _farm.id) ? _farm.id : ((!s.propertyId && typeof activePropertyId !== 'undefined' && activePropertyId) ? activePropertyId : null);
+        if (_fid && _fid !== s.propertyId){
+          s.propertyId = _fid;
+          if (typeof autoShareToPropertyGroups === 'function') { try { autoShareToPropertyGroups('site', s.id, s.propertyId); } catch(e2){} }
+        }
+      } catch(e){}
       try { await saveSite(s); } catch (e) { console.error('Outdoor Companion: failed to save moved stand', e); }
       // If a camera is deployed here, keep its OPEN deployment's coords in sync with the moved spot
       // (a camera registered from home lands at the wrong GPS; moving the spot corrects the record too).
