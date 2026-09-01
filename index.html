@@ -2325,7 +2325,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 589</div>
+    <div id="buildBadge">BUILD 590</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -10716,7 +10716,32 @@
 
   function passesPropertyFilter(site){
     if (!activePropertyId) return true; // "All Properties" selected
-    return site.propertyId === activePropertyId;
+    if (site.propertyId === activePropertyId) return true;
+    // Recognize a pin that physically sits INSIDE the selected farm's boundary even if it isn't tagged to
+    // it yet — a camera deployed from home lands unattached, and it should show the moment it's on the
+    // ground inside Holt Farm, not only after a manual move (founder). Only for UNTAGGED sites, so a pin
+    // that belongs to a DIFFERENT farm is never shown here by mistake.
+    if (!site.propertyId && typeof site.lat === 'number'){
+      var _p = (typeof properties !== 'undefined' ? properties : []).filter(function(x){ return x.id === activePropertyId; })[0];
+      if (_p && typeof pointInProperty === 'function' && pointInProperty(site.lat, site.lng, _p)) return true;
+    }
+    return false;
+  }
+  // Data self-heal: stamp the farm onto any UNTAGGED site that falls inside a farm's boundary, so it's
+  // permanently attached (per-farm counts/analytics see it, and it survives the "All Properties" view too).
+  // Runs once after data loads, and whenever cameras/sites are deployed or moved. Cheap: only untagged sites.
+  function autoAttachUntaggedSites(){
+    var changed = [];
+    (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
+      if (!s || s.propertyId || typeof s.lat !== 'number') return;
+      var f = (typeof farmForPoint === 'function') ? farmForPoint(s.lat, s.lng, s.module) : null;
+      if (f && f.id){ s.propertyId = f.id; changed.push(s); }
+    });
+    changed.forEach(function(s){
+      saveSite(s).catch(function(e){ console.error('Outdoor Companion: auto-attach save failed', e); });
+      if (typeof autoShareToPropertyGroups === 'function'){ try { autoShareToPropertyGroups('site', s.id, s.propertyId); } catch(e){} }
+    });
+    return changed.length;
   }
 
   // Which camera SITES have any photos attached — so a camera dot reads SOLID (pictures here) vs HOLLOW
@@ -18655,6 +18680,7 @@
     await loadDeployments();
     await loadProperties();
     await migratePropertyModules();   // stamp a module on any legacy property missing one (sites → name → default)
+    try { autoAttachUntaggedSites(); } catch (e) {}   // claim any untagged pin that sits inside a farm boundary
     await loadHuntEvents();
     await loadTrails();
     try { await loadSavedQueries(); await seedStarterTemplates(); } catch (e) {}
