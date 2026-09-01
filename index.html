@@ -141,6 +141,20 @@
     display:flex;align-items:center;justify-content:center;
     box-shadow:0 2px 6px rgba(0,0,0,0.4);
   }
+
+  /* 🔍 Magnifier placement overlay (crosshair + loupe + bar). Positions are set in JS from the map rect. */
+  #magOverlay{ position:fixed; inset:0; z-index:2650; pointer-events:none; }
+  #magCrosshair{ position:fixed; transform:translate(-50%,-50%); pointer-events:none; filter:drop-shadow(0 1px 2px rgba(0,0,0,.65)); }
+  #magLoupe{ position:fixed; width:132px; height:132px; border-radius:50%; overflow:hidden; border:3px solid #fff; box-shadow:0 4px 16px rgba(0,0,0,.55); pointer-events:none; background:#111; }
+  #magLoupe #magLoupeMap{ width:100%; height:100%; }
+  #magLoupe::after{ content:''; position:absolute; left:50%; top:50%; width:16px; height:16px; margin:-8px 0 0 -8px; border:2px solid #FF6A13; border-radius:50%; box-shadow:0 0 0 1px rgba(0,0,0,.45); pointer-events:none; }
+  #magBar{ position:fixed; left:50%; bottom:28px; transform:translateX(-50%); display:flex; align-items:center; gap:9px; background:rgba(20,30,22,.96); border:1px solid #3c6d42; border-radius:14px; padding:9px 12px; box-shadow:0 6px 22px rgba(0,0,0,.55); pointer-events:auto; max-width:94vw; }
+  #magBar #magLabel{ color:#cfe6d5; font-size:12.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #magBar button{ font-size:14px; font-weight:700; border-radius:10px; padding:10px 14px; cursor:pointer; border:none; white-space:nowrap; flex:0 0 auto; }
+  #magBar #magHereBtn{ background:#4A9E4F; color:#fff; }
+  #magBar #magCancelBtn{ background:transparent; color:#cfc9ad; border:1px solid #46532f; }
+  #magBar #magGpsBtn{ background:#1c3327; color:#cfe6d5; border:1px solid #3c6d42; font-weight:600; }
+
   .display-tray-section{ margin-bottom:22px; }
   .display-tray-section-title{
     font-family:'Oswald',sans-serif;
@@ -2287,9 +2301,31 @@
     <button id="windToggleBtn" title="Show wind direction">💨</button>
     <div id="windInfoLabel"></div>
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
+
+    <!-- 🔍 Magnifier placement: a crosshair on the FULL main map (all your features visible) + a zoomed
+         loupe. Pan the map so the crosshair sits on the exact spot, then tap "📍 Here". -->
+    <div id="magOverlay" style="display:none;">
+      <div id="magCrosshair" aria-hidden="true">
+        <svg width="54" height="54" viewBox="0 0 54 54">
+          <circle cx="27" cy="27" r="12" fill="none" stroke="#FF6A13" stroke-width="3"/>
+          <circle cx="27" cy="27" r="2.5" fill="#FF6A13"/>
+          <line x1="27" y1="0" x2="27" y2="13" stroke="#FF6A13" stroke-width="3"/>
+          <line x1="27" y1="41" x2="27" y2="54" stroke="#FF6A13" stroke-width="3"/>
+          <line x1="0" y1="27" x2="13" y2="27" stroke="#FF6A13" stroke-width="3"/>
+          <line x1="41" y1="27" x2="54" y2="27" stroke="#FF6A13" stroke-width="3"/>
+        </svg>
+      </div>
+      <div id="magLoupe"><div id="magLoupeMap"></div></div>
+      <div id="magBar">
+        <span id="magLabel">Pan to the spot, then tap Here</span>
+        <button id="magGpsBtn" type="button" title="Type exact GPS coordinates">⌖ GPS</button>
+        <button id="magCancelBtn" type="button">Cancel</button>
+        <button id="magHereBtn" type="button">📍 Here</button>
+      </div>
+    </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 587</div>
+    <div id="buildBadge">BUILD 588</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -18198,18 +18234,15 @@
     });
   }
 
-  // Paint YOUR features onto the confirm/move mini-map so you can line up the exact spot against your own
-  // ground — property lines, trails/roads, and the other site pins — instead of a bare satellite tile
-  // (founder). Re-drawn each time the picker opens.
-  var logLocOverlay = null;
-  function renderLogLocationOverlay(){
-    if (!logLocationMap) return;
-    if (!logLocOverlay) logLocOverlay = L.layerGroup().addTo(logLocationMap);
-    logLocOverlay.clearLayers();
+  // Paint YOUR features (property lines, trails/roads, other site pins) into a layer group on any map, so
+  // a placement view isn't a bare satellite tile and you can line the crosshair up against your own ground.
+  function drawFeatureOverlay(group, skipSiteId, dotR){
+    if (!group) return;
+    group.clearLayers();
     try {
       (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
         if (p && p.boundary && p.boundary.length >= 3){
-          try { L.polygon(p.boundary, { color:'#E8B04B', weight:2, opacity:0.85, fill:false, interactive:false }).addTo(logLocOverlay); } catch(e){}
+          try { L.polygon(p.boundary, { color:'#E8B04B', weight:2, opacity:0.85, fill:false, interactive:false }).addTo(group); } catch(e){}
         }
       });
       (typeof trails !== 'undefined' ? trails : []).forEach(function(t){
@@ -18218,18 +18251,80 @@
           L.polyline(t.points.map(function(pt){ return [pt.lat, pt.lng]; }), {
             color: t.color || '#7A8A94', weight: 3, opacity: 0.9,
             dashArray: (typeof lineStyleToDashArray === 'function' ? lineStyleToDashArray(t.lineStyle) : null), interactive:false
-          }).addTo(logLocOverlay);
+          }).addTo(group);
         } catch(e){}
       });
       (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
         if (!s || typeof s.lat !== 'number') return;
-        if (s.id === pendingRepositionSiteId) return;   // don't draw the very spot you're moving
+        if (skipSiteId && s.id === skipSiteId) return;   // don't draw the very spot you're moving
         if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type, true)) return;
         var ty = (typeof getActiveTypes === 'function' ? getActiveTypes()[s.type] : null) || { color:'#9aa' };
-        try { L.circleMarker([s.lat, s.lng], { radius:5, color:'#0b120c', weight:1, fillColor: ty.color, fillOpacity:0.95, interactive:false }).addTo(logLocOverlay); } catch(e){}
+        try { L.circleMarker([s.lat, s.lng], { radius: dotR || 5, color:'#0b120c', weight:1, fillColor: ty.color, fillOpacity:0.95, interactive:false }).addTo(group); } catch(e){}
       });
-    } catch(e){ console.error('Outdoor Companion: log-location overlay failed', e); }
+    } catch(e){ console.error('Outdoor Companion: feature overlay failed', e); }
   }
+  var logLocOverlay = null;
+  function renderLogLocationOverlay(){
+    if (!logLocationMap) return;
+    if (!logLocOverlay) logLocOverlay = L.layerGroup().addTo(logLocationMap);
+    drawFeatureOverlay(logLocOverlay, pendingRepositionSiteId, 5);
+  }
+
+  // ---------- 🔍 Magnifier placement (crosshair loupe on the FULL main map) ----------
+  // A crosshair pinned to the main map's center + a zoomed loupe showing that exact spot, over the real,
+  // fully-featured map. Pan the map so the crosshair sits on the spot, then "📍 Here". (Founder's idea.)
+  var magLoupeMap = null, magLoupeOverlay = null, magActive = false, magOnHere = null, magSkipSiteId = null, magMoveHandler = null;
+  function positionMagChrome(){
+    try {
+      var r = map.getContainer().getBoundingClientRect();
+      var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+      var xh = document.getElementById('magCrosshair'); if (xh){ xh.style.left = cx + 'px'; xh.style.top = cy + 'px'; }
+      var lp = document.getElementById('magLoupe'); if (lp){ lp.style.left = (cx - 66) + 'px'; lp.style.top = (r.top + 14) + 'px'; }
+    } catch(e){}
+  }
+  function updateMagLoupe(){
+    if (!magLoupeMap) return;
+    try { magLoupeMap.setView(map.getCenter(), Math.min(map.getZoom() + 2, 22), { animate:false }); } catch(e){}
+  }
+  function renderMagLoupeOverlay(){ if (magLoupeOverlay) drawFeatureOverlay(magLoupeOverlay, magSkipSiteId, 6); }
+  function enterMagnifier(lat, lng, zoom, label, onHere, skipSiteId){
+    magActive = true; magOnHere = onHere; magSkipSiteId = skipSiteId || null;
+    var lbl = document.getElementById('magLabel'); if (lbl) lbl.textContent = label || 'Pan to the spot, then tap Here';
+    document.getElementById('magOverlay').style.display = 'block';
+    try { map.closePopup(); } catch(e){}
+    map.setView([lat, lng], zoom || Math.max(map.getZoom(), 18));
+    positionMagChrome();
+    if (!magLoupeMap){
+      magLoupeMap = L.map('magLoupeMap', { zoomControl:false, attributionControl:false, dragging:false, touchZoom:false, scrollWheelZoom:false, doubleClickZoom:false, boxZoom:false, keyboard:false, zoomSnap:0, zoomAnimation:false, fadeAnimation:false });
+      L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom:22 }).addTo(magLoupeMap);
+      magLoupeOverlay = L.layerGroup().addTo(magLoupeMap);
+    }
+    setTimeout(function(){ try { magLoupeMap.invalidateSize(); } catch(e){} updateMagLoupe(); renderMagLoupeOverlay(); }, 60);
+    magMoveHandler = function(){ positionMagChrome(); updateMagLoupe(); };
+    map.on('move', magMoveHandler);
+    map.on('moveend', renderMagLoupeOverlay);
+    window.addEventListener('resize', positionMagChrome);
+  }
+  function exitMagnifier(){
+    magActive = false; magOnHere = null; magSkipSiteId = null;
+    var ov = document.getElementById('magOverlay'); if (ov) ov.style.display = 'none';
+    if (magMoveHandler){ map.off('move', magMoveHandler); map.off('moveend', renderMagLoupeOverlay); magMoveHandler = null; }
+    window.removeEventListener('resize', positionMagChrome);
+  }
+  (function(){
+    var here = document.getElementById('magHereBtn'), cancel = document.getElementById('magCancelBtn'), gps = document.getElementById('magGpsBtn');
+    if (here) here.addEventListener('click', function(){ var c = map.getCenter(); var cb = magOnHere; exitMagnifier(); if (cb) cb({ lat: c.lat, lng: c.lng }); });
+    if (cancel) cancel.addEventListener('click', exitMagnifier);
+    if (gps) gps.addEventListener('click', function(){
+      var v = prompt('Type exact GPS as  lat, lng');
+      if (v == null) return;
+      var m = v.match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
+      if (!m){ showToast('Enter coordinates as "lat, lng".'); return; }
+      var lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180){ showToast('Those coordinates look off.'); return; }
+      map.setView([lat, lng], Math.max(map.getZoom(), 18));
+    });
+  })();
 
   var pendingRepositionObsId = null; // null = the crosshair modal is creating a new sighting; set = it's repositioning this existing one
 
@@ -18350,15 +18445,13 @@
     pendingLogType = null; _logBuckId = null; _showLogBuckRow(null);
     _logDir = null; _showLogDirRow(null);
     var tl = getActiveTypes()[s.type];
-    document.getElementById('logLocationTypeName').textContent = 'Move ' + (tl ? tl.label : 'Stand');
-    logLocationPos = {lat: s.lat, lng: s.lng};
-    document.getElementById('logLocationCoords').textContent = fmtCoord(s.lat) + ', ' + fmtCoord(s.lng);
-    document.getElementById('logLocationPropertyList').style.display = 'none';
-    map.closePopup();
+    // Move it with the magnifier on the FULL main map (all your features) — pan the crosshair onto the
+    // real spot (or ⌖ GPS for exact coords) and tap "📍 Here". On phones, drop the panel to show the map.
     closeAllModals();
-    document.getElementById('logLocationModalBackdrop').classList.add('show');
-    ensureLogLocationMap();
-    setTimeout(function(){ logLocationMap.invalidateSize(); logLocationMap.setView([s.lat, s.lng], 18); renderLogLocationOverlay(); }, 50);
+    if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();
+    enterMagnifier(s.lat, s.lng, Math.max(map.getZoom(), 18), 'Move ' + (tl ? tl.label : 'spot') + ' — pan to the spot', function(c){
+      applyRepositionedSite(c.lat, c.lng);
+    }, siteId);
   }
   async function applyRepositionedSite(lat, lng){
     var s = sites.filter(function(x){ return x.id === pendingRepositionSiteId; })[0];

@@ -399,11 +399,12 @@ HOW TO name a camera spot later: a fresh drop starts unnamed (shown by the camer
 ready, Cameras tab -> that camera's row -> "✏ Name spot" -> type a name (e.g. "Oak Flat"). From then on
 GPS recognizes that place and offers it next time you deploy nearby.
 HOW TO move a deployed camera to the right spot (e.g. you registered it from the computer at home, so
-"Deploy here" dropped it at the house): Cameras tab -> that camera's row -> "🗺 Map". A little map opens
-centered on where it thinks the camera is — and it now shows YOUR features (property lines, trails/roads,
-other pins) so you can line up against your own ground. Pan the crosshair onto the REAL spot and Confirm.
-For pinpoint accuracy you can paste exact GPS as "lat, lng" in the box and tap Go. The camera pin (and
-its deployment record) move to the right place. (You can also undeploy at the old spot and Deploy
+"Deploy here" dropped it at the house): Cameras tab -> that camera's row -> "🗺 Map". The FULL map opens
+with an orange CROSSHAIR pinned to where it thinks the camera is, plus a little zoomed MAGNIFIER loupe.
+Pan/drag the map so the crosshair sits on the REAL spot (all your features — property lines, trails,
+pins — are right there to line up against), then tap "📍 Here". For pinpoint accuracy tap "⌖ GPS" and
+type exact "lat, lng". The camera pin AND its deployment record move to the right place. (Same crosshair
+magnifier is how you Move a stand from the Sites list.) (You can also undeploy at the old spot and Deploy
 here at the new one — the old deployment closes automatically; every past spot is kept in History.)
 HOW TO fix a camera's deploy date/time (adding yesterday's cameras today): Cameras tab -> that camera's
 row -> "📅 Date" -> pick the real date and time it went out -> Save.
