@@ -357,6 +357,13 @@ for named bucks seen, optionally mark a harvest/shot + note, Save. (If you Quick
 sit, counts pre-fill — just top up; it saves only the difference.)
 HOW TO open the Journal: LEFT PANEL -> "📋 Hunt Journal" (Fish Journal in fishing). Sessions group by
 day, newest first; use the All Time / This Week / This Month / Custom filters; tap a row to expand.
+HOW TO filter your map & lists by date: the four tabs (Sites / Log / Cameras / Analytics) sit like
+file folders below your buttons — the folder you're in turns a brighter green so you know where you
+are. On the SITES and LOG folders there's a "📅 Dates" button at the top of the list. Tap it and pick
+a window (Last 3 Days / Last 7 Days / Past Month / Past Year / Custom) to show only recent stuff, or
+"All Time" to see everything. When a range is ON the button lights up ORANGE so you can't forget your
+list is trimmed — set it back to All Time to bring the older pins/entries back. It only trims Sites &
+Log; Cameras and Analytics aren't affected (that's why the button doesn't show on those two folders).
 HOW TO fix a hunt's times: in the Journal, tap "Set End Time" on an in-progress session, or "fix
 start time" on any row, and enter the real time in the picker.
 
