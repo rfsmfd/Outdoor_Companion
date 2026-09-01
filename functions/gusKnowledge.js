@@ -353,13 +353,19 @@ HOW TO register a camera: point your phone's NORMAL Camera app at the printed QR
 -> "🏷 Register / Edit Details" -> fill Name/Make/Model/Notes -> "Save Details". (The "🏷 Register
 Camera" button on the Cameras tab just reminds you to use the phone's camera, with an in-app scanner
 fallback.)
-HOW TO deploy a camera: scan its tag (or "📷 Deploy Camera" on the Cameras tab) -> "📷 Deploy Here
-(use my GPS)" -> pick an existing place or drop & name a new spot -> pan the orange crosshair to the
-exact spot -> "Lock In Deployment".
-HOW TO move a camera: physically move it, scan the same tag again, "📷 Deploy Here" and deploy — the
-old spot is kept forever in Deployment History automatically (no un-deploy step).
-HOW TO pick up a camera: Cameras tab -> the camera's row -> "Pick Up" -> confirm. It ends the
-deployment, drops the live pin, and leaves the camera ready to redeploy (no re-registration).
+HOW TO deploy a camera (the easy field way): Cameras tab -> find the camera in your list -> tap the
+green "📍 Deploy here". That's it — it grabs your GPS, drops the spot right where you're standing, and
+marks it deployed. No scanning, no map, and it works with NO signal (GPS needs no bars). You only ever
+scan a tag ONCE, at first setup (Register). If you're within ~25 yards of a spot you've NAMED before, it
+offers it (or shows several if more than one's close) so you can reuse that place and keep its history —
+you pick which, or "New spot." On fresh ground it just drops a spot; name it whenever you like (see below).
+HOW TO name a camera spot later: a fresh drop starts unnamed (shown by the camera + date). When you're
+ready, Cameras tab -> that camera's row -> "✏ Name spot" -> type a name (e.g. "Oak Flat"). From then on
+GPS recognizes that place and offers it next time you deploy nearby.
+HOW TO move a camera: undeploy it at the old spot (or just Deploy here at the new one — the old
+deployment closes automatically) — every past spot is kept forever in Deployment History.
+HOW TO undeploy (pick up) a camera: Cameras tab -> the camera's row -> tap "Undeploy". One tap — it
+stamps the pickup date, frees the camera to redeploy, and keeps the spot on the map (no re-registration).
 HOW TO see deployment history: Cameras tab -> the camera's row -> "📜 History" (date/GPS/weather/moon
 per spot, permanent); "View on Map" shows a dashed-yellow marker at that old spot.
 HOW TO batch-generate QR tags: Cameras tab -> "🖶 Batch Generate QR Codes" (ONLY for brand-new

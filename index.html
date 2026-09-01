@@ -261,9 +261,11 @@
 
     .cam-qr-thumb{ width:54px; height:54px; }
     .cam-qr-thumb img{ width:50px; height:50px; }
-    .cam-meta .nm{ font-size:18px; }
-    .cam-meta .st{ font-size:14.5px; }
-    .cam-actions button{ font-size:15px; padding:11px 14px; }
+    /* Bigger, higher-contrast in the field — readable squinting into the sun with gloves on. */
+    .cam-meta .nm{ font-size:21px; font-weight:700; }
+    .cam-meta .st{ font-size:16.5px; }
+    .cam-meta .st.deployed{ font-weight:600; }
+    .cam-actions button{ font-size:16.5px; padding:14px 18px; font-weight:600; }
 
     #gps-status, #gps-readout{ font-size:14.5px; padding:14px 16px; }
     .empty{ font-size:16.5px !important; padding:32px 18px !important; }
@@ -2087,7 +2089,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 564</div>
+    <div id="buildBadge">BUILD 565</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -22160,7 +22162,102 @@
     try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: failed to save camera after pickup', e); }
     renderCameraList();
     renderAll(); // the place stays on the map, but its marker drops from a camera icon to a plain dot
-    showToast(cam.name + ' marked as picked up');
+    showToast(cam.name + ' undeployed');
+  }
+
+  // One-tap FIELD deploy: drop the camera at your CURRENT GPS — no scan, no map, works with NO signal
+  // (GPS needs no bars; the save queues offline). If you're within ~25 yd of a spot you've NAMED before,
+  // it OFFERS those (you pick which, or new) so a re-hung camera keeps that place's history; on new ground
+  // it just drops a fresh spot you can name later. Weather stamps in afterward, non-blocking.
+  async function deployCameraHere(cam, btn){
+    var origLabel = btn ? btn.textContent : '';
+    if (btn){ btn.disabled = true; btn.textContent = '📍 Getting GPS…'; }
+    var pos = await new Promise(function(resolve){
+      if (!navigator.geolocation){ resolve(null); return; }
+      navigator.geolocation.getCurrentPosition(
+        function(p){ resolve({ lat:p.coords.latitude, lng:p.coords.longitude, accuracy:p.coords.accuracy }); },
+        function(){ resolve(null); },
+        { enableHighAccuracy:true, timeout:8000, maximumAge:10000 }
+      );
+    });
+    if (btn){ btn.disabled = false; btn.textContent = origLabel; }
+    if (pos){ lastKnownPos = pos; }
+    else { pos = lastKnownPos || (function(){ var c = map.getCenter(); return { lat:c.lat, lng:c.lng, accuracy:null }; })(); }
+    if (!pos || pos.lat == null){ showToast('No GPS fix yet — try again in a moment.'); return; }
+
+    // Only NAMED camera spots (real places you've named) are offered — unnamed quick-drops stay quiet.
+    // (Existing/older spots have no autoNamed flag → treated as named, which is right.)
+    var named = [];
+    sites.filter(function(s){ return s.type === 'camera' && !s.autoNamed && s.name; }).forEach(function(s){
+      var dM = distMeters(pos.lat, pos.lng, s.lat, s.lng);
+      if (dM != null && dM <= 23){ named.push({ site:s, d:dM }); }   // ~23m ≈ 25 yards
+    });
+    named.sort(function(a,b){ return a.d - b.d; });
+
+    if (named.length){ showDeploySpotChooser(cam, pos, named); }
+    else { finishDeploy(cam, null, pos); }
+  }
+
+  // You're near known named spot(s) — reuse one, or drop a new spot. Shows all in range.
+  function showDeploySpotChooser(cam, pos, named){
+    var ex = document.getElementById('oc-deploy-chooser'); if (ex) ex.parentNode.removeChild(ex);
+    var yd = function(m){ return Math.round(m * 1.09361); };
+    var bd = document.createElement('div'); bd.id = 'oc-deploy-chooser';
+    bd.style.cssText = 'position:fixed;inset:0;z-index:100040;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
+    var rows = named.map(function(x){
+      return '<button class="oc-dc-reuse" data-sid="'+x.site.id+'" style="display:block;width:100%;text-align:left;margin:0 0 8px;padding:15px 16px;border:1px solid #4A9E4F;border-radius:11px;background:#26331d;color:#eaf3e2;font-size:17px;font-weight:600;cursor:pointer;">📍 '+escapeHtml(x.site.name)+' <span style="color:#9db0a3;font-weight:400;">· ~'+yd(x.d)+' yd</span></button>';
+    }).join('');
+    bd.innerHTML =
+      '<div style="width:100%;max-width:420px;background:#1E2B23;border:1px solid #35443A;border-radius:14px;padding:18px;color:#eaf3e2;">' +
+        '<div style="font-size:19px;font-weight:700;margin-bottom:4px;">You\'re near a spot you know</div>' +
+        '<div style="font-size:14.5px;color:#9db0a3;margin-bottom:14px;">Deploy '+escapeHtml(cam.name)+' to one of these, or drop a new spot.</div>' +
+        rows +
+        '<button class="oc-dc-new" style="display:block;width:100%;margin:6px 0 0;padding:15px 16px;border:1px dashed #8a9a4e;border-radius:11px;background:transparent;color:#dfeee4;font-size:17px;font-weight:600;cursor:pointer;">➕ New spot right here</button>' +
+        '<button class="oc-dc-cancel" style="display:block;width:100%;margin:10px 0 0;padding:12px;border:none;border-radius:11px;background:transparent;color:#9db0a3;font-size:15px;cursor:pointer;">Cancel</button>' +
+      '</div>';
+    document.body.appendChild(bd);
+    function close(){ if (bd.parentNode) bd.parentNode.removeChild(bd); }
+    bd.addEventListener('click', function(e){ if (e.target === bd) close(); });
+    var reuseBtns = bd.querySelectorAll('.oc-dc-reuse');
+    for (var i = 0; i < reuseBtns.length; i++){ (function(b){
+      b.addEventListener('click', function(){ var s = sites.filter(function(x){ return x.id === b.getAttribute('data-sid'); })[0]; close(); finishDeploy(cam, s || null, pos); });
+    })(reuseBtns[i]); }
+    bd.querySelector('.oc-dc-new').addEventListener('click', function(){ close(); finishDeploy(cam, null, pos); });
+    bd.querySelector('.oc-dc-cancel').addEventListener('click', close);
+  }
+
+  // Do the actual deploy: reuse the chosen named spot, or create a fresh unnamed one at GPS.
+  async function finishDeploy(cam, reuseSite, pos){
+    var site;
+    if (reuseSite){ site = reuseSite; }
+    else {
+      var when = new Date().toLocaleDateString(undefined, { month:'short', day:'numeric' });
+      site = { id: uid(), name: cam.name + ' · ' + when, autoNamed:true, type:'camera',   // unnamed → name it later
+        notes:'Deployed ' + new Date().toLocaleDateString(), lat: pos.lat, lng: pos.lng,
+        createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: (farmForPoint(pos.lat, pos.lng) || {}).id || null };
+      sites.push(site);
+    }
+    // Close any deployment still open for this camera before opening the new one.
+    var prevOpen = deployments.filter(function(d){ return d.cameraId === cam.id && !d.pickedUpAt; })
+      .sort(function(a,b){ return b.deployedAt - a.deployedAt; })[0];
+    if (prevOpen && prevOpen.siteId !== site.id){ prevOpen.pickedUpAt = Date.now(); try{ await saveDeployment(prevOpen); }catch(e){} }
+    site.lastActivityAt = Date.now();
+    cam.currentSiteId = site.id; cam.lastDeployedAt = Date.now();
+    var dep = { id: uid(), cameraId: cam.id, siteId: site.id, lat: site.lat, lng: site.lng, deployedAt: Date.now(),
+      moonPhase: getMoonPhase(new Date()), solunarPeriod: classifyEventSolunarPeriod(new Date(), site.lat, site.lng),
+      weather: null, weatherStatus: 'pending' };
+    deployments.push(dep);
+    try{ await saveSite(site); await saveCamera(cam); await saveDeployment(dep); }catch(e){ console.error('Outdoor Companion: deploy-here save failed', e); }
+    if (typeof autoShareToPropertyGroups === 'function' && site.propertyId){
+      autoShareToPropertyGroups('site', site.id, site.propertyId);
+      autoShareToPropertyGroups('cam', cam.id, site.propertyId);
+      autoShareToPropertyGroups('dep', dep.id, site.propertyId);
+    }
+    try { fetchCurrentWeather(site.lat, site.lng).then(async function(w){ dep.weather=w; dep.weatherStatus=w?'ok':'unavailable'; try{ await saveDeployment(dep); }catch(e){} }); } catch(e){}
+    renderCameraList();
+    renderAll();
+    var acc = pos.accuracy ? (' · ~' + Math.round(pos.accuracy) + 'm') : '';
+    showToast(cam.name + (reuseSite ? ' deployed at ' + site.name : ' deployed here') + acc);
   }
 
   function renderCameraList(){
@@ -22180,19 +22277,26 @@
       var row = document.createElement('div');
       row.className = 'cam-row';
       var qrDivId = 'thumb_' + cam.id;
-      var deployBtnStyle = site
-        ? 'background:#D94A2E;color:#fff;border-color:#D94A2E;'
-        : 'background:#4A9E4F;color:#fff;border-color:#4A9E4F;';
       var makeModel = [cam.make, cam.model].filter(Boolean).join(' ');
+      // When deployed, show WHERE and SINCE when — the at-a-glance state for a field pass.
+      var curDep = site ? deployments.filter(function(d){ return d.cameraId === cam.id && !d.pickedUpAt; })
+        .sort(function(a,b){ return b.deployedAt - a.deployedAt; })[0] : null;
+      var sinceStr = (curDep && curDep.deployedAt) ? ' · since ' + new Date(curDep.deployedAt).toLocaleDateString(undefined, {month:'short', day:'numeric'}) : '';
+      // Primary field button: not deployed → drop it at your GPS; deployed → undeploy (frees it, stamps the date).
+      var primaryBtn = site
+        ? '<button data-act="pickup-cam" data-id="'+cam.id+'" style="background:#D94A2E;color:#fff;border-color:#D94A2E;">Undeploy</button>'
+        : '<button data-act="deploy-cam" data-id="'+cam.id+'" style="background:#4A9E4F;color:#fff;border-color:#4A9E4F;">📍 Deploy here</button>';
+      // Deployed to a not-yet-named quick-drop → let him name the spot whenever (never forced in the field).
+      var nameSpotBtn = (site && site.autoNamed) ? '<button class="btn-ghost" data-act="name-spot" data-id="'+cam.id+'" style="color:#c9a24a;border-color:#5a5327;">✏ Name spot</button>' : '';
       row.innerHTML =
         '<div class="cam-qr-thumb" id="'+qrDivId+'" data-cam="'+cam.id+'"></div>' +
         '<div class="cam-meta">' +
           '<div class="nm">'+escapeHtml(cam.name)+'</div>' +
-          '<div class="st'+(site ? ' deployed' : '')+'">'+(site ? 'Deployed at ' + escapeHtml(site.name) : 'Not deployed')+(makeModel ? ' · ' + escapeHtml(makeModel) : '')+'</div>' +
+          '<div class="st'+(site ? ' deployed' : '')+'">'+(site ? 'Deployed at ' + escapeHtml(site.name) + sinceStr : 'Not deployed')+(makeModel ? ' · ' + escapeHtml(makeModel) : '')+'</div>' +
         '</div>' +
         '<div class="cam-actions">' +
-          '<button data-act="deploy-cam" data-id="'+cam.id+'" style="'+deployBtnStyle+'">'+(site ? 'Deployed' : 'Deploy')+'</button>' +
-          (site ? '<button class="btn-ghost" data-act="pickup-cam" data-id="'+cam.id+'">Pick Up</button>' : '') +
+          primaryBtn +
+          nameSpotBtn +
           '<button class="btn-ghost" data-act="edit-cam" data-id="'+cam.id+'">Edit</button>' +
           '<button class="btn-ghost" data-act="history-cam" data-id="'+cam.id+'">📜 History</button>' +
           '<button class="btn-ghost" data-act="delete-cam" data-id="'+cam.id+'" style="color:#D94A2E;">Delete</button>' +
@@ -22208,18 +22312,26 @@
         }
       }, 0);
 
-      row.querySelector('[data-act="deploy-cam"]').addEventListener('click', function(){
-        showUseCameraAppReminder('deploy');
-      });
+      // Deploy = one tap, drops it at your GPS (no scan, no map, no signal needed).
+      var deployBtn = row.querySelector('[data-act="deploy-cam"]');
+      if (deployBtn) deployBtn.addEventListener('click', function(){ deployCameraHere(cam, this); });
 
+      // Undeploy = one tap, stamps the pickup date + frees the camera (redeploy anytime).
       var pickupBtn = row.querySelector('[data-act="pickup-cam"]');
-      if (pickupBtn){
-        pickupBtn.addEventListener('click', async function(){
-          var confirmed = await showConfirm('Mark ' + cam.name + ' as picked up? It\'ll show as not deployed until you redeploy it somewhere new.');
-          if (!confirmed) return;
-          await pickUpCamera(cam);
-        });
-      }
+      if (pickupBtn) pickupBtn.addEventListener('click', function(){ pickUpCamera(cam); });
+
+      // Name this spot later — turns a quick-drop into a real named place (GPS will offer it next time).
+      var nameBtn = row.querySelector('[data-act="name-spot"]');
+      if (nameBtn) nameBtn.addEventListener('click', async function(){
+        var s = cam.currentSiteId ? sites.filter(function(x){ return x.id === cam.currentSiteId; })[0] : null;
+        if (!s) return;
+        var nm = await showPrompt('Name this spot (e.g. "Oak Flat"):', '');
+        if (nm == null) return; nm = nm.trim(); if (!nm) return;
+        s.name = nm; s.autoNamed = false; s.lastActivityAt = Date.now();
+        try{ await saveSite(s); }catch(e){ console.error('Outdoor Companion: name spot save failed', e); }
+        renderCameraList(); renderAll();
+        showToast('Spot named "' + nm + '"');
+      });
 
       row.querySelector('[data-act="edit-cam"]').addEventListener('click', function(){
         openEditCameraModal(cam); // convenience: edit without needing to rescan the physical tag
