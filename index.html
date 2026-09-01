@@ -2263,7 +2263,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 579</div>
+    <div id="buildBadge">BUILD 580</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3711,11 +3711,17 @@
       gusVoice = (bestS > -1000) ? best : (gusVoices[0] || null);
     }
     if (window.speechSynthesis){ gusPickVoice(); window.speechSynthesis.onvoiceschanged = gusPickVoice; }
+    // Gus writes with em-dashes ("Well howdy — welcome to Cedar Creek"). The speech engine plows straight
+    // through a dash with no pause, so two thoughts run together and sound unnatural. Turn his dashes into
+    // a real spoken beat (a comma pause) before speaking — applied to ALL his speech, not just the greeting.
+    function gusSpeechText(text){
+      return String(text || '').replace(/\s*[—–]\s*/g, ', ').replace(/\s+/g, ' ').trim();
+    }
     function gusSpeak(text){
       if (!gusVoiceOn || !window.speechSynthesis || !text) return;
       try {
         window.speechSynthesis.cancel();
-        var u = new SpeechSynthesisUtterance(text);
+        var u = new SpeechSynthesisUtterance(gusSpeechText(text));
         if (gusVoice) u.voice = gusVoice;
         u.rate = 0.8; u.pitch = 0.8;   // slow & deep — a proper old-codger drawl, in no hurry at all
         window.speechSynthesis.speak(u);
@@ -3878,7 +3884,7 @@
       if (!window.speechSynthesis){ if (onDone) onDone(); return; }
       try {
         window.speechSynthesis.cancel();
-        var u = new SpeechSynthesisUtterance(text);
+        var u = new SpeechSynthesisUtterance(gusSpeechText(text));
         if (gusVoice) u.voice = gusVoice;
         u.rate = 0.83; u.pitch = 0.82;   // unhurried tour narration — matches Gus's slower drawl
         var done = false; function fin(){ if (done) return; done = true; if (onDone) onDone(); }
