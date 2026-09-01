@@ -433,9 +433,9 @@
   }
   .btn-ghost:hover{color:var(--text);border-color:var(--text-dim);}
 
+  /* The date filter sits inside the green folder body (Sites & Log only). */
   #filters{
-    padding:12px 16px;
-    border-bottom:1px solid var(--line);
+    padding:8px 8px 4px;
   }
   #filters .flabel{
     font-size:10.5px;
@@ -445,21 +445,21 @@
     margin-bottom:8px;
   }
   #dateFilterBtn{
-    margin-top:10px;
     width:100%;
-    background:var(--panel-alt);
-    border:1px solid var(--line);
-    color:var(--text-dim);
+    background:#1c3327;
+    border:1px solid #3c6d42;
+    color:#cfe6d5;
     font-size:12px;
     padding:8px 10px;
-    border-radius:4px;
+    border-radius:6px;
     text-align:left;
   }
+  /* Lit up when a range is actually on, so you never forget the list is being trimmed. */
   #dateFilterBtn.filtered{
     background:var(--accent);
     color:#1A1204;
     border-color:var(--accent);
-    font-weight:600;
+    font-weight:700;
   }
 
   #propertyRow{
@@ -967,25 +967,48 @@
   .form-pop .row{margin-top:10px;}
 
   /* ---------- Sidebar tabs ---------- */
+  /* The 4 tabs are a FILE CABINET — a break sets them off from the tools above, and each reads as a
+     folder tab. The open folder (active tab + #folderBody) goes a brighter green so you can tell at a
+     glance which folder you're in and that the list below belongs to it. */
   #tabs{
     display:flex;
-    border-bottom:1px solid var(--line);
+    gap:4px;
+    padding:14px 10px 0;
+    border-top:1px solid var(--line);
+    margin-top:6px;
   }
   .tab-btn{
     flex:1;
-    background:transparent;
-    border:none;
-    border-radius:0;
+    background:#182420;
+    border:1px solid #2c3f34;
+    border-bottom:none;
+    border-radius:8px 8px 0 0;
     color:var(--text-dim);
     font-family:'Oswald',sans-serif;
     font-size:12px;
     letter-spacing:0.8px;
     text-transform:uppercase;
-    padding:10px 0;
-    border-bottom:2px solid transparent;
+    padding:11px 0 10px;
   }
-  .tab-btn.active{color:var(--text);border-bottom:2px solid var(--accent);}
-  .tab-btn:hover:not(.active){color:var(--text);}
+  .tab-btn:hover:not(.active){ background:#1f2e26; color:var(--text); }
+  .tab-btn.active{
+    background:#2C4636;
+    border-color:#4a7d53;
+    color:#F1FBF0;
+    font-weight:600;
+    margin-bottom:-1px;
+    position:relative;
+    z-index:1;
+  }
+  /* the open folder's body — same brighter green, connected up to the active tab */
+  #folderBody{
+    background:#2C4636;
+    border:1px solid #4a7d53;
+    border-radius:0 0 10px 10px;
+    margin:0 10px 12px;
+    padding-top:6px;
+  }
+  #folderBody #site-list{ padding:8px 8px 4px; }
 
   .obs-row{
     display:flex;
@@ -2037,10 +2060,9 @@
         <button class="btn-ghost" id="exportBtn">Export</button>
       </div>
     </div>
-    <div id="filters">
-      <button id="dateFilterBtn">📅 <span id="dateFilterLabel">All Time</span></button>
-    </div>
-
+    <!-- The 4 tabs are a "file cabinet" set off from the tools above. Each is a folder tab; the OPEN
+         one and its body (#folderBody) go a brighter green so you know which folder you're in and that
+         everything below belongs to it. -->
     <div id="tabs">
       <button class="tab-btn active" data-tab="sites">Sites</button>
       <button class="tab-btn" data-tab="log">Log</button>
@@ -2048,18 +2070,26 @@
       <button class="tab-btn" data-tab="analytics">📊 Analytics</button>
     </div>
 
-    <div id="cameraToolbar" style="display:none;">
-      <button class="btn-primary" id="scanRegisterBtn" style="flex:1 1 30%;background:#8FA05C;color:#14201A;">🏷 Scan Register</button>
-      <button class="btn-primary" id="registerCamBtn" style="flex:1 1 30%;background:#B8AF9C;color:#1A1204;">✍ Register by Hand</button>
-      <button class="btn-primary" id="importPhotosBtn" style="flex:1 1 30%;background:#6B8F5C;color:#0F1A0C;">🗂 Import Photos</button>
-      <!-- Kept in the DOM (hidden) so their existing handlers/logic still wire up; reached from the Scan Register menu. -->
-      <button id="batchAddBtn" style="display:none;">Batch Generate QR Codes</button>
-      <button id="printAllBtn" style="display:none;">Print / Re-print Sheet</button>
+    <div id="folderBody">
+      <!-- The date filter lives INSIDE the folder — it only shows on Sites & Log (the two lists it
+           actually trims); hidden on Cameras & Analytics. Lights up when a range is on. -->
+      <div id="filters">
+        <button id="dateFilterBtn">📅 Dates: <span id="dateFilterLabel">All Time</span></button>
+      </div>
+
+      <div id="cameraToolbar" style="display:none;">
+        <button class="btn-primary" id="scanRegisterBtn" style="flex:1 1 30%;background:#8FA05C;color:#14201A;">🏷 Scan Register</button>
+        <button class="btn-primary" id="registerCamBtn" style="flex:1 1 30%;background:#B8AF9C;color:#1A1204;">✍ Register by Hand</button>
+        <button class="btn-primary" id="importPhotosBtn" style="flex:1 1 30%;background:#6B8F5C;color:#0F1A0C;">🗂 Import Photos</button>
+        <!-- Kept in the DOM (hidden) so their existing handlers/logic still wire up; reached from the Scan Register menu. -->
+        <button id="batchAddBtn" style="display:none;">Batch Generate QR Codes</button>
+        <button id="printAllBtn" style="display:none;">Print / Re-print Sheet</button>
+      </div>
+
+      <button id="tagHistoryBtn" style="display:none;">🏷 Search Tag History</button>
+
+      <div id="site-list"></div>
     </div>
-
-    <button id="tagHistoryBtn" style="display:none;">🏷 Search Tag History</button>
-
-    <div id="site-list"></div>
 
     <div id="gps-status" class="pending">GPS: checking…</div>
     <div id="gps-readout">
@@ -2143,7 +2173,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 570</div>
+    <div id="buildBadge">BUILD 571</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13186,7 +13216,9 @@
       try { track('tab_open', { tab: activeTab }); } catch(e){}
       document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
-      document.getElementById('filters').style.display = (activeTab === 'sites') ? '' : 'none';
+      // The date filter belongs to the two lists it actually trims — Sites & Log — so it shows in the
+      // folder body on both, and is hidden on Cameras & Analytics (it does nothing there).
+      document.getElementById('filters').style.display = (activeTab === 'sites' || activeTab === 'log') ? '' : 'none';
       document.getElementById('cameraToolbar').style.display = (activeTab === 'cameras') ? 'flex' : 'none';
       var _camTip = document.getElementById('cameraTip'); if (_camTip) _camTip.style.display = (activeTab === 'cameras') ? 'block' : 'none';
       // Each tab = its own tools: fold the hunt-flow stack + Tools&Data away on every tab but Sites.
