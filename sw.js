@@ -19,7 +19,7 @@
  * Bump VERSION on every build so old shell/lib caches are cleared on activate. The tile
  * caches are intentionally NOT version-suffixed — saved offline maps survive app updates.
  */
-var VERSION = 'b430';
+var VERSION = 'b564';
 var SHELL_CACHE = 'oc-shell-' + VERSION;
 var LIB_CACHE   = 'oc-lib-' + VERSION;
 var TILE_RUNTIME = 'oc-tiles-runtime';   // rolling, auto-filled as you pan (LRU-trimmed)
@@ -64,7 +64,16 @@ function hostMatches(url, list){
 }
 
 self.addEventListener('install', function(e){
-  self.skipWaiting(); // take over as soon as possible; the network-first shell keeps builds fresh
+  self.skipWaiting(); // take over as soon as possible
+  // Precache the app shell right now, so a device that updates then loses signal can still open the
+  // app. Best-effort — a failure here must never abort the install.
+  e.waitUntil(
+    caches.open(SHELL_CACHE).then(function(sc){
+      return fetch(new Request('index.html', { cache: 'no-store' }))
+        .then(function(r){ if (r && r.ok){ sc.put('index.html', r.clone()); sc.put('./', r.clone()); } })
+        .catch(function(){});
+    }).catch(function(){})
+  );
   e.waitUntil(
     caches.open(LIB_CACHE).then(function(cache){
       // Precache each lib individually and tolerate any single failure — one 404 must not
@@ -124,28 +133,37 @@ self.addEventListener('fetch', function(e){
   var url;
   try { url = new URL(req.url); } catch (err) { return; }
 
-  // 1) App shell / navigations → NETWORK-FIRST. Fresh build when online; cached only when offline.
+  // 1) App shell / navigations → NETWORK-FIRST **WITH A 2-SECOND TIMEOUT**, then cached copy.
+  //    WHY the timeout: plain network-first HANGS in a marginal-signal area (a bar or two) — there's
+  //    just enough signal to keep the fetch trying and never connect, so the app never opens. That's
+  //    the "couldn't access the app in bad service" field failure. Now: if the network answers within
+  //    2s we serve the freshest build (updates stay near-instant on good signal); if it doesn't, we
+  //    serve the saved copy IMMEDIATELY so the app always opens — and the network fetch, whenever it
+  //    eventually finishes, still refreshes the cache in the background for next launch.
   var sameOrigin = (url.origin === self.location.origin);
   var looksLikeShell = sameOrigin && (url.pathname === '/' || /\/(index\.html)?$/.test(url.pathname));
   if (req.mode === 'navigate' || looksLikeShell){
     e.respondWith(
-      // {cache:'no-store'} makes the network-first shell TRULY network-first: without it the
-      // browser's own HTTP cache can hand back a stale index.html (GitHub Pages stamps it with a
-      // ~10-min max-age), so users sat on an old build for up to 10 minutes after a deploy even
-      // though the SW "fetched" it. Bypassing the HTTP cache guarantees the freshest build online;
-      // the cached copy below is still the offline fallback.
-      fetch(req, { cache: 'no-store' }).then(function(res){
-        var copy = res.clone();
-        caches.open(SHELL_CACHE).then(function(c){ c.put(req, copy); });
-        return res;
-      }).catch(function(){
-        return caches.match(req).then(function(hit){
-          if (hit) return hit;
-          // Fall back to any cached shell entry (single-page app — any copy will do).
-          return caches.open(SHELL_CACHE).then(function(c){
-            return c.keys().then(function(keys){ return keys.length ? c.match(keys[0]) : undefined; });
-          });
+      // Find any cached shell copy first (this build's, or any prior — it's a single-page app).
+      caches.match(req).then(function(hit){
+        return hit ? hit : caches.open(SHELL_CACHE).then(function(c){
+          return c.keys().then(function(keys){ return keys.length ? c.match(keys[0]) : null; });
         });
+      }).then(function(cached){
+        // {cache:'no-store'} bypasses the browser HTTP cache so a real network win is truly the
+        // freshest build (GitHub Pages stamps index.html with ~10-min max-age otherwise).
+        var network = fetch(req, { cache: 'no-store' }).then(function(res){
+          var copy = res.clone();
+          caches.open(SHELL_CACHE).then(function(c){ c.put(req, copy); });
+          return res;
+        }).catch(function(){ return null; });
+        // First-ever load with nothing cached yet → we have no choice but to wait on the network.
+        if (!cached) return network.then(function(res){ return res || caches.match(req); });
+        // Have a saved copy: serve fresh only if the network beats a 2s timer; otherwise serve cache now.
+        return Promise.race([
+          network,
+          new Promise(function(resolve){ setTimeout(function(){ resolve(null); }, 2000); })
+        ]).then(function(res){ return res || cached; });
       })
     );
     return;
