@@ -322,10 +322,10 @@ walk-in lanes); 6 Feeding areas and 7 Bedding areas (tap Add, mark each). (In fi
 steps: boat ramps & access, then mark your spots, plus an optional 📐 Lake acreage panel.)
 HOW TO set lake acreage (fishing): in the Lake's setup, use the 📐 Lake acreage panel — type the
 known acreage and Save, or "Trace the outline for exact acreage". It powers catch-per-acre.
-HOW TO undo a mistake (step back): whenever you do something you can take back — add / delete / move a
-site, log a sighting, delete a sighting — a "↩ Undo" pill pops up at the top-left of the map (just below
-the ☰ menu). Tap it to reverse that action; tap again to step back another. It tells you what it'll undo
-("↩ Undo delete", "↩ Undo move"…) and disappears when there's nothing left to reverse.
+HOW TO undo / redo (step back & forward): up top by the 👤 account and 💡 help buttons are two little
+arrows — "↩" (undo) and "↪" (redo). They float on every screen. Tap ↩ to reverse your last action
+(add / delete / move a site, log a sighting, delete a sighting) — tap again to step back further; tap ↪
+to put it back. They dim when there's nothing to step to. Hover shows exactly what it'll undo/redo.
 HOW TO add a Site / Stand: 1) LEFT PANEL, Sites tab (phone: open it with the ☰ menu top-left). 2) Tap
 "+ Add Site". 3) Tap the spot on the map. 4) Fill Name, pick a Type (Trail Camera, Tree Stand,
 Parking/Access, Feeding, Bedding, Water, Custom Point... fishing: Boat Ramp, Dock, Favorite Hole,
