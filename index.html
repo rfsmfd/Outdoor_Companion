@@ -155,6 +155,28 @@
   #magBar #magCancelBtn{ background:transparent; color:#cfc9ad; border:1px solid #46532f; }
   #magBar #magGpsBtn{ background:#1c3327; color:#cfe6d5; border:1px solid #3c6d42; font-weight:600; }
 
+  /* ↩ Undo pill — top-left of the MAP (after the 320px sidebar on desktop). Shows only when there's
+     something to reverse. */
+  #undoBtn{
+    position:fixed;
+    top:14px; left:334px;
+    z-index:2450;
+    display:none;
+    align-items:center;
+    gap:6px;
+    background:#2b1c0e;
+    border:1px solid #c9a24a;
+    color:#f0dca0;
+    font-size:13px;
+    font-weight:700;
+    padding:9px 14px;
+    border-radius:12px;
+    box-shadow:0 3px 12px rgba(0,0,0,.45);
+    cursor:pointer;
+  }
+  #undoBtn.show{ display:inline-flex; }
+  #undoBtn:hover{ background:#3a2712; border-color:#e0bd5e; }
+
   .display-tray-section{ margin-bottom:22px; }
   .display-tray-section-title{
     font-family:'Oswald',sans-serif;
@@ -237,6 +259,7 @@
     /* Start Hunt/Trip only collides with the mode toggle when the panel is OPEN (it floats over it), so
        shift it right ONLY then — stays centered on the map when the panel's closed. */
     #huntBar.oc-hb-shift{ left:calc(50% + 64px) !important; }
+    #undoBtn{ top:150px !important; left:14px !important; }   /* below the ☰ menu on phones */
     /* Property picker sits in the clear lane between the ☰ (left) and the right-side controls — shift it
        right past the hamburger and shorten it so it's not tucked behind them (founder phone tuning). */
     #propertyRow{ padding-left:74px !important; padding-right:64px !important; }
@@ -2325,7 +2348,11 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 591</div>
+    <div id="buildBadge">BUILD 592</div>
+    <!-- ↩ Undo — steps back your last actions (add / delete / move a site, log a sighting, deploy a
+         camera, reset a date…). Shows only when there's something to reverse; each tap undoes one more. -->
+    <button id="undoBtn" type="button" title="Undo the last action">↩ Undo</button>
+
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12877,12 +12904,15 @@
       if (db) db.addEventListener('click', async function(ev){
         ev.stopPropagation();
         var linked = observations.filter(function(o){ return o && o.siteId === s.id; }).length;
-        var msg = 'Delete "' + s.name + '" permanently? This cannot be undone.';
+        var msg = 'Delete "' + s.name + '"?';
         if (linked) msg += ' ' + linked + ' logged sighting' + (linked === 1 ? '' : 's') + ' will be kept but unlinked from it.';
+        msg += ' (You can ↩ Undo.)';
         var ok = await showConfirm(msg);
         if (!ok) return;
         activeSiteId = null; highlightSiteOnMap(null);
+        var _restore = JSON.parse(JSON.stringify(s));   // snapshot to bring it back on Undo
         try { await removeSite(s.id); } catch (e) { console.error('Outdoor Companion: site delete failed', e); }
+        pushUndo('delete', async function(){ sites.push(_restore); try { await saveSite(_restore); } catch(e){} renderAll(); });
         showToast('Deleted "' + s.name + '".');
       });
       list.appendChild(row);
@@ -13201,10 +13231,13 @@
     if (!node) return;
     var delBtn = node.querySelector('[data-act="delete-obs"]');
     if (delBtn) delBtn.addEventListener('click', async function(){
-      var ok = await showConfirm('Delete this sighting? This can\'t be undone.');
+      var ok = await showConfirm('Delete this sighting? (You can ↩ Undo.)');
       if (!ok) return;
       closeObsEditor(); map.closePopup();
+      var _ro = observations.filter(function(o){ return o.id === id; })[0];
+      _ro = _ro ? JSON.parse(JSON.stringify(_ro)) : null;
       try { await removeObservation(id); } catch (err) { console.error('Outdoor Companion: delete sighting failed', err); }
+      if (_ro) pushUndo('delete', async function(){ observations.push(_ro); try { await saveObservation(_ro); } catch(e){} renderObsMarkers(); renderActiveList(); });
       showToast('Sighting deleted');
     });
 
@@ -15330,6 +15363,36 @@
     renderAll();
   }
 
+  // ---------- ↩ Undo — step back the last actions ----------
+  // Each undoable action registers HOW to reverse itself (a closure) with a short label. The ↩ Undo pill
+  // appears whenever the stack isn't empty; each tap steps back one more action.
+  var undoStack = [];
+  function pushUndo(label, undoFn){
+    if (typeof undoFn !== 'function') return;
+    undoStack.push({ label: label || '', undo: undoFn });
+    if (undoStack.length > 40) undoStack.shift();
+    updateUndoBtn();
+  }
+  function updateUndoBtn(){
+    var b = document.getElementById('undoBtn'); if (!b) return;
+    if (undoStack.length){
+      var last = undoStack[undoStack.length - 1];
+      b.classList.add('show');
+      b.textContent = '↩ Undo' + (last.label ? ' ' + last.label : '');
+      b.title = 'Undo: ' + (last.label || 'last action');
+    } else {
+      b.classList.remove('show');
+    }
+  }
+  async function performUndo(){
+    var a = undoStack.pop();
+    updateUndoBtn();
+    if (!a) return;
+    try { await a.undo(); showToast('Undone' + (a.label ? ': ' + a.label : '')); }
+    catch(e){ console.error('Outdoor Companion: undo failed', e); showToast('Could not undo that'); }
+  }
+  (function(){ var b = document.getElementById('undoBtn'); if (b) b.addEventListener('click', performUndo); })();
+
   // ---------- add-site flow ----------
   var addBtn = document.getElementById('addSiteBtn');
   var hint = document.getElementById('hint');
@@ -15449,6 +15512,7 @@
           console.error('Outdoor Companion: failed to save site', err);
         }
         autoShareToPropertyGroups('site', site.id, site.propertyId);   // new stand on a shared farm → shared too
+        (function(_sid){ pushUndo('add', async function(){ await removeSite(_sid); }); })(site.id);
         if (tempMarker){ map.removeLayer(tempMarker); tempMarker = null; }
         map.closePopup();
         exitPlacing();
@@ -18177,6 +18241,7 @@
     observations.push(obs);
     try{ await saveObservation(obs); }catch(e){ console.error('Outdoor Companion: failed to save observation', e); }
     autoShareToPropertyGroups('obs', obs.id, obs.propertyId);   // if this farm is shared, the new sighting/catch is too
+    (function(_oid){ pushUndo('log', async function(){ await removeObservation(_oid); }); })(obs.id);
 
     // Dual-linking: this observation keeps its own real map location (set above,
     // independent of the hunter's position) AND separately gets tagged to whichever
@@ -18525,6 +18590,7 @@
   async function applyRepositionedSite(lat, lng){
     var s = sites.filter(function(x){ return x.id === pendingRepositionSiteId; })[0];
     if (s){
+      var _prevLat = s.lat, _prevLng = s.lng, _prevProp = s.propertyId, _sid = s.id;   // remember for ↩ Undo
       s.lat = lat; s.lng = lng; s.lastActivityAt = Date.now();
       // The spot may now sit inside a farm it wasn't linked to — a camera registered from home lands at
       // the house (no farm), so after you move it ONTO the property it must re-attach, or the property
@@ -18552,6 +18618,13 @@
       if (typeof renderCameraList === 'function' && activeTab === 'cameras') renderCameraList();
       if (activeSiteId === s.id) highlightSiteOnMap(s.id);
       showToast(_movedCam ? 'Camera spot moved' : 'Stand moved');
+      pushUndo('move', async function(){
+        var t = sites.filter(function(x){ return x.id === _sid; })[0]; if (!t) return;
+        t.lat = _prevLat; t.lng = _prevLng; t.propertyId = _prevProp; t.lastActivityAt = Date.now();
+        try { await saveSite(t); } catch(e){}
+        (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId === _sid && !d.pickedUpAt; }).forEach(function(d){ d.lat = _prevLat; d.lng = _prevLng; saveDeployment(d).catch(function(e){}); });
+        renderAll(); if (typeof renderCameraList === 'function' && activeTab === 'cameras') renderCameraList();
+      });
     }
     pendingRepositionSiteId = null;
   }
