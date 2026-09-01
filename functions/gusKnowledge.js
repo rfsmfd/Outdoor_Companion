@@ -281,7 +281,7 @@ question and get an answer you need to be signed in.) NOTE: we're in invite-only
 your own farm means signing up with an email the owner has approved for you — no code needed. Not
 approved yet? Join the waitlist right there on the sign-up screen and the owner will get you in.
 HOW TO send a suggestion or report an issue (FEEDBACK): tap the 💡 Suggestion / Issue button — it's
-at the TOP-RIGHT of the app (by Refresh / Sign out), or the "💡 Suggestion" button in the DEMO
+at the TOP-RIGHT of the app (next to the 👤 account button), or the "💡 Suggestion" button in the DEMO
 banner. Pick Suggestion or Issue, type it, optionally add your email so we can follow up, and Send.
 It goes straight to the maker — every one is read. You can send feedback whether you're signed in OR
 just looking around in the demo. (Encourage folks to use it — it's how the app gets better.)
@@ -297,8 +297,9 @@ to copy or hack it, keep your login private, and that anonymous pooled data abou
 — never your identity, exact locations, or personal records — may be used to make the app smarter for
 everyone) — tick the box and tap "Agree & continue" to start; you only see it once. 3)
 Signed in, your data lives in your cloud account and syncs across phone + desktop on its own. 4) The
-app works offline (map, GPS, your farms cached), but sign in BEFORE you lose signal. 5) Sign out from
-the pill at the top-right of the map (the 🔄 there reloads the app).
+app works offline (map, GPS, your farms cached), but sign in BEFORE you lose signal. 5) Account stuff
+lives behind the 👤 button at the top-right of the map: tap it for a little menu with your email,
+📂 My data (private vs a shared group), 🛠 Admin (owner only), 🔄 Refresh app, and ↩ Sign out.
 HOW TO switch Hunting <-> Fishing: at the top of the LEFT PANEL tap 🏹 Hunting or 🎣 Fishing. It
 swaps every site type, Quick-Log type, map pin, and word (a "Property" becomes a "Lake", a "sighting"
 a "catch", a "Hunt" a "Trip"); each mode shows only its own data.
@@ -525,16 +526,17 @@ HOW TO read spot intel: fishing mode -> tap a marked spot pin -> "🎣 Spot inte
 your biggest, hot lure, best pressure/season). Catches auto-attach to a spot within ~25 yards.
 
 SHARE WITH YOUR CAMP
-HOW TO create or join a group: top account bar -> the scope dropdown ("📁 My Data") -> "＋ Create a
-group…" (name it, share the invite code) or "🔑 Join with a code…" (enter a code). The group then
-shows as "🤝 <name>" in that dropdown.
-HOW TO switch My Data <-> the camp: the scope dropdown — "📁 My Data" for private, "🤝 <group>" for
-the pooled camp set; "⚙ Group info & invite code…" opens details, "🚪 Leave this group…" leaves.
+HOW TO create or join a group: tap the 👤 account button (top-right) -> the "📂 My data" scope
+dropdown -> "＋ Create a group…" (name it, share the invite code) or "🔑 Join with a code…" (enter a
+code). The group then shows as "🤝 <name>" in that dropdown.
+HOW TO switch My Data <-> the camp: 👤 account menu -> the "📂 My data" scope dropdown — "📁 My Data"
+for private, "🤝 <group>" for the pooled camp set; "⚙ Group info & invite code…" opens details,
+"🚪 Leave this group…" leaves.
 HOW TO share a whole farm: be in a group, tap ⚙ by the Property dropdown -> Manage Properties -> on
 the farm tap "🤝 Share" -> pick the group -> confirm. Shares the whole farm (boundary/stands/trails/
 sightings/cameras/photos) read-only; new items auto-share. Only farms you share are visible; the rest
 stays private. Use "🔗 Attach inside" to pull in spots not yet linked to the farm.
-HOW TO set member permissions (owner): scope dropdown -> the group -> "⚙ Group info…" -> a member's
+HOW TO set member permissions (owner): 👤 account menu -> the "📂 My data" scope dropdown -> the group -> "⚙ Group info…" -> a member's
 "⚙ Permissions" -> role Viewer / Suggester / Editor, tick which data types it covers, optionally
 "Allow AI matching" (billed to you), Save.
 HOW TO suggest / approve a buck tag: a Suggester opens a shared photo and uses "💬 Suggest a buck…"
