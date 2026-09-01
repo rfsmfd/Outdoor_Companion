@@ -2289,7 +2289,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 586</div>
+    <div id="buildBadge">BUILD 587</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2360,6 +2360,11 @@
       </div>
       <button class="btn-ghost" id="logLocationJumpToPropertyBtn" type="button" style="width:100%;margin-bottom:8px;font-size:11px;">🏡 Jump to Property</button>
       <div id="logLocationPropertyList" style="display:none;margin-bottom:8px;max-height:140px;overflow-y:auto;"></div>
+      <!-- Type/paste exact GPS coordinates for pinpoint accuracy (founder). Accepts "lat, lng". -->
+      <div style="display:flex;gap:6px;margin-bottom:8px;">
+        <input id="logLocationLatLngInput" type="text" inputmode="decimal" placeholder="Or paste GPS: lat, lng" style="flex:1;min-width:0;font-size:12px;padding:8px 9px;background:var(--panel-alt);border:1px solid var(--line);border-radius:6px;color:var(--text);font-family:'IBM Plex Mono',monospace;" />
+        <button class="btn-ghost" id="logLocationGoCoordsBtn" type="button" style="flex:0 0 auto;font-size:12px;padding:8px 14px;">Go</button>
+      </div>
       <div id="logBuckRow" style="display:none;margin-bottom:10px;">
         <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:6px;">Which buck? <span style="opacity:.65;">optional — tags this sighting to him so it lands on his timeline</span></div>
         <div id="logBuckChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
@@ -18193,6 +18198,39 @@
     });
   }
 
+  // Paint YOUR features onto the confirm/move mini-map so you can line up the exact spot against your own
+  // ground — property lines, trails/roads, and the other site pins — instead of a bare satellite tile
+  // (founder). Re-drawn each time the picker opens.
+  var logLocOverlay = null;
+  function renderLogLocationOverlay(){
+    if (!logLocationMap) return;
+    if (!logLocOverlay) logLocOverlay = L.layerGroup().addTo(logLocationMap);
+    logLocOverlay.clearLayers();
+    try {
+      (typeof properties !== 'undefined' ? properties : []).forEach(function(p){
+        if (p && p.boundary && p.boundary.length >= 3){
+          try { L.polygon(p.boundary, { color:'#E8B04B', weight:2, opacity:0.85, fill:false, interactive:false }).addTo(logLocOverlay); } catch(e){}
+        }
+      });
+      (typeof trails !== 'undefined' ? trails : []).forEach(function(t){
+        if (!t || t.hidden || t.module !== activeModule || !t.points || t.points.length < 2) return;
+        try {
+          L.polyline(t.points.map(function(pt){ return [pt.lat, pt.lng]; }), {
+            color: t.color || '#7A8A94', weight: 3, opacity: 0.9,
+            dashArray: (typeof lineStyleToDashArray === 'function' ? lineStyleToDashArray(t.lineStyle) : null), interactive:false
+          }).addTo(logLocOverlay);
+        } catch(e){}
+      });
+      (typeof sites !== 'undefined' ? sites : []).forEach(function(s){
+        if (!s || typeof s.lat !== 'number') return;
+        if (s.id === pendingRepositionSiteId) return;   // don't draw the very spot you're moving
+        if (typeof typeIsInActiveModule === 'function' && !typeIsInActiveModule(s.type, true)) return;
+        var ty = (typeof getActiveTypes === 'function' ? getActiveTypes()[s.type] : null) || { color:'#9aa' };
+        try { L.circleMarker([s.lat, s.lng], { radius:5, color:'#0b120c', weight:1, fillColor: ty.color, fillOpacity:0.95, interactive:false }).addTo(logLocOverlay); } catch(e){}
+      });
+    } catch(e){ console.error('Outdoor Companion: log-location overlay failed', e); }
+  }
+
   var pendingRepositionObsId = null; // null = the crosshair modal is creating a new sighting; set = it's repositioning this existing one
 
   // Reuses the exact same crosshair-confirm screen Quick Log uses for a brand new
@@ -18217,6 +18255,7 @@
     setTimeout(function(){
       logLocationMap.invalidateSize();
       logLocationMap.setView([o.lat, o.lng], 17);
+      renderLogLocationOverlay();
     }, 50);
   }
 
@@ -18252,6 +18291,7 @@
       btn.addEventListener('click', function(){
         lastJumpedPropertyId = p.id;
         logLocationMap.setView([p.centerLat, p.centerLng], p.zoom || 15);
+        renderLogLocationOverlay();
         document.getElementById('logLocationPropertyList').style.display = 'none';
       });
       listEl.appendChild(btn);
@@ -18281,6 +18321,7 @@
     setTimeout(function(){
       logLocationMap.invalidateSize();
       logLocationMap.setView([pos.lat, pos.lng], 17);
+      renderLogLocationOverlay();
     }, 50);
   }
 
@@ -18317,7 +18358,7 @@
     closeAllModals();
     document.getElementById('logLocationModalBackdrop').classList.add('show');
     ensureLogLocationMap();
-    setTimeout(function(){ logLocationMap.invalidateSize(); logLocationMap.setView([s.lat, s.lng], 18); }, 50);
+    setTimeout(function(){ logLocationMap.invalidateSize(); logLocationMap.setView([s.lat, s.lng], 18); renderLogLocationOverlay(); }, 50);
   }
   async function applyRepositionedSite(lat, lng){
     var s = sites.filter(function(x){ return x.id === pendingRepositionSiteId; })[0];
@@ -18358,6 +18399,23 @@
       createAndSaveObservation(pendingLogType, logLocationPos.lat, logLocationPos.lng, true);
     }
   });
+  // Type/paste exact GPS coordinates → recenter the crosshair there (most-accurate placement).
+  (function(){
+    var goBtn = document.getElementById('logLocationGoCoordsBtn');
+    var inp = document.getElementById('logLocationLatLngInput');
+    function goToCoords(){
+      if (!inp || !logLocationMap) return;
+      var m = (inp.value || '').match(/(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)/);
+      if (!m){ showToast('Enter coordinates as "lat, lng".'); return; }
+      var lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+      if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180){ showToast('Those coordinates look off — check lat/lng.'); return; }
+      logLocationMap.setView([lat, lng], Math.max(logLocationMap.getZoom(), 18));
+      renderLogLocationOverlay();   // move fires and updates logLocationPos + the readout
+    }
+    if (goBtn) goBtn.addEventListener('click', goToCoords);
+    if (inp) inp.addEventListener('keydown', function(e){ if (e.key === 'Enter'){ e.preventDefault(); goToCoords(); } });
+  })();
+
   document.getElementById('logLocationConfirmBtn').addEventListener('click', function(){
     document.getElementById('logLocationModalBackdrop').classList.remove('show');
     if (pendingRepositionSiteId){
