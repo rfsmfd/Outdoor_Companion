@@ -244,6 +244,7 @@
 
     .btn-primary, .btn-ghost{ font-size:17px; padding:16px 12px; }
     #actions .btn-primary, #cameraToolbar .btn-primary, #cameraToolbar .btn-ghost{ font-size:16px; padding:16px 10px; }
+    #toolsGroup .btn-ghost{ font-size:17px; padding:15px 12px; }   /* keep Tools & Data big & readable on phones */
 
     .tab-btn{ font-size:16px; padding:15px 0; }
     #filters #showMapBtn{ display:inline-flex; }   /* phone: the list is primary; this hops to the map (specificity beats the base display:none defined later in the file) */
@@ -433,6 +434,20 @@
     padding:8px 10px;
   }
   .btn-ghost:hover{color:var(--text);border-color:var(--text-dim);}
+
+  /* Tools & Data items were dim + tiny (plain ghost buttons). Bump them to bright, larger, clearly-
+     tappable rows — readable at a glance and matching the other left-panel groups. */
+  #toolsGroup .btn-ghost{
+    color:var(--text);
+    font-size:14.5px;
+    font-weight:600;
+    text-align:left;
+    padding:12px 12px;
+    background:#1E2B23;
+    border:1px solid #33473A;
+    border-radius:8px;
+  }
+  #toolsGroup .btn-ghost:hover{ background:#25392C; border-color:#4a7d53; color:#F1FBF0; }
 
   /* The date filter sits inside the green folder body (Sites & Log only), with a compact "Show Map"
      button to its right on phones (the list is primary there; the map is a deliberate tap away). */
@@ -2245,7 +2260,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 575</div>
+    <div id="buildBadge">BUILD 576</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
