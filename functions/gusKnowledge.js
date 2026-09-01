@@ -74,8 +74,11 @@ Cameras tab buttons: scan-register (🏷 Scan Register — scan a tag; make/prin
 register-camera (✍ Register by Hand — add a camera with no tag), import-photos (🗂 Import Photos). Deploy
 is per-camera in the list (deploy-camera points there → tap "📍 Deploy here" on the camera's row). batch-qr
 points at Scan Register.
-Tools menu items: photo-gallery, solunar (Solunar Table), journal (Hunt Journal), trails, import
+Tools menu items: photo-gallery, solunar (Solunar Table), journal (Hunt Journal), import
 (Import from other apps), export.
+Sites-folder category tabs (points token 'trails' at the Trails tab): 🎯 Stands, 📷 Cameras,
+🌾 Feeding, 🅿 Parking, 🥾 Trails, 📌 Other (fishing: 🎣 Spots, ⛵ Access, 🪱 Bait, 🥾 Trails, 📌 Other).
+Each shows a live count; pick one and the list follows. (Trails moved OUT of Tools & Data to this tab.)
 Top toolbar / map: property-lines (the 📐 button), layers (the ⛰ Layers pill), wind (the 💨 button),
 compass, map-display (opens the show/hide pins tray), quick-log (the orange + Quick Log),
 send-feedback (the 💡 Suggestion / Issue button, top-right — point here to help folks send feedback).
@@ -326,18 +329,20 @@ don't pick a Property it auto-links to the farm it sits inside).
 HOW TO add a site where you're standing: LEFT PANEL -> "📍 My Location" grabs a fresh GPS fix and
 opens Add Site right there; fill Name/Type and Save Site.
 HOW TO find a site in your list: on the SITES folder the list is split into category tabs across the
-top — 🎯 Stands, 📷 Cameras, 🌾 Feeding, 🅿 Parking, 📌 Other (fishing: 🎣 Spots, ⛵ Access, 🪱 Bait,
-📌 Other). Each tab shows a COUNT so you can see at a glance how many stands or cameras this farm has.
-Tap a tab and the list below shows just that kind. Everything follows the farm picked at the very top,
-so the counts are per-farm. Tap a row to ring that pin on the map (then Move or Delete it from the row).
-Bedding and Water live under 📌 Other.
+top — 🎯 Stands, 📷 Cameras, 🌾 Feeding, 🅿 Parking, 🥾 Trails, 📌 Other (fishing: 🎣 Spots, ⛵ Access,
+🪱 Bait, 🥾 Trails, 📌 Other). Each tab shows a COUNT so you can see at a glance how many stands, cameras
+or trails this farm has. Tap a tab and the list below shows just that kind. Everything follows the farm
+picked at the very top, so the counts are per-farm. Tap a row to ring that pin on the map (then Move or
+Delete it from the row). Bedding and Water live under 📌 Other; 🥾 Trails is your access paths & routes.
 HOW TO record a trail as you walk: 1) Tap the ⚫ Record Trail button (left side of the map, above 🧭
 Follow Me). 2) Walk it — a live line and distance/time show. 3) Tap ⚫ again to stop. 4) Name it, pick
 a Type (Access Trail / Boat Route / Game Trail / Custom), color, and line style (Solid/Dashed/Dotted).
 HOW TO draw a trail on the map: tap the ✏️ Draw-a-path button (map toolbar), click along the lane at
 each bend, double-click to finish, name it and set its style. Saves as an Access trail.
-HOW TO manage trails: LEFT PANEL -> "🥾 Trails" — Show/Hide, Edit (rename/recolor/restyle; never
-changes the path), or Delete. You can also tap a trail line on the map to edit it there. Line style
+HOW TO manage trails: on the SITES folder tap the "🥾 Trails" category tab (it shows a count of this
+farm's trails). Tap a trail row to ride it on the map and reveal Show/Hide, Edit (rename/recolor/restyle;
+never changes the path), or Delete. You can also tap a trail line on the map to edit it there. (Trails
+used to live under 🧰 Tools & Data — they're now their own tab in the Sites folder.) Line style
 tells the Walk-In planner how you travel it: Solid = vehicle-ready, Dashed = walk-only, Dotted =
 walk-only & rough.
 HOW TO switch the base map: tap "⛰ Layers" to open the layer bar, tap Aerial / Street / USGS / Topo.

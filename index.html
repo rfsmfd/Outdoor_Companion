@@ -2120,7 +2120,7 @@
         <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
         <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
         <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
-        <button class="btn-ghost" id="manageTrailsBtn" style="flex:1 1 100%;">🥾 Trails</button>
+        <!-- 🥾 Trails moved to its own tab in the Sites folder (B575); managed there now. -->
         <button class="btn-ghost" id="importWaypointsBtn" title="Import sites, waypoints & trails from onX, HuntStand, Google Earth, Garmin, ArcGIS — or any GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import from other apps</button>
         <input type="file" id="waypointFileInput" accept=".kml,.kmz,.gpx,.geojson,.json,.csv,.txt" style="display:none;" />
         <button class="btn-ghost" id="exportBtn">Export</button>
@@ -2245,7 +2245,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 574</div>
+    <div id="buildBadge">BUILD 575</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3806,7 +3806,7 @@
       'photo-gallery': { tab:'sites', tools:true, el:'photoGalleryBtn', label:'"Photo Gallery"' },
       'solunar': { tab:'sites', tools:true, el:'solunarBtn', label:'"Solunar Table"' },
       'journal': { tab:'sites', tools:true, el:'huntLogBtn', label:'"Hunt Journal"' },
-      'trails': { tab:'sites', tools:true, el:'manageTrailsBtn', label:'"Trails"' },
+      'trails': { tab:'sites', siteCat:'trails', el:'siteCatTabs', label:'the "🥾 Trails" tab (in the Sites folder)' },
       'import': { tab:'sites', tools:true, el:'importWaypointsBtn', label:'"Import from other apps"' },
       'export': { tab:'sites', tools:true, el:'exportBtn', label:'"Export"' }
     };
@@ -3820,6 +3820,7 @@
         if (t.plan){ var pg = document.getElementById('planScoutGroup'), pt = document.getElementById('planScoutToggleBtn'); if (pg && pt && getComputedStyle(pg).display === 'none') pt.click(); }
         if (t.hunt){ var hg = document.getElementById('huntGroup'), ht = document.getElementById('huntToggleBtn'); if (hg && ht && getComputedStyle(hg).display === 'none') ht.click(); }
         if (t.tools){ var tg = document.getElementById('toolsGroup'), tt = document.getElementById('toolsToggleBtn'); if (tg && tt && getComputedStyle(tg).display === 'none') tt.click(); }
+        if (t.siteCat){ try { if (typeof setActiveSiteCat === 'function') setActiveSiteCat(t.siteCat); if (typeof renderList === 'function') renderList(t.siteCat); } catch(e3){} }
         if (t.tray){   // open the Map Display tray (its rows are pre-built) so the toggle is visible to point at
           try { if (typeof renderChips === 'function') renderChips(); } catch(e2){}
           var dt = document.getElementById('displayTray'), dbk = document.getElementById('displayTrayBackdrop');
@@ -4470,74 +4471,17 @@
     document.getElementById('saveTrailModalBackdrop').classList.remove('show');
   });
 
+  // Trails now live in their own tab inside the Sites folder (renderTrailsRows). This legacy entry point
+  // is kept because several trail flows (record, import, edit-save) call it to refresh the list — it now
+  // just refreshes that tab when it's showing.
   function renderTrailsList(){
-    var listEl = document.getElementById('trailsList');
-    var relevantTrails = trails.filter(function(t){ return t.module === activeModule; });
-    if (relevantTrails.length === 0){
-      listEl.innerHTML = '<div class="empty" style="padding:16px 0;">No trails recorded yet. Tap the ⚫ record button on the map to start one.</div>';
-      return;
-    }
-    listEl.innerHTML = '';
-    relevantTrails.forEach(function(trail){
-      var row = document.createElement('div');
-      row.className = 'history-row' + (trail.id === selectedTrailId ? ' sel' : '');
-      row.setAttribute('data-trail-row', trail.id);
-      row.innerHTML =
-        '<div class="info">' +
-          '<div class="dt"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'+trail.color+';margin-right:6px;"></span>' + escapeHtml(trail.name) + '</div>' +
-          '<div class="co">' + trailTypeLabel(trail.type) + ' · ' + trailLenLabel(trail) + '</div>' +
-        '</div>' +
-        '<div style="display:flex;flex-direction:column;gap:4px;">' +
-          '<button class="btn-ghost" data-act="toggle-trail-visibility" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;">'+(trail.hidden?'Show':'Hide')+'</button>' +
-          '<button class="btn-ghost" data-act="edit-trail" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;">Edit</button>' +
-          '<button class="btn-ghost" data-act="delete-trail" data-id="'+trail.id+'" style="font-size:11px;padding:5px 8px;color:#D94A2E;">Delete</button>' +
-        '</div>';
-      // Tap anywhere on the row (except the action buttons) to select → highlights the trail on the map.
-      row.addEventListener('click', function(e){ if (e.target.closest('button')) return; selectTrail(trail.id, 'list'); });
-      listEl.appendChild(row);
-    });
-    listEl.querySelectorAll('[data-act="toggle-trail-visibility"]').forEach(function(btn){
-      btn.addEventListener('click', async function(e){
-        e.stopPropagation();
-        var trail = trails.filter(function(t){ return t.id === btn.getAttribute('data-id'); })[0];
-        if (!trail) return;
-        trail.hidden = !trail.hidden;
-        try{ await saveTrail(trail); }catch(err){ console.error('Outdoor Companion: failed to save trail visibility', err); }
-        renderSavedTrailOnMap(trail);
-        renderTrailsList();
-      });
-    });
-    listEl.querySelectorAll('[data-act="edit-trail"]').forEach(function(btn){
-      btn.addEventListener('click', function(e){
-        e.stopPropagation();
-        var trail = trails.filter(function(t){ return t.id === btn.getAttribute('data-id'); })[0];
-        if (trail){ selectTrail(trail.id, 'list'); openSaveTrailModal(true, trail); }
-      });
-    });
-    listEl.querySelectorAll('[data-act="delete-trail"]').forEach(function(btn){
-      btn.addEventListener('click', async function(e){
-        e.stopPropagation();
-        var id = btn.getAttribute('data-id');
-        var trail = trails.filter(function(t){ return t.id === id; })[0];
-        // Highlight the exact trail (map stays live behind the sheet) and name it in the confirm.
-        selectTrail(id, 'list');
-        var confirmed = await showConfirm('Delete "' + (trail ? trail.name : 'this trail') + '"? This cannot be undone.');
-        if (!confirmed) return;
-        if (savedTrailPolylines[id]){ map.removeLayer(savedTrailPolylines[id]); delete savedTrailPolylines[id]; }
-        trails = trails.filter(function(t){ return t.id !== id; });
-        try{ await deleteTrailStorage(id); }catch(err){ console.error('Outdoor Companion: failed to delete trail', err); }
-        if (selectedTrailId === id) clearTrailSelection();
-        renderTrailsList();
-      });
-    });
+    if (typeof activeTab !== 'undefined' && activeTab === 'sites' && typeof renderList === 'function') renderList();
   }
 
-  document.getElementById('manageTrailsBtn').addEventListener('click', function(){
-    renderTrailsList();
-    closeAllModals();
-    document.getElementById('manageTrailsModalBackdrop').classList.add('show');
-  });
-  document.getElementById('manageTrailsClose').addEventListener('click', function(){
+  // (🥾 Trails is now its own tab in the Sites folder — no Tools & Data button / modal to open. The legacy
+  // manageTrails modal DOM stays harmlessly unused; its close handler is kept below for safety.)
+  var _mtc = document.getElementById('manageTrailsClose');
+  if (_mtc) _mtc.addEventListener('click', function(){
     clearTrailSelection();
     document.getElementById('manageTrailsModalBackdrop').classList.remove('show');
   });
@@ -12574,17 +12518,21 @@
   // so you know at a glance how many stands/cameras this farm has. Pick one; the list below follows.
   // `types:null` = the catch-all ("Other") — anything not claimed by a named category lands there,
   // so new site types are covered automatically.
+  // `trails:true` = the special Trails tab: it lists LINES from the `trails` array (not point sites),
+  // so it renders its own row type. Everything else lists point sites by their type(s).
   var SITE_CATEGORIES_HUNTING = [
     { key:'stands',  label:'Stands',  emoji:'🎯', types:['stand'] },
     { key:'cameras', label:'Cameras', emoji:'📷', types:['camera'] },
     { key:'feeding', label:'Feeding', emoji:'🌾', types:['feeding'] },
     { key:'parking', label:'Parking', emoji:'🅿️', types:['access'] },
+    { key:'trails',  label:'Trails',  emoji:'🥾', trails:true },
     { key:'other',   label:'Other',   emoji:'📌', types:null }
   ];
   var SITE_CATEGORIES_FISHING = [
     { key:'spots',  label:'Spots',  emoji:'🎣', types:['hole','structure','dropoff','brushpile'] },
     { key:'access', label:'Access', emoji:'⛵', types:['ramp','dock'] },
     { key:'bait',   label:'Bait',   emoji:'🪱', types:['baitshop'] },
+    { key:'trails', label:'Trails', emoji:'🥾', trails:true },
     { key:'other',  label:'Other',  emoji:'📌', types:null }
   ];
   function getSiteCategories(){ return activeModule === 'fishing' ? SITE_CATEGORIES_FISHING : SITE_CATEGORIES_HUNTING; }
@@ -12607,18 +12555,68 @@
       var chip = document.createElement('button');
       chip.className = 'site-cat-chip' + (c.key === displayCat ? ' active' : '') + (n === 0 ? ' empty' : '');
       chip.innerHTML = c.emoji + ' ' + escapeHtml(c.label) + ' <span class="cnt">' + n + '</span>';
-      chip.addEventListener('click', function(){ setActiveSiteCat(c.key); renderList(); });
+      // An explicit tap is honored even if that category is empty here (shows "none on this farm yet"),
+      // so tapping a tab never bounces you to a different one.
+      chip.addEventListener('click', function(){ setActiveSiteCat(c.key); renderList(c.key); });
       el.appendChild(chip);
     });
   }
 
-  function renderList(){
+  // Trails that belong to the current module + selected farm (trails carry a propertyId; "All Properties"
+  // shows them all). Used both for the Trails-tab count and its list.
+  function trailsForActiveFarm(){
+    return (typeof trails !== 'undefined' ? trails : []).filter(function(t){ return t && t.module === activeModule && passesPropertyFilter(t); });
+  }
+
+  // The Trails tab's own list — LINES, not pins. Tap a row to ride it on the map (and reveal Hide/Edit/
+  // Delete); same one-at-a-time selection as the site rows. Creating trails is unchanged (⚫ Record on the
+  // map, or Import).
+  function renderTrailsRows(listEl, farmTrails){
+    if (!farmTrails.length){
+      listEl.innerHTML = '<div class="empty">No trails on this farm yet.<br>Tap the ⚫ record button on the map to walk one in — or bring routes over with <strong>📥 Import from other apps</strong>.</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    farmTrails.slice().sort(function(a,b){ return (b.createdAt||0) - (a.createdAt||0); }).forEach(function(trail){
+      var sel = trail.id === selectedTrailId;
+      var row = document.createElement('div');
+      row.className = 'site-row' + (sel ? ' selected' : '');
+      row.setAttribute('data-trail-row', trail.id);
+      row.innerHTML =
+        '<div class="site-badge" style="background:'+ (trail.color || '#7A8A94') +';color:#0A1A2E;">〰</div>' +
+        '<div class="site-meta"><div class="nm">'+ escapeHtml(trail.name) +'</div><div class="ty">'+ escapeHtml(trailTypeLabel(trail.type)) +' · '+ escapeHtml(trailLenLabel(trail)) + (trail.hidden ? ' · hidden' : '') +'</div></div>' +
+        (sel
+          ? '<div class="site-row-actions"><button class="btn-ghost" data-act="toggle-trail-visibility" style="font-size:11px;padding:5px 8px;">'+(trail.hidden?'Show':'Hide')+'</button><button class="btn-ghost" data-act="edit-trail" style="font-size:11px;padding:5px 8px;">Edit</button><button class="site-del-btn" data-act="delete-trail" title="Delete this trail">🗑</button></div>'
+          : '');
+      // Tap the row → select + ride the line on the map (reveals its actions).
+      row.addEventListener('click', function(e){ if (e.target.closest('button')) return; selectTrail(trail.id, 'list'); renderList('trails'); });
+      var tv = row.querySelector('[data-act="toggle-trail-visibility"]');
+      if (tv) tv.addEventListener('click', async function(e){ e.stopPropagation(); trail.hidden = !trail.hidden; try{ await saveTrail(trail); }catch(err){ console.error('Outdoor Companion: trail visibility save failed', err); } renderSavedTrailOnMap(trail); renderList('trails'); });
+      var ed = row.querySelector('[data-act="edit-trail"]');
+      if (ed) ed.addEventListener('click', function(e){ e.stopPropagation(); selectTrail(trail.id, 'list'); openSaveTrailModal(true, trail); });
+      var dl = row.querySelector('[data-act="delete-trail"]');
+      if (dl) dl.addEventListener('click', async function(e){
+        e.stopPropagation();
+        var confirmed = await showConfirm('Delete "' + (trail.name || 'this trail') + '"? This cannot be undone.');
+        if (!confirmed) return;
+        if (savedTrailPolylines[trail.id]){ map.removeLayer(savedTrailPolylines[trail.id]); delete savedTrailPolylines[trail.id]; }
+        trails = trails.filter(function(t){ return t.id !== trail.id; });
+        try{ await deleteTrailStorage(trail.id); }catch(err){ console.error('Outdoor Companion: trail delete failed', err); }
+        if (selectedTrailId === trail.id) clearTrailSelection();
+        renderList('trails');
+      });
+      listEl.appendChild(row);
+    });
+  }
+
+  function renderList(forceCat){
     if (activeTab !== 'sites') return;
     var list = document.getElementById('site-list');
     var catTabsEl = document.getElementById('siteCatTabs');
     var filtered = sites.filter(function(s){ return activeFilters.has(s.type) && passesDateFilter(s.lastActivityAt || s.createdAt) && passesPropertyFilter(s); });
+    var farmTrails = trailsForActiveFarm();
     document.getElementById('siteCount').textContent = filtered.length + (filtered.length===1 ? ' SITE' : ' SITES');
-    if (filtered.length === 0){
+    if (filtered.length === 0 && farmTrails.length === 0){
       if (catTabsEl) catTabsEl.innerHTML = '';   // nothing on this farm → no category tabs, just the invite
       if (sites.length > 0){
         list.innerHTML = '<div class="empty">No sites match the current filter.<br>Try <strong>All Time</strong> in the date filter, or check your Site Types selection.</div>';
@@ -12629,16 +12627,20 @@
       }
       return;
     }
-    // Tally each category for this farm/filter, then decide which tab to show: your remembered pick if it
-    // still has sites here, otherwise the first non-empty one (so switching farms lands you on real data —
-    // without overwriting your saved preference).
+    // Tally each category for this farm/filter, then decide which tab to show: an explicit tap (forceCat)
+    // always wins; otherwise your remembered pick if it still has items here, else the first non-empty one
+    // (so switching farms lands you on real data — without overwriting your saved preference).
     var cats = getSiteCategories();
     var counts = {}; cats.forEach(function(c){ counts[c.key] = 0; });
     filtered.forEach(function(s){ var k = siteCatKeyForType(s.type); counts[k] = (counts[k] || 0) + 1; });
-    var displayCat = (activeSiteCat && counts[activeSiteCat]) ? activeSiteCat : null;
+    counts['trails'] = farmTrails.length;
+    var displayCat = forceCat || ((activeSiteCat && counts[activeSiteCat]) ? activeSiteCat : null);
     if (!displayCat){ for (var i = 0; i < cats.length; i++){ if (counts[cats[i].key] > 0){ displayCat = cats[i].key; break; } } }
     if (!displayCat) displayCat = activeSiteCat || cats[0].key;
     renderSiteCatTabs(counts, displayCat);
+
+    // Trails tab: its own line-based list.
+    if (displayCat === 'trails'){ renderTrailsRows(list, farmTrails); return; }
 
     var catFiltered = filtered.filter(function(s){ return siteCatKeyForType(s.type) === displayCat; });
     if (catFiltered.length === 0){
