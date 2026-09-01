@@ -59,9 +59,12 @@ WHERE THINGS ARE — THE APP LAYOUT (ALWAYS tell folks which panel/tab and the e
 - SWITCH HUNTING <-> FISHING: the 🏹 Hunting / 🎣 Fishing buttons at the top of the LEFT PANEL.
 
 POINTABLE TARGETS (tokens for the 'highlights' list — the app lights these up on screen)
-Left panel: add-site (+ Add Site), my-location (My Location), plan-hunt (Plan a Hunt), where-to-hunt
-(Where to Hunt), field-card (Field Card), hunt-mode (Hunt Mode), walk-in (Walk-In), log-sit (Log a
-Sit), scout-mode (Scout Mode), camera-plan (Camera Plan), terrain-read (Terrain Read).
+Left panel — arranged so it's not cluttered: at the top, always, are add-site (+ Add Site), my-location
+(My Location), and the DURING-HUNT tools you use in the field: hunt-mode (Hunt Mode), walk-in (Walk-In),
+log-sit (Log a Sit). The PRE-HUNT tools are tucked under a "🗓 Plan & Scout" drop-down (tap to open):
+where-to-hunt (Where to Hunt), plan-hunt (Plan a Hunt), field-card (Field Card), scout-mode (Scout Mode),
+terrain-read (Terrain Read), camera-plan (Camera Plan). Below that is the "🧰 Tools & Data" drop-down.
+NOTE: these hunt tools show on the SITES tab; switch to Sites first if you're on Cameras/Log/Analytics.
 Tabs: tab-sites, tab-log, tab-cameras, tab-analytics.
 Cameras tab buttons: scan-register (🏷 Scan Register — scan a tag; make/print tag sheets live under it),
 register-camera (✍ Register by Hand — add a camera with no tag), import-photos (🗂 Import Photos). Deploy
@@ -411,10 +414,10 @@ HOW TO play his movement / see where he's been: "🦌 Buck Gallery" -> his row -
 (plays his track in date order) or "📍 Where he's been (map)" (sized rings on his hotspots).
 
 PLAN A HUNT
-HOW TO Plan a Hunt: LEFT PANEL -> "🗓 Plan a Hunt". If you hunt several farms it asks which farm
+HOW TO Plan a Hunt: LEFT PANEL -> open "🗓 Plan & Scout" -> "🗓 Plan a Hunt". If you hunt several farms it asks which farm
 first; then pick "Now" or an upcoming forecast sit (each with a go/caution/no-go stoplight); that sets
 the conditions for the rest.
-HOW TO see Where to Hunt: LEFT PANEL -> "🎯 Where to Hunt". Set the "🗓 When are you sitting?" window
+HOW TO see Where to Hunt: LEFT PANEL -> open "🗓 Plan & Scout" -> "🎯 Where to Hunt". Set the "🗓 When are you sitting?" window
 (Now->dark / Light->noon / Noon->dark / All day) and the "🏹 How do you hunt?" style; read the
 "TONIGHT'S CALL" pick, then the ranked stands (each with property, a red/yellow/green scent stoplight,
 recent activity), and the "🦌 Bucks in play" list.
@@ -447,14 +450,14 @@ field/hardwood/pine/cutover/etc. across your ground + ½ mile. Use "Fade" to com
 to drag-fill.
 HOW TO show wind arrows: tap the "💨" button in the map toolbar — arrows point where the wind (and
 your scent) travels, with a "12 mph from NW" label. Tap "💨" again to clear; re-tap after panning far.
-HOW TO run Terrain Read: pick a farm in the top Property dropdown, LEFT PANEL -> "🗺 Terrain Read". It
+HOW TO run Terrain Read: pick a farm in the top Property dropdown, LEFT PANEL -> open "🗓 Plan & Scout" -> "🗺 Terrain Read". It
 points out cover + terrain features (📌 Timber point, 📐 Inside corner, ⏳ Pinch/neck, saddles,
 benches...) as candidates to verify; tap a row to fly to it. (Run "Field vs woods" in Property Setup
 first if it asks.)
-HOW TO use Scout Mode: LEFT PANEL -> "🔍 Scout Mode" (shows all sign & conjecture marks at once). Then
+HOW TO use Scout Mode: LEFT PANEL -> open "🗓 Plan & Scout" -> "🔍 Scout Mode" (shows all sign & conjecture marks at once). Then
 "➕ Add a Mark" to drop a pin, "✏️ Draw a Line" for a rub line/corridor, "🔍 Scouting Report" for the
 composite read. Tap "🔍 Scout Mode" again to turn it off.
-HOW TO run Camera Plan: pick a farm in the top dropdown, LEFT PANEL -> "📸 Camera Plan". Read
+HOW TO run Camera Plan: pick a farm in the top dropdown, LEFT PANEL -> open "🗓 Plan & Scout" -> "📸 Camera Plan". Read
 "📷 MY CAMERAS" (a verdict on each; set 📌 Anchor / 🎈 Float roles; ★ = shared, can't move), and
 "🎯 SUGGESTED SPOTS" (where to hang one to cover a gap — shown as 📷 map pins with capture rings). On
 a suggestion, "📍 Show on map" or "📷 Drop a mark".
