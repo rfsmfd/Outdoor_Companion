@@ -2260,7 +2260,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 576</div>
+    <div id="buildBadge">BUILD 577</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4407,6 +4407,7 @@
       while (el && el !== document.body && el.parentElement && el.parentElement !== document.body){
         var p = el.parentElement, cs = getComputedStyle(p);
         if (cs.position === 'fixed'){
+          if (p.id === 'sidebar' || p.id === 'displayTray') return null;   // docked panels are locked, never draggable
           var r = p.getBoundingClientRect();
           if (r.width >= window.innerWidth * 0.85 && r.height >= window.innerHeight * 0.85 && r.top <= 4 && r.left <= 4) return el;
         }
@@ -4417,6 +4418,11 @@
     document.addEventListener('pointerdown', function(e){
       if (e.button && e.button !== 0) return;
       if (interactive(e.target)) return;
+      // NEVER drag the docked sliding panels — the left sidebar and the Map Display tray. On a phone the
+      // sidebar is a fixed, ~full-screen panel, so without this guard the drag logic would grab its INSIDES
+      // (the folder body, tabs, the list) as a "card" and detach them, with no way back but an app refresh
+      // (founder-reported bug). These panels are locked; only true pop-up modals over the map are draggable.
+      if (e.target.closest && e.target.closest('#sidebar, #displayTray, #mobileMenuBtn, #displayTrayToggleBtn')) return;
       var card = findCard(e.target); if (!card) return;
       if (card.tagName === 'IMG' || card.tagName === 'CANVAS' || card.tagName === 'VIDEO') return;
       var r = card.getBoundingClientRect();
