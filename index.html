@@ -1033,6 +1033,44 @@
   }
   #folderBody #site-list{ padding:8px 8px 4px; }
 
+  /* Sites-tab category tabs: Stands / Cameras / Feeding / Parking / Other, each with a live count.
+     Pick one and the list below follows it. Wraps to a second row on a narrow phone. */
+  #siteCatTabs{
+    display:flex;
+    flex-wrap:wrap;
+    gap:5px;
+    padding:2px 8px 8px;
+  }
+  .site-cat-chip{
+    display:inline-flex;
+    align-items:center;
+    gap:5px;
+    background:#1c3327;
+    border:1px solid #3c6d42;
+    color:#cfe6d5;
+    font-size:12px;
+    font-weight:600;
+    padding:6px 10px;
+    border-radius:14px;
+    white-space:nowrap;
+  }
+  .site-cat-chip .cnt{
+    background:#0f2117;
+    color:#9db0a3;
+    font-size:11px;
+    min-width:17px;
+    text-align:center;
+    padding:1px 5px;
+    border-radius:9px;
+  }
+  .site-cat-chip.active{
+    background:var(--accent);
+    border-color:var(--accent);
+    color:#1A1204;
+  }
+  .site-cat-chip.active .cnt{ background:#1A1204; color:#FFD9A8; }
+  .site-cat-chip.empty:not(.active){ opacity:0.5; }
+
   .obs-row{
     display:flex;
     align-items:center;
@@ -2102,6 +2140,10 @@
         <button id="showMapBtn" title="Show these on the map">🗺 Show Map</button>
       </div>
 
+      <!-- Sites tab only: category tabs (Stands / Cameras / Feeding / Parking / Other) with a live count
+           on each, so you see at a glance how many of each this farm has. Pick one → the list follows. -->
+      <div id="siteCatTabs"></div>
+
       <div id="cameraToolbar" style="display:none;">
         <button class="btn-primary" id="scanRegisterBtn" style="flex:1 1 30%;background:#8FA05C;color:#14201A;">🏷 Scan Register</button>
         <button class="btn-primary" id="registerCamBtn" style="flex:1 1 30%;background:#B8AF9C;color:#1A1204;">✍ Register by Hand</button>
@@ -2198,7 +2240,7 @@
     <button id="compassBtn" title="Compass &amp; GPS coordinates" aria-label="Compass and GPS coordinates"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><polygon points="12,3 8,13 12,11 16,13" fill="#D94A2E"></polygon><polygon points="12,21 8,13 12,15 16,13" fill="#9aa89c"></polygon></svg></button>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 572</div>
+    <div id="buildBadge">BUILD 573</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12521,12 +12563,58 @@
     if (row && row.scrollIntoView) row.scrollIntoView({ block: 'center' });
   }
 
+  // ---------- Sites list: category tabs ----------
+  // The Sites list is split into a few plain-language CATEGORIES the hunter actually thinks in —
+  // Stands, Cameras, Feeding, Parking, Other — shown as a little tab row with a LIVE COUNT on each,
+  // so you know at a glance how many stands/cameras this farm has. Pick one; the list below follows.
+  // `types:null` = the catch-all ("Other") — anything not claimed by a named category lands there,
+  // so new site types are covered automatically.
+  var SITE_CATEGORIES_HUNTING = [
+    { key:'stands',  label:'Stands',  emoji:'🎯', types:['stand'] },
+    { key:'cameras', label:'Cameras', emoji:'📷', types:['camera'] },
+    { key:'feeding', label:'Feeding', emoji:'🌾', types:['feeding'] },
+    { key:'parking', label:'Parking', emoji:'🅿️', types:['access'] },
+    { key:'other',   label:'Other',   emoji:'📌', types:null }
+  ];
+  var SITE_CATEGORIES_FISHING = [
+    { key:'spots',  label:'Spots',  emoji:'🎣', types:['hole','structure','dropoff','brushpile'] },
+    { key:'access', label:'Access', emoji:'⛵', types:['ramp','dock'] },
+    { key:'bait',   label:'Bait',   emoji:'🪱', types:['baitshop'] },
+    { key:'other',  label:'Other',  emoji:'📌', types:null }
+  ];
+  function getSiteCategories(){ return activeModule === 'fishing' ? SITE_CATEGORIES_FISHING : SITE_CATEGORIES_HUNTING; }
+  function siteCatKeyForType(type){
+    var cats = getSiteCategories();
+    for (var i = 0; i < cats.length; i++){ if (cats[i].types && cats[i].types.indexOf(type) !== -1) return cats[i].key; }
+    return 'other';
+  }
+  var activeSiteCat = null;
+  try { activeSiteCat = localStorage.getItem('oc_site_cat'); } catch(e){}
+  function setActiveSiteCat(key){ activeSiteCat = key; try { localStorage.setItem('oc_site_cat', key); } catch(e){} }
+
+  // Render the category tab row with a count on each; `displayCat` is highlighted. Tapping a tab picks it.
+  function renderSiteCatTabs(counts, displayCat){
+    var el = document.getElementById('siteCatTabs'); if (!el) return;
+    var cats = getSiteCategories();
+    el.innerHTML = '';
+    cats.forEach(function(c){
+      var n = counts[c.key] || 0;
+      var chip = document.createElement('button');
+      chip.className = 'site-cat-chip' + (c.key === displayCat ? ' active' : '') + (n === 0 ? ' empty' : '');
+      chip.innerHTML = c.emoji + ' ' + escapeHtml(c.label) + ' <span class="cnt">' + n + '</span>';
+      chip.addEventListener('click', function(){ setActiveSiteCat(c.key); renderList(); });
+      el.appendChild(chip);
+    });
+  }
+
   function renderList(){
     if (activeTab !== 'sites') return;
     var list = document.getElementById('site-list');
+    var catTabsEl = document.getElementById('siteCatTabs');
     var filtered = sites.filter(function(s){ return activeFilters.has(s.type) && passesDateFilter(s.lastActivityAt || s.createdAt) && passesPropertyFilter(s); });
     document.getElementById('siteCount').textContent = filtered.length + (filtered.length===1 ? ' SITE' : ' SITES');
     if (filtered.length === 0){
+      if (catTabsEl) catTabsEl.innerHTML = '';   // nothing on this farm → no category tabs, just the invite
       if (sites.length > 0){
         list.innerHTML = '<div class="empty">No sites match the current filter.<br>Try <strong>All Time</strong> in the date filter, or check your Site Types selection.</div>';
       } else {
@@ -12536,11 +12624,28 @@
       }
       return;
     }
-    // Drop the highlight if the active stand is no longer in the filtered list (filter/property changed).
-    if (activeSiteId && !filtered.some(function(s){ return s.id === activeSiteId; })){ activeSiteId = null; highlightSiteOnMap(null); }
+    // Tally each category for this farm/filter, then decide which tab to show: your remembered pick if it
+    // still has sites here, otherwise the first non-empty one (so switching farms lands you on real data —
+    // without overwriting your saved preference).
+    var cats = getSiteCategories();
+    var counts = {}; cats.forEach(function(c){ counts[c.key] = 0; });
+    filtered.forEach(function(s){ var k = siteCatKeyForType(s.type); counts[k] = (counts[k] || 0) + 1; });
+    var displayCat = (activeSiteCat && counts[activeSiteCat]) ? activeSiteCat : null;
+    if (!displayCat){ for (var i = 0; i < cats.length; i++){ if (counts[cats[i].key] > 0){ displayCat = cats[i].key; break; } } }
+    if (!displayCat) displayCat = activeSiteCat || cats[0].key;
+    renderSiteCatTabs(counts, displayCat);
+
+    var catFiltered = filtered.filter(function(s){ return siteCatKeyForType(s.type) === displayCat; });
+    if (catFiltered.length === 0){
+      var cdef = cats.filter(function(c){ return c.key === displayCat; })[0];
+      list.innerHTML = '<div class="empty">No ' + (cdef ? cdef.label.toLowerCase() : 'sites') + ' on this farm yet.</div>';
+      return;
+    }
+    // Drop the highlight if the active stand is no longer in the shown list (filter/property/category changed).
+    if (activeSiteId && !catFiltered.some(function(s){ return s.id === activeSiteId; })){ activeSiteId = null; highlightSiteOnMap(null); }
     list.innerHTML = '';
     var myUid = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
-    filtered.slice().sort(function(a,b){ return b.createdAt - a.createdAt; }).forEach(function(s){
+    catFiltered.slice().sort(function(a,b){ return b.createdAt - a.createdAt; }).forEach(function(s){
       var t = getActiveTypes()[s.type] || getFallbackTypeEntry(false);
       var row = document.createElement('div');
       var isActive = activeSiteId === s.id;
@@ -13256,6 +13361,9 @@
       // The date filter belongs to the two lists it actually trims — Sites & Log — so it shows in the
       // folder body on both, and is hidden on Cameras & Analytics (it does nothing there).
       document.getElementById('filters').style.display = (activeTab === 'sites' || activeTab === 'log') ? '' : 'none';
+      // Category tabs (Stands/Cameras/…) belong to the Sites list only — the shared #site-list container
+      // gets reused by Log/Cameras/Analytics, so hide the category row on those or it'd sit over their content.
+      var _catTabs = document.getElementById('siteCatTabs'); if (_catTabs) _catTabs.style.display = (activeTab === 'sites') ? '' : 'none';
       document.getElementById('cameraToolbar').style.display = (activeTab === 'cameras') ? 'flex' : 'none';
       var _camTip = document.getElementById('cameraTip'); if (_camTip) _camTip.style.display = (activeTab === 'cameras') ? 'block' : 'none';
       // Each tab = its own tools: fold the hunt-flow stack + Tools&Data away on every tab but Sites.
