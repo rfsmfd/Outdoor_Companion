@@ -26,9 +26,12 @@ WHERE THINGS ARE — THE APP LAYOUT (ALWAYS tell folks which panel/tab and the e
   * Add a stand or any site: near the top of the LEFT PANEL tap "+ Add Site", then tap the spot on
     the map, give it a name, pick the type (Stand, Camera, Bedding, Feeding, Water, Parking, Boat
     Ramp...), and tap Save Site.
-  * Cameras & deploying them: tap the CAMERAS tab in the LEFT PANEL. There you'll find
-    "🏷 Register Camera" and "📷 Deploy Camera" (plus Batch QR codes and "🗂 Import Photos"). Deploy
-    drops the camera on a crosshair spot; if you move it later, the old spot stays in history.
+  * Cameras & deploying them: tap the CAMERAS tab in the LEFT PANEL. Three buttons up top:
+    "🏷 Scan Register" (scan a tag to register, and make/print tag sheets), "✍ Register by Hand"
+    (add a camera with no tag), and "🗂 Import Photos". Below them is your CAMERA LIST — each camera
+    shows its state and a "📍 Deploy here" (or "Undeploy") button. Deploying is per-camera from the
+    list now: tap "📍 Deploy here" and it drops the spot at your GPS. If you move a camera, the old
+    spot stays in history.
   * Your logged sightings and catches are under the LOG tab; your charts under 📊 ANALYTICS.
 - TURNING MAP LAYERS ON:
   * Property lines: tap the 📐 button in the map toolbar (the row of round map buttons), then zoom in — gold
@@ -60,8 +63,10 @@ Left panel: add-site (+ Add Site), my-location (My Location), plan-hunt (Plan a 
 (Where to Hunt), field-card (Field Card), hunt-mode (Hunt Mode), walk-in (Walk-In), log-sit (Log a
 Sit), scout-mode (Scout Mode), camera-plan (Camera Plan), terrain-read (Terrain Read).
 Tabs: tab-sites, tab-log, tab-cameras, tab-analytics.
-Cameras tab buttons: register-camera (Register Camera), deploy-camera (Deploy Camera), batch-qr
-(Batch QR codes), import-photos (Import Photos).
+Cameras tab buttons: scan-register (🏷 Scan Register — scan a tag; make/print tag sheets live under it),
+register-camera (✍ Register by Hand — add a camera with no tag), import-photos (🗂 Import Photos). Deploy
+is per-camera in the list (deploy-camera points there → tap "📍 Deploy here" on the camera's row). batch-qr
+points at Scan Register.
 Tools menu items: photo-gallery, solunar (Solunar Table), journal (Hunt Journal), trails, import
 (Import from other apps), export.
 Top toolbar / map: property-lines (the 📐 button), layers (the ⛰ Layers pill), wind (the 💨 button),
@@ -349,10 +354,12 @@ HOW TO fix a hunt's times: in the Journal, tap "Set End Time" on an in-progress 
 start time" on any row, and enter the real time in the picker.
 
 TRAIL CAMERAS
-HOW TO register a camera: point your phone's NORMAL Camera app at the printed QR tag and tap the link
--> "🏷 Register / Edit Details" -> fill Name/Make/Model/Notes -> "Save Details". (The "🏷 Register
-Camera" button on the Cameras tab just reminds you to use the phone's camera, with an in-app scanner
-fallback.)
+HOW TO register a camera — TWO ways (Cameras tab, one-time setup):
+  • WITH a tag: tap "🏷 Scan Register" -> "📷 Scan a tag" (or point your phone's normal Camera app at the
+    printed tag) -> fill Name/Make/Model/Notes -> Save. This ties that tag's number to the camera.
+  • WITHOUT a tag: tap "✍ Register by Hand" -> type the camera's name -> add make/model/notes -> Save. It
+    lands in your list ready to deploy — no decal needed.
+Either way, once it's registered you never scan it again; you deploy from the list.
 HOW TO deploy a camera (the easy field way): Cameras tab -> find the camera in your list -> tap the
 green "📍 Deploy here". That's it — it grabs your GPS, drops the spot right where you're standing, and
 marks it deployed. No scanning, no map, and it works with NO signal (GPS needs no bars). You only ever
@@ -368,11 +375,12 @@ HOW TO undeploy (pick up) a camera: Cameras tab -> the camera's row -> tap "Unde
 stamps the pickup date, frees the camera to redeploy, and keeps the spot on the map (no re-registration).
 HOW TO see deployment history: Cameras tab -> the camera's row -> "📜 History" (date/GPS/weather/moon
 per spot, permanent); "View on Map" shows a dashed-yellow marker at that old spot.
-HOW TO batch-generate QR tags: Cameras tab -> "🖶 Batch Generate QR Codes" (ONLY for brand-new
-cameras — makes new unique codes) -> enter how many + a name prefix -> print single-sided. Do a big
-batch in one run (numbering restarts each run).
-HOW TO re-print an existing camera's tag: Cameras tab -> "Print / Re-print Sheet" (reuses its code,
-keeps history). Never use Batch Generate for a replacement — that makes a second, disconnected camera.
+HOW TO batch-generate QR tags: Cameras tab -> "🏷 Scan Register" -> "🖶 Make QR tag sheet" (ONLY for
+brand-new cameras — makes new unique codes) -> enter how many + a name prefix -> print single-sided. Do a
+big batch in one run (numbering restarts each run).
+HOW TO re-print an existing camera's tag: Cameras tab -> "🏷 Scan Register" -> "🖨 Reprint a tag sheet"
+(reuses its code, keeps history). Never use Make QR tag sheet for a replacement — that makes a second,
+disconnected camera.
 
 PHOTOS, AI TAGGING & SORTING
 HOW TO browse the Photo Gallery: LEFT PANEL -> "🧰 Tools & Data" -> "📸 Photo Gallery". Filter by
