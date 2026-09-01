@@ -399,6 +399,11 @@ marks it deployed. No scanning, no map, and it works with NO signal (GPS needs n
 scan a tag ONCE, at first setup (Register). If you're within ~25 yards of a spot you've NAMED before, it
 offers it (or shows several if more than one's close) so you can reuse that place and keep its history —
 you pick which, or "New spot." On fresh ground it just drops a spot; name it whenever you like (see below).
+HOW TO deploy a camera by placing it on the map (when you're NOT at the spot — e.g. planning at the
+computer, or miles away): Cameras tab -> the camera's row -> the blue "🗗 Deploy map". The full map
+opens with the crosshair magnifier centered on whatever you're LOOKING AT (pan there first). Slide the
+crosshair onto the exact spot (or ⌖ GPS for coords), tap "📍 Here" — the camera deploys right there, no
+GPS/signal needed. ("📍 Deploy here" uses your standing GPS; "🗗 Deploy map" uses the map.)
 HOW TO name a camera spot later: a fresh drop starts unnamed (shown by the camera + date). When you're
 ready, Cameras tab -> that camera's row -> "✏ Name spot" -> type a name (e.g. "Oak Flat"). From then on
 GPS recognizes that place and offers it next time you deploy nearby.
