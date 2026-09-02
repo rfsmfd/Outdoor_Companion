@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 594</div>
+    <div id="buildBadge">BUILD 595</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -23089,8 +23089,14 @@
         var newMs = await promptDateTime('Deploy date & time — ' + cam.name, curDep.deployedAt);
         if (newMs == null) return;
         curDep.deployedAt = newMs;
+        // The open deployment IS the camera's most-recent one, so keep cam.lastDeployedAt in
+        // lockstep — the map popup card and Stand Profile read lastDeployedAt, not the deployment,
+        // so without this the pin's "Deployed …" tag stays stuck on the original (today's) date.
+        cam.lastDeployedAt = newMs;
         try{ await saveDeployment(curDep); }catch(e){ console.error('Outdoor Companion: deploy-date save failed', e); }
+        try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: deploy-date camera save failed', e); }
         renderCameraList();
+        if (typeof renderAll === 'function') renderAll();
         showToast('Deploy date set to ' + new Date(newMs).toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}));
       });
 
