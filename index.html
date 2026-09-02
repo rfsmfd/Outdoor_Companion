@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 595</div>
+    <div id="buildBadge">BUILD 596</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -23089,10 +23089,25 @@
         var newMs = await promptDateTime('Deploy date & time — ' + cam.name, curDep.deployedAt);
         if (newMs == null) return;
         curDep.deployedAt = newMs;
-        // The open deployment IS the camera's most-recent one, so keep cam.lastDeployedAt in
-        // lockstep — the map popup card and Stand Profile read lastDeployedAt, not the deployment,
-        // so without this the pin's "Deployed …" tag stays stuck on the original (today's) date.
+        // At deploy time the date gets stamped in THREE places, so all three must move together or
+        // the pin/popup keeps showing the original (today's) date somewhere:
+        //   1) cam.lastDeployedAt — drives "Deployed 1h ago" on the popup + the Stand Profile.
+        //   2) the auto-named site name suffix "· Sep 2" — drives the popup title + the map label.
+        //   3) site.notes "Deployed 9/2/2026" — the second dated line on the popup card.
+        // The open deployment IS the camera's most-recent one, so lastDeployedAt tracks it.
         cam.lastDeployedAt = newMs;
+        var depSite = sites.filter(function(s){ return s.id === curDep.siteId; })[0];
+        if (depSite){
+          // Only rewrite the name if it's still the auto "<cam> · <date>" form (don't clobber a name the user chose).
+          if (depSite.autoNamed){
+            depSite.name = cam.name + ' · ' + new Date(newMs).toLocaleDateString(undefined, { month:'short', day:'numeric' });
+          }
+          // Only rewrite the auto "Deployed <date>" note (leave a user's own notes alone).
+          if (depSite.notes && /^Deployed\b/.test(depSite.notes)){
+            depSite.notes = 'Deployed ' + new Date(newMs).toLocaleDateString();
+          }
+          try{ await saveSite(depSite); }catch(e){ console.error('Outdoor Companion: deploy-date site save failed', e); }
+        }
         try{ await saveDeployment(curDep); }catch(e){ console.error('Outdoor Companion: deploy-date save failed', e); }
         try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: deploy-date camera save failed', e); }
         renderCameraList();
