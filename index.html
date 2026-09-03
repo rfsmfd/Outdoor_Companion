@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 598</div>
+    <div id="buildBadge">BUILD 600</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2403,7 +2403,7 @@
         <button class="btn-ghost" id="logLocationGoCoordsBtn" type="button" style="flex:0 0 auto;font-size:12px;padding:8px 14px;">Go</button>
       </div>
       <div id="logBuckRow" style="display:none;margin-bottom:10px;">
-        <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:6px;">Which buck? <span style="opacity:.65;">optional — tags this sighting to him so it lands on his timeline</span></div>
+        <div style="font-size:11.5px;color:var(--text-dim);margin-bottom:6px;">Is it one of your tagged bucks? <span style="opacity:.65;">optional — pick him and this sighting lands on his timeline</span></div>
         <div id="logBuckChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
       </div>
       <div id="logDirRow" style="display:none;margin-bottom:10px;">
@@ -17344,33 +17344,52 @@
       });
     }
     var _prefTotal = _pref.does + _pref.unknown + Object.keys(_pref.buckIds).length;
-    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: null, does: _pref.does, unknown: _pref.unknown, bucks: {}, harvest: null, shotResult: null, hunter: (hunt && hunt.sitLog && hunt.sitLog.hunter) || null };
-    Object.keys(_pref.buckIds).forEach(function(bid){ st.bucks[bid] = true; });
+    // Smart-guess the movement rating from how many deer got logged this sit, so it's pre-picked and
+    // the hunter just confirms. Reopening a saved recap keeps whatever was chosen before. Thresholds:
+    // 0 deer = Dead, 1–2 = Slow, 3–4 = Steady, 5+ = Hot.
+    var _actGuess = _prefTotal >= 5 ? 'hot' : (_prefTotal >= 3 ? 'steady' : (_prefTotal >= 1 ? 'slow' : 'dead'));
+    var st = { hunt: hunt || null, standId: stand.id, sitTime: (hunt && hunt.checkInAt) ? hunt.checkInAt : Date.now(), activity: (hunt && hunt.sitLog && hunt.sitLog.activity) || _actGuess, harvest: (hunt && hunt.sitLog && hunt.sitLog.harvest) || null, harvestBuckId: (hunt && hunt.sitLog && hunt.sitLog.harvestBuckId) || null, shotResult: (hunt && hunt.sitLog && hunt.sitLog.shotResult) || null, hunter: (hunt && hunt.sitLog && hunt.sitLog.hunter) || null };
+    // Read-only tally of what came in through the "+" this sit. The Recap NEVER adds sightings — a second
+    // entry path is exactly the double-count trap the founder flagged. Every animal enters via Quick Log;
+    // here we only TOTAL them. (Harvest is the lone exception below, and only as a flag, never a new count.)
+    var _tally = { does: 0, unk: 0, named: {} };
+    ((hunt && hunt.observationIds) || []).forEach(function(oid){
+      var o = (typeof observations !== 'undefined' ? observations : []).filter(function(x){ return x.id === oid; })[0]; if (!o) return;
+      var c = o.count || 1;
+      if (o.type === 'doe') _tally.does += c;
+      else if (o.type === 'buck'){ if (o.buckProfileId) _tally.named[o.buckProfileId] = (_tally.named[o.buckProfileId] || 0) + c; else _tally.unk += c; }
+    });
     var back = document.createElement('div'); back.id = 'sitLogPanel'; back.style.cssText = 'position:fixed;inset:0;z-index:100012;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;font-family:inherit;overflow:auto;';
     var card = document.createElement('div'); card.style.cssText = 'background:#14201a;border:1px solid #2c3f34;border-radius:16px;padding:16px;width:440px;max-width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 14px 44px rgba(0,0,0,.6);';
     back.appendChild(card); document.body.appendChild(back);
     back.addEventListener('click', function(e){ if (e.target === back) back.remove(); });
-    function step(id, label, min){ return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;background:#1c2b23;border-radius:10px;padding:8px 11px;"><span style="font-size:12.5px;">' + label + '</span><span style="display:flex;align-items:center;gap:10px;"><button class="sl-dec" data-t="' + id + '" style="width:30px;height:30px;border-radius:8px;border:1px solid #3c4d42;background:#26332b;color:#e8f0ea;font-size:18px;cursor:pointer;line-height:1;">−</button><span id="sl-' + id + '" style="min-width:20px;text-align:center;font-weight:800;font-size:15px;">0</span><button class="sl-inc" data-t="' + id + '" style="width:30px;height:30px;border-radius:8px;border:1px solid #3c4d42;background:#26332b;color:#e8f0ea;font-size:18px;cursor:pointer;line-height:1;">+</button></span></div>'; }
     var standOpts = stands.map(function(s){ return '<option value="' + escapeHtml(s.id) + '"' + (s.id === st.standId ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>'; }).join('');
-    var buckChips = (typeof buckProfiles !== 'undefined' && buckProfiles.length) ? buckProfiles.map(function(b){ return '<button class="sl-buck" data-bid="' + escapeHtml(b.id) + '" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;">🦌 ' + escapeHtml(b.name) + '</button>'; }).join('') : '<span style="font-size:11px;color:#8aa596;">No named bucks yet — use Unknown, or name them on the board later.</span>';
+    // Read-only tally line: what the "+" captured this sit (does · unnamed bucks · named bucks).
+    var _tnames = Object.keys(_tally.named).map(function(id){ var bp = buckProfiles.filter(function(x){ return x.id === id; })[0]; return bp ? bp.name : 'a buck'; });
+    var _tparts = [ _tally.does ? (_tally.does + ' doe' + (_tally.does > 1 ? 's' : '')) : '', _tally.unk ? (_tally.unk + ' buck' + (_tally.unk > 1 ? 's' : '') + ' (unnamed)') : '', _tnames.join(', ') ].filter(Boolean);
+    var tallyHtml = _tparts.length ? ('<b>' + _tparts.join(' · ') + '</b>') : '<span style="opacity:.8;">Nothing logged this sit</span>';
+    // Tagged-buck picker for a harvest — one chip per shooter on the board, plus an Unknown/not-tagged option.
+    var harvBuckChips = (typeof buckProfiles !== 'undefined' && buckProfiles.length ? buckProfiles.map(function(b){ return '<button class="sl-hbuck" data-bid="' + escapeHtml(b.id) + '" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;">🦌 ' + escapeHtml(b.name) + '</button>'; }).join('') : '') + '<button class="sl-hbuck" data-bid="" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;">Unknown / not tagged</button>';
     var dLbl = fcDayLabel(st.sitTime);
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;"><div><div style="font-weight:800;font-size:16px;">📓 End-of-Hunt Recap</div><div style="font-size:11px;color:#8aa596;margin-top:2px;">' + escapeHtml(dLbl) + ' · feeds your rankings</div></div><button id="slX" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
-      '<div id="slRollup" style="display:none;font-size:11.5px;color:#bcd18a;background:rgba(124,203,124,.1);border-radius:9px;padding:9px 11px;margin-bottom:12px;line-height:1.5;"></div>' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:4px;">What you saw this sit <span style="opacity:.65;">— all logged with the “+”. Missed one? Close this and tap the “+”.</span></div>' +
+      '<div style="font-size:12.5px;background:#1c2b23;border-radius:9px;padding:9px 11px;margin-bottom:13px;line-height:1.5;color:#cfe3b8;">' + tallyHtml + '</div>' +
       '<div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Stand you sat</div>' +
       '<select id="slStand" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;margin-bottom:12px;">' + standOpts + '</select>' +
       '<div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Who sat it?</div>' +
       '<select id="slHunter" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;margin-bottom:12px;">' + hunterOptions(st.hunter) + '</select>' +
-      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">How was the movement?</div>' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">How was the movement? <span style="opacity:.7;">(pre-picked from your sightings — tap to change)</span></div>' +
       '<div style="display:flex;gap:6px;margin-bottom:13px;">' + SITLOG_ACT.map(function(a){ return '<button class="sl-act" data-k="' + a.k + '" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">' + a.label + '</button>'; }).join('') + '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:7px;margin-bottom:13px;">' + step('does', '🦌 Does seen', 0) + step('unknown', '🦌 Bucks (unnamed)', 0) + '</div>' +
-      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">Named bucks you saw</div>' +
-      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:13px;">' + buckChips + '</div>' +
-      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">Harvest?</div>' +
-      '<div style="display:flex;gap:6px;margin-bottom:13px;">' +
+      '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">Did you harvest?</div>' +
+      '<div style="display:flex;gap:6px;margin-bottom:10px;">' +
         '<button class="sl-harv" data-h="" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #63C6FF;background:#22323b;color:#e8f0ea;cursor:pointer;font-size:11.5px;">None</button>' +
         '<button class="sl-harv" data-h="buck" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">🎯 Buck</button>' +
         '<button class="sl-harv" data-h="doe" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">🎯 Doe</button>' +
+      '</div>' +
+      '<div id="slHarvBuckRow" style="display:none;margin-bottom:13px;">' +
+        '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">Which buck did you harvest? <span style="opacity:.7;">(one of your tagged shooters)</span></div>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;">' + harvBuckChips + '</div>' +
       '</div>' +
       '<div style="font-size:11px;color:#8aa596;margin-bottom:5px;">Shot opportunity? <span style="opacity:.7;">(in range — harvest above covers a hit)</span></div>' +
       '<div style="display:flex;gap:6px;margin-bottom:13px;">' +
@@ -17379,7 +17398,7 @@
         '<button class="sl-shot" data-s="missed" style="flex:1;padding:8px 4px;border-radius:9px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:11.5px;">❌ Missed</button>' +
       '</div>' +
       '<textarea id="slNotes" placeholder="Notes — wind reality, what spooked, time of movement, direction they came from…" style="width:100%;box-sizing:border-box;min-height:64px;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:9px;padding:9px;font-size:12.5px;font-family:inherit;resize:vertical;margin-bottom:13px;"></textarea>' +
-      '<div style="display:flex;gap:9px;"><button id="slSave" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;">Save the sit</button><button id="slCancel" style="background:transparent;border:1px solid #3c4d42;color:#9db0a3;border-radius:9px;padding:11px 14px;cursor:pointer;">Cancel</button></div>';
+      '<div style="display:flex;gap:9px;"><button id="slSave" style="flex:1;background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:9px;padding:11px;font-size:13px;font-weight:800;cursor:pointer;">Save recap</button><button id="slCancel" style="background:transparent;border:1px solid #3c4d42;color:#9db0a3;border-radius:9px;padding:11px 14px;cursor:pointer;">Cancel</button></div>';
     function close(){ back.remove(); }
     card.querySelector('#slX').addEventListener('click', close);
     card.querySelector('#slCancel').addEventListener('click', close);
@@ -17398,44 +17417,33 @@
       }
     });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(b){ b.addEventListener('click', function(){ st.activity = b.getAttribute('data-k'); Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(x){ var on = x.getAttribute('data-k') === st.activity; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
-    Array.prototype.forEach.call(card.querySelectorAll('.sl-buck'), function(b){ b.addEventListener('click', function(){ var id = b.getAttribute('data-bid'); st.bucks[id] = !st.bucks[id]; var on = st.bucks[id]; b.style.border = '1px solid ' + (on ? '#E8B04B' : '#3c4d42'); b.style.background = on ? '#3a3320' : '#1E2B23'; }); });
-    Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(b){ b.addEventListener('click', function(){ st.harvest = b.getAttribute('data-h') || null; Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(x){ var on = (x.getAttribute('data-h') || null) === st.harvest; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(b){ b.addEventListener('click', function(){ st.harvest = b.getAttribute('data-h') || null; if (st.harvest !== 'buck') st.harvestBuckId = null; Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(x){ var on = (x.getAttribute('data-h') || null) === st.harvest; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); var hr = card.querySelector('#slHarvBuckRow'); if (hr) hr.style.display = (st.harvest === 'buck') ? 'block' : 'none'; if (st.harvest !== 'buck'){ Array.prototype.forEach.call(card.querySelectorAll('.sl-hbuck'), function(x){ x.style.border = '1px solid #3c4d42'; x.style.background = '#1E2B23'; }); } }); });
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-hbuck'), function(b){ b.addEventListener('click', function(){ st.harvestBuckId = b.getAttribute('data-bid') || null; Array.prototype.forEach.call(card.querySelectorAll('.sl-hbuck'), function(x){ var on = (x.getAttribute('data-bid') || null) === st.harvestBuckId; x.style.border = '1px solid ' + (on ? '#E8B04B' : '#3c4d42'); x.style.background = on ? '#3a3320' : '#1E2B23'; }); }); });
     Array.prototype.forEach.call(card.querySelectorAll('.sl-shot'), function(b){ b.addEventListener('click', function(){ st.shotResult = b.getAttribute('data-s') || null; Array.prototype.forEach.call(card.querySelectorAll('.sl-shot'), function(x){ var on = (x.getAttribute('data-s') || null) === st.shotResult; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }); });
-    function bump(t, d){ st[t] = Math.max(0, (st[t] || 0) + d); var el = card.querySelector('#sl-' + t); if (el) el.textContent = st[t]; }
-    Array.prototype.forEach.call(card.querySelectorAll('.sl-inc'), function(b){ b.addEventListener('click', function(){ bump(b.getAttribute('data-t'), 1); }); });
-    Array.prototype.forEach.call(card.querySelectorAll('.sl-dec'), function(b){ b.addEventListener('click', function(){ bump(b.getAttribute('data-t'), -1); }); });
-    // paint the prefilled roll-up (counters, selected buck chips, and a note of what carried over)
-    card.querySelector('#sl-does').textContent = st.does;
-    card.querySelector('#sl-unknown').textContent = st.unknown;
-    Array.prototype.forEach.call(card.querySelectorAll('.sl-buck'), function(b){ if (st.bucks[b.getAttribute('data-bid')]){ b.style.border = '1px solid #E8B04B'; b.style.background = '#3a3320'; } });
-    if (_prefTotal > 0){
-      var ru = card.querySelector('#slRollup');
-      var _names = Object.keys(_pref.buckIds).map(function(id){ var bp = buckProfiles.filter(function(x){ return x.id === id; })[0]; return bp ? bp.name : 'a buck'; });
-      var _parts = [ _pref.does ? (_pref.does + ' doe' + (_pref.does > 1 ? 's' : '')) : '', _pref.unknown ? (_pref.unknown + ' buck' + (_pref.unknown > 1 ? 's' : '')) : '', _names.join(', ') ].filter(Boolean);
-      ru.style.display = 'block';
-      ru.innerHTML = '✓ Rolled up from what you logged this sit: <b>' + _parts.join(' · ') + '</b>. Just add anything you didn\'t pin.';
-    }
+    // Paint the pre-picked movement rating (the smart guess above) as selected, so it's ready to confirm.
+    Array.prototype.forEach.call(card.querySelectorAll('.sl-act'), function(x){ var on = x.getAttribute('data-k') === st.activity; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; });
+    // Restore harvest / tagged-buck / shot / notes when REOPENING a saved recap, so it opens on your prior answers.
+    if (st.harvest){ Array.prototype.forEach.call(card.querySelectorAll('.sl-harv'), function(x){ var on = (x.getAttribute('data-h') || null) === st.harvest; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); var hr0 = card.querySelector('#slHarvBuckRow'); if (hr0) hr0.style.display = (st.harvest === 'buck') ? 'block' : 'none'; }
+    if (st.harvestBuckId){ Array.prototype.forEach.call(card.querySelectorAll('.sl-hbuck'), function(x){ if ((x.getAttribute('data-bid') || null) === st.harvestBuckId){ x.style.border = '1px solid #E8B04B'; x.style.background = '#3a3320'; } }); }
+    if (st.shotResult){ Array.prototype.forEach.call(card.querySelectorAll('.sl-shot'), function(x){ var on = (x.getAttribute('data-s') || null) === st.shotResult; x.style.border = '1px solid ' + (on ? '#63C6FF' : '#3c4d42'); x.style.background = on ? '#22323b' : '#1E2B23'; }); }
+    if (hunt && hunt.sitLog && hunt.sitLog.notes){ var _nt = card.querySelector('#slNotes'); if (_nt) _nt.value = hunt.sitLog.notes; }
     card.querySelector('#slSave').addEventListener('click', function(){
       var stand = _logHuntStands().filter(function(s){ return s.id === st.standId; })[0]; if (!stand){ showToast('Pick a stand.'); return; }
       var notes = (card.querySelector('#slNotes').value || '').trim(), pid = _logPropIdFor(stand), created = [];
-      function mk(type, buckId, count, harv){ var o = { id: uid(), type: type, lat: stand.lat, lng: stand.lng, approx: false, siteId: stand.id, propertyId: pid, createdAt: st.sitTime, moonPhase: getMoonPhase(new Date(st.sitTime)), solunarPeriod: classifyEventSolunarPeriod(new Date(st.sitTime), stand.lat, stand.lng), weather: null, weatherStatus: 'pending', fromSit: true, activity: st.activity }; if (buckId) o.buckProfileId = buckId; if (count && count > 1) o.count = count; if (harv) o.harvest = true; if (notes) o.note = notes; if (st.hunter) o.hunter = st.hunter; return o; }
-      // DELTA only — the prefilled sightings already exist as observations, so we create just what you ADDED.
-      var namedSeen = Object.keys(st.bucks).filter(function(b){ return st.bucks[b]; });
-      var doeDelta = Math.max(0, st.does - _pref.does), unkDelta = Math.max(0, st.unknown - _pref.unknown);
-      var newNamed = namedSeen.filter(function(bid){ return !_pref.buckIds[bid]; });   // bucks not already quick-logged this sit
-      if (doeDelta > 0) created.push(mk('doe', null, doeDelta, st.harvest === 'doe'));
-      newNamed.forEach(function(bid){ created.push(mk('buck', bid, 1, false)); });
-      if (unkDelta > 0) created.push(mk('buck', null, unkDelta, false));
-      // harvest is a flag on ONE record, not an extra animal — mark a created one, or add a marker if it was prefilled
-      if (st.harvest === 'buck'){ var _bh = created.filter(function(o){ return o.type === 'buck'; })[0]; if (_bh) _bh.harvest = true; else created.push(mk('buck', null, 1, true)); }
-      if (st.harvest === 'doe'){ var _dh = created.filter(function(o){ return o.type === 'doe'; })[0]; if (_dh) _dh.harvest = true; else created.push(mk('doe', null, 1, true)); }
-      if (!created.length && !st.activity && !notes && _prefTotal === 0){ showToast('Nothing logged yet — set the movement, deer seen, or a note.'); return; }
-      created.forEach(function(o){ observations.push(o); saveObservation(o).catch(function(e){ console.error('Outdoor Companion: sit-log obs save failed', e); }); });
-      if (st.hunt){ st.hunt.observationIds = (st.hunt.observationIds || []).concat(created.map(function(o){ return o.id; })); st.hunt.sitLog = { activity: st.activity, does: st.does, buckIds: namedSeen, unknownBucks: st.unknown, harvest: st.harvest, shotResult: st.shotResult, shotOpp: !!(st.shotResult || st.harvest), hunter: st.hunter || null, notes: notes, loggedAt: Date.now() }; saveHuntEvent(st.hunt).catch(function(e){ console.error('Outdoor Companion: sit-log hunt save failed', e); }); }
+      // Harvest is the ONLY record the Recap creates — and only as a FLAG on a sighting, never a new head-count.
+      // Flag the matching sighting you already logged this sit; if you harvested something you never quick-logged,
+      // drop one marker for it (so a harvest is never lost just because you forgot to tap it in the moment).
+      function mk(type, buckId){ var o = { id: uid(), type: type, lat: stand.lat, lng: stand.lng, approx: false, siteId: stand.id, propertyId: pid, createdAt: st.sitTime, moonPhase: getMoonPhase(new Date(st.sitTime)), solunarPeriod: classifyEventSolunarPeriod(new Date(st.sitTime), stand.lat, stand.lng), weather: null, weatherStatus: 'pending', fromSit: true, harvest: true, activity: st.activity }; if (buckId) o.buckProfileId = buckId; if (notes) o.note = notes; if (st.hunter) o.hunter = st.hunter; return o; }
+      var sitObs = (((st.hunt && st.hunt.observationIds) || []).map(function(oid){ return observations.filter(function(x){ return x.id === oid; })[0]; })).filter(Boolean);
+      function flagOrCreate(type, buckId){ var target = sitObs.filter(function(o){ return o.type === type && (buckId ? o.buckProfileId === buckId : !o.buckProfileId); })[0]; if (target){ if (!target.harvest){ target.harvest = true; saveObservation(target).catch(function(e){ console.error('Outdoor Companion: harvest flag save failed', e); }); } return target; } var n = mk(type, buckId); created.push(n); return n; }
+      if (st.harvest === 'doe') flagOrCreate('doe', null);
+      else if (st.harvest === 'buck') flagOrCreate('buck', st.harvestBuckId || null);
+      created.forEach(function(o){ observations.push(o); saveObservation(o).catch(function(e){ console.error('Outdoor Companion: harvest obs save failed', e); }); });
+      if (st.hunt){ st.hunt.observationIds = (st.hunt.observationIds || []).concat(created.map(function(o){ return o.id; })); st.hunt.sitLog = { activity: st.activity, does: _tally.does, unknownBucks: _tally.unk, buckIds: Object.keys(_tally.named), harvest: st.harvest, harvestBuckId: st.harvestBuckId || null, shotResult: st.shotResult, shotOpp: !!(st.shotResult || st.harvest), hunter: st.hunter || null, notes: notes, loggedAt: Date.now() }; saveHuntEvent(st.hunt).catch(function(e){ console.error('Outdoor Companion: sit-log hunt save failed', e); }); }
       try { renderObsMarkers(); } catch (e) {}
       if (typeof activeTab !== 'undefined' && activeTab === 'log' && typeof renderLogList === 'function') renderLogList();
-      var seen = st.does + st.unknown + namedSeen.length;
-      showToast('Sit logged' + (seen ? ' — ' + seen + ' deer now feeding your maps' : '') + (st.harvest ? ' · 🎯 harvest recorded' : '') + '. It weighs into your rankings.');
+      var seen = _tally.does + _tally.unk + Object.keys(_tally.named).length;
+      showToast('Recap saved' + (seen ? ' — ' + seen + ' deer this sit' : '') + (st.harvest ? ' · 🎯 harvest recorded' : '') + '. It weighs into your rankings.');
       close();
     });
   }
