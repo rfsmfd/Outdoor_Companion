@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 596</div>
+    <div id="buildBadge">BUILD 597</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12032,7 +12032,9 @@
           '<div class="notes">📷 <strong>' + escapeHtml(cam.name) + '</strong> is here now</div>' +
           (makeModel ? '<div class="notes">' + escapeHtml(makeModel) + '</div>' : '') +
           (cam.notes ? '<div class="notes">' + escapeHtml(cam.notes) + '</div>' : '') +
-          (cam.lastDeployedAt ? '<div class="coords">Deployed ' + relTime(cam.lastDeployedAt) + '</div>' : '');
+          // One clean line = exact date + how long ago (e.g. "Deployed Sep 2, 2026 · 1h ago").
+          // The redundant auto "Deployed 9/2/2026" note is suppressed below where s.notes renders.
+          (cam.lastDeployedAt ? '<div class="coords">Deployed ' + new Date(cam.lastDeployedAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) + ' · ' + relTime(cam.lastDeployedAt) + '</div>' : '');
       }
     }
     // Per-item sharing: a member viewing the group sees others' items read-only; the
@@ -12098,7 +12100,8 @@
         '<div class="ty" style="color:'+t.color+'">'+t.label+'</div>' +
         camInfo +
         scoutInfo +
-        (s.notes ? '<div class="notes">'+escapeHtml(s.notes)+'</div>' : '') +
+        // Skip the auto "Deployed <date>" note on cameras — it duplicates the single dated line above.
+        (s.notes && !(s.type === 'camera' && /^Deployed\b/.test(s.notes)) ? '<div class="notes">'+escapeHtml(s.notes)+'</div>' : '') +
         buckNote +
         '<div class="coords">'+fmtCoord(s.lat)+', '+fmtCoord(s.lng)+'</div>' +
         photosBtn +
