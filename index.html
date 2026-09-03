@@ -2169,7 +2169,7 @@
       <div id="huntGroup" style="display:none;">
         <button class="btn-ghost" id="huntModeBtn" style="flex:1 1 100%;display:none;background:#14201A;color:#e8f0ea;border-color:#3c6d42;font-weight:600;">🎯 Hunt Mode — in-stand HUD</button>
         <button class="btn-ghost" id="walkInBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">🚶 Walk-In — best way to your stand</button>
-        <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 Log a Sit — what you saw</button>
+        <button class="btn-ghost" id="sitLogBtn" style="flex:1 1 100%;display:none;background:#1E2B23;color:#dfeee4;border-color:#3c6d42;font-weight:600;">📓 End-of-Hunt Recap</button>
       </div>
       <!-- TOOLS & DATA -->
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 597</div>
+    <div id="buildBadge">BUILD 598</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3854,7 +3854,7 @@
       'field-card': { tab:'sites', plan:true, el:'fieldCardBtn', label:'"Field Card" (in the 🗓 Plan & Scout drop-down)' },
       'hunt-mode': { tab:'sites', hunt:true, el:'huntModeBtn', label:'"Hunt Mode" (in the 🎯 Hunt drop-down)' },
       'walk-in': { tab:'sites', hunt:true, el:'walkInBtn', label:'"Walk-In" (in the 🎯 Hunt drop-down)' },
-      'log-sit': { tab:'sites', hunt:true, el:'sitLogBtn', label:'"Log a Sit" (in the 🎯 Hunt drop-down)' },
+      'log-sit': { tab:'sites', hunt:true, el:'sitLogBtn', label:'"End-of-Hunt Recap" (in the 🎯 Hunt drop-down)' },
       'scout-mode': { tab:'sites', plan:true, el:'scoutModeBtn', label:'"Scout Mode" (in the 🗓 Plan & Scout drop-down)' },
       'camera-plan': { tab:'sites', plan:true, el:'cameraPlanBtn', label:'"Camera Plan" (in the 🗓 Plan & Scout drop-down)' },
       'terrain-read': { tab:'sites', plan:true, el:'terrainReadBtn', label:'"Terrain Read" (in the 🗓 Plan & Scout drop-down)' },
@@ -16792,7 +16792,7 @@
   })();
 
   // "🎯 Hunt" drop-down — the during-hunt tools. Remembers open/closed (leave it open in season →
-  // one tap to Hunt Mode / Walk-In / Log a Sit). Default: open on desktop, tucked on phone.
+  // one tap to Hunt Mode / Walk-In / End-of-Hunt Recap). Default: open on desktop, tucked on phone.
   (function(){
     var tb = document.getElementById('huntToggleBtn'), tg = document.getElementById('huntGroup');
     if (!tb || !tg) return;
@@ -17355,7 +17355,7 @@
     var buckChips = (typeof buckProfiles !== 'undefined' && buckProfiles.length) ? buckProfiles.map(function(b){ return '<button class="sl-buck" data-bid="' + escapeHtml(b.id) + '" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;">🦌 ' + escapeHtml(b.name) + '</button>'; }).join('') : '<span style="font-size:11px;color:#8aa596;">No named bucks yet — use Unknown, or name them on the board later.</span>';
     var dLbl = fcDayLabel(st.sitTime);
     card.innerHTML =
-      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;"><div><div style="font-weight:800;font-size:16px;">📓 Log the sit</div><div style="font-size:11px;color:#8aa596;margin-top:2px;">' + escapeHtml(dLbl) + ' · feeds your rankings</div></div><button id="slX" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;"><div><div style="font-weight:800;font-size:16px;">📓 End-of-Hunt Recap</div><div style="font-size:11px;color:#8aa596;margin-top:2px;">' + escapeHtml(dLbl) + ' · feeds your rankings</div></div><button id="slX" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
       '<div id="slRollup" style="display:none;font-size:11.5px;color:#bcd18a;background:rgba(124,203,124,.1);border-radius:9px;padding:9px 11px;margin-bottom:12px;line-height:1.5;"></div>' +
       '<div style="font-size:11px;color:#8aa596;margin-bottom:4px;">Stand you sat</div>' +
       '<select id="slStand" style="width:100%;background:#1E2B23;color:#e8f0ea;border:1px solid #3c4d42;border-radius:8px;padding:8px;font-size:13px;font-weight:600;margin-bottom:12px;">' + standOpts + '</select>' +

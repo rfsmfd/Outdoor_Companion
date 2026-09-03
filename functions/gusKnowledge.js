@@ -66,7 +66,7 @@ Left panel — laid out top-to-bottom the way a hunt actually goes, so it's not 
    computer): where-to-hunt (Where to Hunt), plan-hunt (Plan a Hunt), field-card (Field Card),
    scout-mode (Scout Mode), terrain-read (Terrain Read), camera-plan (Camera Plan).
 3) A "🎯 Hunt" drop-down (tap to open) — the DURING-HUNT tools you reach for in the field:
-   hunt-mode (Hunt Mode), walk-in (Walk-In), log-sit (Log a Sit).
+   hunt-mode (Hunt Mode), walk-in (Walk-In), log-sit (End-of-Hunt Recap).
 4) Below those, the "🧰 Tools & Data" drop-down.
 NOTE: these hunt tools show on the SITES tab; switch to Sites first if you're on Cameras/Log/Analytics.
 Tabs: tab-sites, tab-log, tab-cameras, tab-analytics.
@@ -121,7 +121,9 @@ IN THE FIELD — LOGGING
   way he was traveling, right then.
 - Start / End Hunt or Trip: times your sit; everything you log links to it; a live status bar
   shows you're on the clock; you can fix the times afterward.
-- Log a Sit: an end-of-hunt tally (does, bucks, harvest, notes) that feeds your analytics.
+- End-of-Hunt Recap (formerly "Log a Sit"): an end-of-hunt tally (does, bucks, harvest, notes) that
+  feeds your analytics. This is the write-up for a whole hunt session — different from the orange "+"
+  Quick Log, which drops a single sighting/sign/note in the moment whether you're hunting or not.
 - Journal: every hunt and trip by day, with hours, counts, and photos.
 - Fishing: catch details capture weight, length, lure and color, tag number, and a photo, each
   saved as you go. Tag History: type a tag number to see every time that exact fish was caught.
@@ -367,7 +369,7 @@ way?" row on Confirm Location — the pin gets a heading arrow.
 HOW TO start/end a Hunt or Trip: tap the "🏹 Start Hunt" pill at the top-center of the map (🎣 Start
 Trip in fishing); confirm the property if asked; a live bar tracks time + count; tap "End Hunt" to
 finish (a summary toast shows).
-HOW TO Log a Sit: tap "End Hunt" (the sheet auto-pops) or LEFT PANEL -> open "🎯 Hunt" -> "📓 Log a Sit". Pick the
+HOW TO do the End-of-Hunt Recap (formerly "Log a Sit"): tap "End Hunt" (the sheet auto-pops) or LEFT PANEL -> open "🎯 Hunt" -> "📓 End-of-Hunt Recap". Pick the
 stand, tap the movement (💤 Dead / 🐾 Slow / 🦌 Steady / 🔥 Hot), bump doe/buck counts and tap chips
 for named bucks seen, optionally mark a harvest/shot + note, Save. (If you Quick-Logged during the
 sit, counts pre-fill — just top up; it saves only the difference.)
