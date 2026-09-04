@@ -359,8 +359,12 @@ Bedding and Water live under Other; Trails is your access paths & routes.
 HOW TO record a trail as you walk: 1) Tap the ⚫ Record Trail button (left side of the map, above 🧭
 Follow Me). 2) Walk it — a live line and distance/time show. 3) Tap ⚫ again to stop. 4) Name it, pick
 a Type (Access Trail / Boat Route / Game Trail / Custom), color, and line style (Solid/Dashed/Dotted).
-HOW TO draw a trail on the map: tap the ✏️ Draw-a-path button (map toolbar), click along the lane at
-each bend, double-click to finish, name it and set its style. Saves as an Access trail.
+HOW TO draw on the map: tap the ✏️ pencil (lower-left of the map). It opens a Draw menu — pick Line
+(a path/trail: click each bend, double-click to finish, name it), Area (trace a food plot / bedding /
+zone), Rectangle, or Circle. Areas/circles ask what they are (Food plot, Bedding, Field, Water, Hunt
+zone, Other) and get a matching color + a label on the map. Tap anything you drew to rename, recolor,
+or delete it. (The Scout Board pencil has the EXACT same Draw menu — the only difference is those drawings
+live on the Scout Board and show only in Scout Mode.)
 HOW TO manage trails: on the SITES folder tap the "🥾 Trails" category tab (it shows a count of this
 farm's trails). Tap a trail row to ride it on the map and reveal Show/Hide, Edit (rename/recolor/restyle;
 never changes the path), or Delete. You can also tap a trail line on the map to edit it there. (Trails
@@ -521,8 +525,9 @@ benches...) as candidates to verify; tap a row to fly to it. (Run "Field vs wood
 first if it asks.)
 HOW TO use Scout Mode: LEFT PANEL -> open "🗓 Plan & Scout" -> "🔍 Scout Mode" (shows all sign & conjecture
 marks at once). When it turns on, a purple "Scout Board" toolbar appears ON THE MAP with all the board tools
-— you doodle where the board is instead of digging in the list. On that toolbar: "✏️ Draw" (rub line /
-corridor / route), "➕ Mark" (drop a scout pin), "🔍 Report" (composite read), "📸 Cam Plan", and
+— you doodle where the board is instead of digging in the list. On that toolbar: "✏️ Draw" (opens the Draw menu — Line for a rub
+line/corridor/route, or Area/Rectangle/Circle to outline a food plot, bedding, or zone; each area gets a
+color + label), "➕ Mark" (drop a scout pin), "🔍 Report" (composite read), "📸 Cam Plan", and
 "🗺 Terrain". Drag the toolbar by any empty part of the bar to move it out of your way (it remembers where you put it).
 The tool you're using lights up; tap it again to turn it off. Tap the toolbar's "✕" (or "🔍 Scout Mode" in
 the list again) to turn the whole board off. NOTE: Camera Plan and
