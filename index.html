@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 601</div>
+    <div id="buildBadge">BUILD 602</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -7482,11 +7482,15 @@
     for (var i = 0; i < photos.length; i++){
       var p = photos[i];
       if (cameraId) p.cameraId = cameraId;   // correct the camera the batch was filed under
+      var _siteChanged = (p.matchedSiteId !== site.id);
       p.matchedSiteId = site.id;
       p.matchedSiteName = site.name;
-      // Now that they have a location, let weather (re)fetch — clear any earlier
-      // 'unavailable' that was set only because there was no site to key weather off.
-      if (p.weatherStatus !== 'ok'){ p.weatherStatus = 'pending'; }
+      // If the SITE actually changed, its solunar + weather were tied to the OLD coordinates — clear
+      // them so the enrich pass below re-pulls weather and recomputes solunar for the NEW spot (moon
+      // is global, so leave it). This matters most for a long move (a different farm miles away); the
+      // archive is day-cached, so a short move costs one cheap call. Otherwise just (re)try if missing.
+      if (_siteChanged){ p.solunarPeriod = null; p.weather = null; p.weatherStatus = 'pending'; }
+      else if (p.weatherStatus !== 'ok'){ p.weatherStatus = 'pending'; }
       if (hasChatStorage){ try{ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); done++; }catch(e){} }
       updateCardCondition(p);
     }

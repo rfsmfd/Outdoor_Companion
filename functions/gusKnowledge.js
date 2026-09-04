@@ -164,7 +164,8 @@ PHOTOS & AI
   location is saved as the SITE where the camera sat when it was taken.
 - Fix photos on the WRONG spot: in the Photo Gallery tap "📍 Move photos to another Site", pick the
   site they're wrongly on (FROM) and the site they belong on (TO), and Move — it moves every photo
-  from that site to the new one and leaves the camera alone. (This is the site-first way; the older
+  from that site to the new one, re-pulls the weather/solunar for the NEW spot (moon is unchanged),
+  and leaves the camera alone. (This is the site-first way; the older
   "🔧 Merge / fix camera" does the same move but framed around cameras, plus serial/junk-camera fixes.)
 - Unlocated photos (no site yet, e.g. they predate the camera's deploy date): use "🔄 Auto-match
   unlocated to deployments", or "📍 Assign a location to unlocated" to stamp a site by hand. If a batch
