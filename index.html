@@ -170,14 +170,18 @@
     display:flex;
     align-items:center;
     justify-content:space-between;
-    padding:7px 0;
+    padding:11px 4px;
+    min-height:44px;
+    box-sizing:border-box;
     gap:10px;
+    cursor:pointer;   /* the WHOLE row is the tap target (forwarded to its switch in JS), not just the 20px switch */
   }
+  .toggle-row:active{ background:rgba(255,255,255,0.05); }
   .toggle-row-label{
     display:flex;
     align-items:center;
     gap:7px;
-    font-size:12.5px;
+    font-size:13.5px;
     color:var(--text);
   }
   .toggle-switch{
@@ -279,7 +283,7 @@
     #actions .btn-primary, #cameraToolbar .btn-primary, #cameraToolbar .btn-ghost{ font-size:16px; padding:16px 10px; }
     #toolsGroup .btn-ghost{ font-size:17px; padding:15px 12px; }   /* keep Tools & Data big & readable on phones */
 
-    .tab-btn{ font-size:16px; padding:15px 0; }
+    .tab-btn{ font-size:13.5px; padding:12px 2px; }   /* one line, finger-tall (min-height:44 on the base rule) */
     #filters #showMapBtn{ display:inline-flex; }   /* phone: the list is primary; this hops to the map (specificity beats the base display:none defined later in the file) */
     .flabel{ font-size:13.5px; }
     .chip{ font-size:14.5px; padding:9px 14px; }
@@ -368,8 +372,10 @@
     background:transparent;
     border:none;
     border-radius:0;
-    padding:7px 14px;
-    font-size:11.5px;
+    padding:11px 16px;
+    min-height:44px;
+    box-sizing:border-box;
+    font-size:14px;
     font-weight:600;
     color:var(--text-dim);
     display:flex;
@@ -504,8 +510,10 @@
     background:#1c3327;
     border:1px solid #3c6d42;
     color:#cfe6d5;
-    font-size:12px;
-    padding:8px 10px;
+    font-size:14px;
+    padding:11px 12px;
+    min-height:44px;
+    box-sizing:border-box;
     border-radius:6px;
     text-align:left;
     white-space:normal;
@@ -519,9 +527,11 @@
     background:#2E4636;
     border:1px solid #4a7d53;
     color:#eaf7ee;
-    font-size:12px;
+    font-size:14px;
     font-weight:600;
-    padding:8px 12px;
+    padding:11px 14px;
+    min-height:44px;
+    box-sizing:border-box;
     border-radius:6px;
     white-space:nowrap;
   }
@@ -624,7 +634,7 @@
   }
   .site-meta{min-width:0;}
   .site-meta .nm{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-  .site-meta .ty{font-size:10.5px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px;}
+  .site-meta .ty{font-size:13px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.4px;}
   /* Tap a site row to ring its pin on the map (so you can find it even under an overlapping pin) and reveal
      a delete button for that exact stand — one deliberate removal at a time, no bulk delete. */
   .site-row.selected{background:rgba(255,106,19,0.16);border-color:#FF6A13;}
@@ -1061,10 +1071,13 @@
     border-radius:8px 8px 0 0;
     color:var(--text-dim);
     font-family:'Oswald',sans-serif;
-    font-size:12px;
-    letter-spacing:0.8px;
+    font-size:13.5px;
+    letter-spacing:0.3px;   /* tighter so "ANALYTICS" stays on ONE line in a narrow phone tab (was wrapping → 70px-tall tabs) */
     text-transform:uppercase;
-    padding:11px 0 10px;
+    white-space:nowrap;
+    padding:12px 2px;
+    min-height:44px;
+    box-sizing:border-box;
   }
   .tab-btn:hover:not(.active){ background:#1f2e26; color:var(--text); }
   .tab-btn.active{
@@ -1108,9 +1121,11 @@
     background:#1c3327;
     border:1px solid #3c6d42;
     color:#cfe6d5;
-    font-size:11px;
+    font-size:13px;
     font-weight:600;
-    padding:7px 5px;
+    padding:10px 7px;
+    min-height:44px;
+    box-sizing:border-box;
     border-radius:8px;
     white-space:nowrap;
     overflow:hidden;
@@ -1119,10 +1134,10 @@
   .site-cat-chip .cnt{
     background:#0f2117;
     color:#9db0a3;
-    font-size:10.5px;
+    font-size:12.5px;
     /* Fixed width (fits 1–2 digit counts identically) so the label NEVER shifts when a different farm has
        a bigger count — the row stayed the same width but the label was jittering (founder: looks unprofessional). */
-    width:15px;
+    width:18px;
     box-sizing:content-box;
     text-align:center;
     padding:1px 2px;
@@ -1161,7 +1176,7 @@
     transform:rotate(-45deg);
   }
   .obs-meta .nm{font-size:13px;font-weight:500;}
-  .obs-meta .ty{font-size:10.5px;color:var(--text-dim);}
+  .obs-meta .ty{font-size:13px;color:var(--text-dim);}
   .obs-meta .ty .site-link{color:var(--moss);}
   .obs-meta .ty .add-details-hint{color:var(--accent);font-weight:500;}
 
@@ -2350,7 +2365,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 610</div>
+    <div id="buildBadge">BUILD 611</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4559,6 +4574,14 @@
   // selected a trail — that bubbles up here a beat later, so the timestamp guard lets a fresh pick survive).
   map.on('click', function(){ if (selectedTrailId && !placing && (Date.now() - _trailClickAt > 350)) clearTrailSelection(); });
   map.on('click', function(e){ if (typeof scoutDrawing !== 'undefined' && scoutDrawing) scoutDrawAddPoint(e.latlng); });   // scout line pen: each tap drops a vertex
+  // Make the WHOLE display-tray toggle row a tap target (44px), forwarding a tap anywhere on the row to its
+  // switch — the switch keeps its own handler, so tapping the switch directly still works (guard prevents a
+  // double-fire). Delegated once, so it covers rows built in HTML and in JS alike.
+  document.addEventListener('click', function(e){
+    var row = e.target.closest && e.target.closest('.toggle-row'); if (!row) return;
+    if (e.target.closest('.toggle-switch')) return;   // the switch handles its own click
+    var sw = row.querySelector('.toggle-switch'); if (sw) sw.click();
+  });
 
   // ---------- Global: every modal panel is draggable ----------
   // Any card that's the child of a fixed, ~full-screen overlay can be grabbed by its TOP (header) zone and
