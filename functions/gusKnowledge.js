@@ -362,9 +362,11 @@ a Type (Access Trail / Boat Route / Game Trail / Custom), color, and line style 
 HOW TO draw on the map: tap the ✏️ pencil (lower-left of the map). It opens a Draw menu — pick Line
 (a path/trail: click each bend, double-click to finish, name it), Area (trace a food plot / bedding /
 zone), Rectangle, or Circle. Areas/circles ask what they are (Food plot, Bedding, Field, Water, Hunt
-zone, Other) and get a matching color + a label on the map. Tap anything you drew to rename, recolor,
-or delete it. (The Scout Board pencil has the EXACT same Draw menu — the only difference is those drawings
-live on the Scout Board and show only in Scout Mode.)
+zone, Other) and get a matching color + a label on the map. Tap anything you drew to select it: corner
+handles pop on so you can drag a corner to RESHAPE it, drag the body to MOVE the whole thing, and the popup
+lets you rename, recolor, or delete it — tap the empty map when you're done to save. (The Scout Board pencil
+has the EXACT same Draw menu — the only difference is those drawings live on the Scout Board and show only
+in Scout Mode.)
 HOW TO manage trails: on the SITES folder tap the "🥾 Trails" category tab (it shows a count of this
 farm's trails). Tap a trail row to ride it on the map and reveal Show/Hide, Edit (rename/recolor/restyle;
 never changes the path), or Delete. You can also tap a trail line on the map to edit it there. (Trails
