@@ -523,8 +523,9 @@ HOW TO use Scout Mode: LEFT PANEL -> open "🗓 Plan & Scout" -> "🔍 Scout Mod
 marks at once). When it turns on, a purple "Scout Board" toolbar appears ON THE MAP with all the board tools
 — you doodle where the board is instead of digging in the list. On that toolbar: "✏️ Draw" (rub line /
 corridor / route), "➕ Mark" (drop a scout pin), "🔍 Report" (composite read), "📸 Cam Plan", and
-"🗺 Terrain". Drag the toolbar by its ⠿ grip to move it out of your way (it remembers where you put it).
-Tap the toolbar's "✕" (or "🔍 Scout Mode" in the list again) to turn the board off. NOTE: Camera Plan and
+"🗺 Terrain". Drag the toolbar by any empty part of the bar to move it out of your way (it remembers where you put it).
+The tool you're using lights up; tap it again to turn it off. Tap the toolbar's "✕" (or "🔍 Scout Mode" in
+the list again) to turn the whole board off. NOTE: Camera Plan and
 Terrain Read live ON this Scout Board — they only show once Scout Mode is on, because they're markup-board
 tools that clear off your everyday map when you leave.
 HOW TO run Camera Plan: pick a farm in the top dropdown, turn on "🔍 Scout Mode" (Plan & Scout), then tap

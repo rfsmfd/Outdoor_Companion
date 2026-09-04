@@ -1889,7 +1889,7 @@
      doodle tools ON the board (the map) instead of stacking five buttons in the left list. */
   #scoutToolbar{ position:absolute; top:92px; left:50%; transform:translateX(-50%); z-index:645; display:none;
     align-items:center; gap:6px; max-width:calc(100% - 24px); overflow-x:auto; -webkit-overflow-scrolling:touch;
-    background:#3a2a52; border:1px solid #7d5aa8; border-radius:12px; padding:6px 8px; box-shadow:0 4px 16px rgba(0,0,0,.5); }
+    background:#3a2a52; border:1px solid #7d5aa8; border-radius:12px; padding:6px 8px; box-shadow:0 4px 16px rgba(0,0,0,.5); cursor:move; }
   #scoutToolbar::-webkit-scrollbar{ height:0; }
   #scoutToolbar .stb-grip{ flex:0 0 auto; color:#b79ad6; font-size:15px; line-height:1; padding:2px 4px; cursor:grab; touch-action:none; user-select:none; }
   #scoutToolbar.dragging{ box-shadow:0 8px 26px rgba(0,0,0,.6); }
@@ -1898,6 +1898,8 @@
   #scoutToolbar .stb-btn{ flex:0 0 auto; white-space:nowrap; background:#1c1726; color:#e9ddf5; border:1px solid #5a3e78;
     border-radius:8px; padding:7px 11px; font-size:12.5px; font-weight:600; cursor:pointer; }
   #scoutToolbar .stb-btn:hover{ background:#2a2138; }
+  #scoutToolbar .stb-btn{ cursor:pointer; }
+  #scoutToolbar .stb-btn.active{ background:#7d5aa8; border-color:#d8c4f0; color:#fff; box-shadow:inset 0 0 0 1px #d8c4f0, 0 0 8px rgba(160,120,210,.5); }
   #scoutToolbar .stb-exit{ background:transparent; border-color:#7d5aa8; color:#cbb8e6; font-weight:800; padding:7px 10px; }
   @media(max-width:820px){
     #scoutToolbar{ top:auto; bottom:14px; left:8px; right:8px; transform:none; max-width:none; justify-content:flex-start; padding:5px 6px; }
@@ -2345,7 +2347,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 607</div>
+    <div id="buildBadge">BUILD 608</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9114,6 +9116,7 @@
       var on = (activeModule === 'hunting' && scoutMode);
       _stb.style.display = on ? 'flex' : 'none';
       if (on && typeof restoreScoutToolbarPos === 'function') restoreScoutToolbarPos();
+      if (on && typeof syncScoutBoard === 'function') syncScoutBoard();
     }
   }
   // Put the Scout Board toolbar back where you last dragged it (remembered per browser). No saved spot →
@@ -9128,12 +9131,29 @@
     var top  = Math.max(4, Math.min(saved.top,  ph - th - 4));
     tb.style.left = left + 'px'; tb.style.top = top + 'px'; tb.style.right = 'auto'; tb.style.bottom = 'auto'; tb.style.transform = 'none';
   }
-  // Drag the Scout Board toolbar by its grip (or title) — pointer events so it works with mouse AND touch.
+  // Light up whichever Scout Board tool is currently active, derived from the REAL state (drawing flag,
+  // placing flag, or which panel is open in the DOM) — so the highlight stays right even when a panel is
+  // closed by its own ✕. Panels tag themselves with data-scout-tool so we can tell which is open.
+  function syncScoutBoard(){
+    var tb = document.getElementById('scoutToolbar'); if (!tb) return;
+    var active = {
+      draw: (typeof scoutDrawing !== 'undefined' && scoutDrawing),
+      mark: (typeof placing !== 'undefined' && placing && typeof pendingSiteType !== 'undefined' && pendingSiteType === 'scout'),
+      camplan: !!document.querySelector('[data-scout-tool="camplan"]'),
+      terrain: !!document.querySelector('[data-scout-tool="terrain"]'),
+      report:  !!document.querySelector('[data-scout-tool="report"]')
+    };
+    Array.prototype.forEach.call(tb.querySelectorAll('.stb-btn[data-scout]'), function(b){
+      var k = b.getAttribute('data-scout');
+      if (active.hasOwnProperty(k)) b.classList.toggle('active', !!active[k]);
+    });
+  }
+  // Drag the Scout Board toolbar from anywhere on the bar (buttons excepted) — pointer events, mouse + touch.
   (function initScoutToolbarDrag(){
     var tb = document.getElementById('scoutToolbar'); if (!tb) return;
-    var handles = tb.querySelectorAll('.stb-grip, .stb-title');
     var dragging = false, sx = 0, sy = 0, startLeft = 0, startTop = 0, parent = null;
     function begin(e){
+      if (e.target.closest('.stb-btn')) return;   // button taps pass through; drag from anywhere else on the bar
       parent = tb.offsetParent || tb.parentElement; if (!parent) return;
       var pr = parent.getBoundingClientRect(), tr = tb.getBoundingClientRect();
       startLeft = tr.left - pr.left; startTop = tr.top - pr.top;
@@ -9149,6 +9169,7 @@
       var nl = Math.max(4, Math.min(startLeft + (e.clientX - sx), pr.width - tw - 4));
       var nt = Math.max(4, Math.min(startTop + (e.clientY - sy), pr.height - th - 4));
       tb.style.left = nl + 'px'; tb.style.top = nt + 'px';
+      if (typeof positionScoutDrawBar === 'function') positionScoutDrawBar();   // keep the draw bar docked under the board
       if (e.cancelable) e.preventDefault();
     }
     function end(){
@@ -9156,7 +9177,7 @@
       document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', end);
       try { localStorage.setItem('oc_scout_tb_pos', JSON.stringify({ left: parseInt(tb.style.left, 10) || 0, top: parseInt(tb.style.top, 10) || 0 })); } catch(e){}
     }
-    Array.prototype.forEach.call(handles, function(h){ h.addEventListener('pointerdown', begin); });
+    tb.addEventListener('pointerdown', begin);
   })();
   // ---------- ✏️ Scout line pen — tap-to-place rub lines / corridors / routes on the markup board ----------
   // Dashed purple conjecture lines, saved via the trail store (so they persist + sync) but tagged scoutKind
@@ -9171,6 +9192,7 @@
     var mapEl = document.getElementById('map'); if (mapEl) mapEl.style.cursor = 'crosshair';
     showScoutDrawBar();
     if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();
+    if (typeof syncScoutBoard === 'function') syncScoutBoard();
     showToast('Tap the map to trace the line — Finish when done ✏️');
   }
   function scoutDrawAddPoint(latlng){
@@ -9183,6 +9205,7 @@
   }
   function endScoutDraw(save){
     scoutDrawing = false;
+    if (typeof syncScoutBoard === 'function') syncScoutBoard();
     var mapEl = document.getElementById('map'); if (mapEl) mapEl.style.cursor = '';
     if (scoutDrawBar){ scoutDrawBar.remove(); scoutDrawBar = null; }
     scoutDrawDots.forEach(function(d){ map.removeLayer(d); }); scoutDrawDots = [];
@@ -9203,11 +9226,26 @@
   function showScoutDrawBar(){
     if (scoutDrawBar) scoutDrawBar.remove();
     scoutDrawBar = document.createElement('div');
-    scoutDrawBar.style.cssText = 'position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:100055;background:#241E2E;border:1px solid #5a3e78;border-radius:12px;padding:8px 10px;display:flex;gap:8px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.55);';
+    scoutDrawBar.style.cssText = 'position:fixed;z-index:100055;background:#241E2E;border:1px solid #5a3e78;border-radius:12px;padding:8px 10px;display:flex;gap:8px;align-items:center;box-shadow:0 8px 30px rgba(0,0,0,.55);';
     scoutDrawBar.innerHTML = '<span id="sdInfo" style="color:#e9ddf5;font-size:13px;">Tap to place points…</span><button id="sdFin" style="background:#2E4636;border:1px solid #3c6d42;color:#dff0e4;border-radius:8px;padding:7px 12px;font-weight:700;cursor:pointer;">Finish</button><button id="sdCan" style="background:transparent;border:1px solid #5a3e78;color:#c9b3e0;border-radius:8px;padding:7px 10px;cursor:pointer;">Cancel</button>';
     document.body.appendChild(scoutDrawBar);
+    positionScoutDrawBar();
     scoutDrawBar.querySelector('#sdFin').addEventListener('click', function(){ endScoutDraw(true); });
     scoutDrawBar.querySelector('#sdCan').addEventListener('click', function(){ endScoutDraw(false); });
+  }
+  // Dock the draw bar right under the Scout Board toolbar (so it travels WITH the board, not stuck at the
+  // bottom of the screen). Falls back to bottom-center if the toolbar isn't showing for some reason.
+  function positionScoutDrawBar(){
+    if (!scoutDrawBar) return;
+    var tb = document.getElementById('scoutToolbar');
+    if (tb && getComputedStyle(tb).display !== 'none'){
+      var r = tb.getBoundingClientRect(), bw = scoutDrawBar.offsetWidth || 220;
+      var left = Math.max(8, Math.min(r.left, window.innerWidth - bw - 8));
+      scoutDrawBar.style.left = left + 'px'; scoutDrawBar.style.top = (r.bottom + 6) + 'px';
+      scoutDrawBar.style.right = 'auto'; scoutDrawBar.style.bottom = 'auto'; scoutDrawBar.style.transform = 'none';
+    } else {
+      scoutDrawBar.style.left = '50%'; scoutDrawBar.style.bottom = '20px'; scoutDrawBar.style.top = 'auto'; scoutDrawBar.style.transform = 'translateX(-50%)';
+    }
   }
   function chooseScoutLineKind(cb){
     var back = document.createElement('div'); back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;';
@@ -11482,9 +11520,10 @@
     h += '<div style="color:#9db0a3;font-size:12px;margin-top:8px;">Patterns to go check on the ground — not predictions. The more you log, the sharper this gets.</div></div>';
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100061;background:rgba(0,0,0,.6);display:flex;align-items:flex-start;justify-content:center;padding:20px;overflow:auto;';
+    back.setAttribute('data-scout-tool', 'report');
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:460px;width:100%;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);margin:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof syncScoutBoard === 'function') syncScoutBoard(); }
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;padding-bottom:6px;border-bottom:1px solid #35443A;"><div style="font-weight:800;font-size:17px;">🔍 Scouting Report</div><button class="sr-x" style="background:transparent;border:none;color:#9db0a3;font-size:24px;cursor:pointer;line-height:1;">×</button></div>' +
       '<div style="font-size:12px;color:#9db0a3;margin-bottom:8px;">' + (prop ? escapeHtml(prop.name) : 'All properties') + '</div>' + h;
@@ -11689,9 +11728,10 @@
     // NON-DIMMING, draggable panel — opens to the side so the map stays visible & clickable behind it.
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
+    back.setAttribute('data-scout-tool', 'camplan');
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:440px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); showCameraFlags = _prevCamFlags; if (typeof renderMarkers === 'function') renderMarkers(); document.removeEventListener('keydown', onKey); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); showCameraFlags = _prevCamFlags; if (typeof renderMarkers === 'function') renderMarkers(); document.removeEventListener('keydown', onKey); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); if (typeof syncScoutBoard === 'function') syncScoutBoard(); }
     function onKey(e){ if (e.key === 'Escape') close(); }
     _scoutPanels.push(close);
     card.innerHTML =
@@ -11987,9 +12027,10 @@
     h += '<div style="color:#9db0a3;font-size:11.5px;margin-top:8px;">This is me pointing at the map like a hunting buddy would — sometimes fresh eyes catch the obvious. But you know the dirt. What do you see that I don\'t?</div></div>';
     var back = document.createElement('div');
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
+    back.setAttribute('data-scout-tool', 'terrain');
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:430px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearTerrainPins === 'function') clearTerrainPins(); try { map.off('click', onMapClose); } catch (e) {} document.removeEventListener('keydown', onKey); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearTerrainPins === 'function') clearTerrainPins(); try { map.off('click', onMapClose); } catch (e) {} document.removeEventListener('keydown', onKey); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); if (typeof syncScoutBoard === 'function') syncScoutBoard(); }
     function onKey(e){ if (e.key === 'Escape') close(); }
     function onMapClose(){ close(); }   // it's a read panel — tapping the map (to go look) dismisses it
     _scoutPanels.push(close);
@@ -15553,6 +15594,7 @@
       placing = true; pendingSiteType = 'scout';
       addBtn.classList.add('active'); addBtn.textContent = 'Cancel';
       hint.classList.add('show'); mapEl.classList.add('placing');
+      if (typeof syncScoutBoard === 'function') syncScoutBoard();
       showToast('Tap the map where it looks promising 👁 — jot why in Notes');
       if (window.innerWidth <= 820) closeSidebar();
     });
@@ -15574,8 +15616,18 @@
         var b = e.target.closest('[data-scout]'); if (!b) return;
         var act = b.getAttribute('data-scout');
         if (act === 'exit'){ setScoutMode(false); showToast('Scout Mode off — back to your clean hunt map'); return; }
+        // If this tool is already ON (highlighted), tapping it turns it OFF.
+        if (b.classList.contains('active')){
+          if (act === 'draw'){ if (typeof endScoutDraw === 'function') endScoutDraw(false); }
+          else if (act === 'mark'){ if (typeof exitPlacing === 'function') exitPlacing(); }
+          else { if (typeof closeScoutPanels === 'function') closeScoutPanels(); }   // camplan / terrain / report
+          if (typeof syncScoutBoard === 'function') syncScoutBoard();
+          return;
+        }
+        // Otherwise open it (the hidden list button holds the real logic; panels close any other open panel first).
         var _ids = { draw:'scoutDrawBtn', mark:'scoutSpotBtn', report:'scoutReportBtn', camplan:'cameraPlanBtn', terrain:'terrainReadBtn' };
         var target = document.getElementById(_ids[act]); if (target) target.click();
+        if (typeof syncScoutBoard === 'function') syncScoutBoard();
       });
     }
     var fcBtn = document.getElementById('fieldCardBtn');
@@ -15687,6 +15739,7 @@
     addBtn.textContent = '+ Add Site';
     hint.classList.remove('show');
     mapEl.classList.remove('placing');
+    if (typeof syncScoutBoard === 'function') syncScoutBoard();
   }
 
   // ---------- base layer switcher ----------
