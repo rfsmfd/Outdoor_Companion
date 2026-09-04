@@ -1885,6 +1885,25 @@
   }
   #quickLogFab:hover{transform:scale(1.06);}
   #quickLogFab:active{transform:scale(0.95);}
+  /* Scout Board — the on-map toolbar of markup-board tools, shown only while Scout Mode is ON. Keeps the
+     doodle tools ON the board (the map) instead of stacking five buttons in the left list. */
+  #scoutToolbar{ position:absolute; top:92px; left:50%; transform:translateX(-50%); z-index:645; display:none;
+    align-items:center; gap:6px; max-width:calc(100% - 24px); overflow-x:auto; -webkit-overflow-scrolling:touch;
+    background:#3a2a52; border:1px solid #7d5aa8; border-radius:12px; padding:6px 8px; box-shadow:0 4px 16px rgba(0,0,0,.5); }
+  #scoutToolbar::-webkit-scrollbar{ height:0; }
+  #scoutToolbar .stb-grip{ flex:0 0 auto; color:#b79ad6; font-size:15px; line-height:1; padding:2px 4px; cursor:grab; touch-action:none; user-select:none; }
+  #scoutToolbar.dragging{ box-shadow:0 8px 26px rgba(0,0,0,.6); }
+  #scoutToolbar.dragging .stb-grip{ cursor:grabbing; }
+  #scoutToolbar .stb-title{ color:#e9ddf5; font-weight:800; font-size:12.5px; padding:0 4px; white-space:nowrap; flex:0 0 auto; cursor:grab; }
+  #scoutToolbar .stb-btn{ flex:0 0 auto; white-space:nowrap; background:#1c1726; color:#e9ddf5; border:1px solid #5a3e78;
+    border-radius:8px; padding:7px 11px; font-size:12.5px; font-weight:600; cursor:pointer; }
+  #scoutToolbar .stb-btn:hover{ background:#2a2138; }
+  #scoutToolbar .stb-exit{ background:transparent; border-color:#7d5aa8; color:#cbb8e6; font-weight:800; padding:7px 10px; }
+  @media(max-width:820px){
+    #scoutToolbar{ top:auto; bottom:14px; left:8px; right:8px; transform:none; max-width:none; justify-content:flex-start; padding:5px 6px; }
+    #scoutToolbar .stb-title{ display:none; }
+    #scoutToolbar .stb-btn{ padding:8px 10px; }
+  }
   #quickLogFab .fab-label{
     position:absolute;
     top:72px;
@@ -2326,7 +2345,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 605</div>
+    <div id="buildBadge">BUILD 606</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2335,6 +2354,17 @@
       </div>
     </div>
     <div id="map"></div>
+
+    <div id="scoutToolbar" style="display:none;">
+      <span class="stb-grip" title="Drag to move">⠿</span>
+      <span class="stb-title" title="Scout Board — drag to move">🔍</span>
+      <button type="button" class="stb-btn" data-scout="draw">✏️ Draw</button>
+      <button type="button" class="stb-btn" data-scout="mark">➕ Mark</button>
+      <button type="button" class="stb-btn" data-scout="report">🔍 Report</button>
+      <button type="button" class="stb-btn" data-scout="camplan">📸 Cam Plan</button>
+      <button type="button" class="stb-btn" data-scout="terrain">🗺 Terrain</button>
+      <button type="button" class="stb-btn stb-exit" data-scout="exit" title="Turn Scout Mode off">✕</button>
+    </div>
 
     <div id="toast"></div>
 
@@ -3857,8 +3887,8 @@
       'walk-in': { tab:'sites', hunt:true, el:'walkInBtn', label:'"Walk-In" (in the 🎯 Hunt drop-down)' },
       'log-sit': { tab:'sites', hunt:true, el:'sitLogBtn', label:'"End-of-Hunt Recap" (in the 🎯 Hunt drop-down)' },
       'scout-mode': { tab:'sites', plan:true, el:'scoutModeBtn', label:'"Scout Mode" (in the 🗓 Plan & Scout drop-down)' },
-      'camera-plan': { tab:'sites', plan:true, el:'cameraPlanBtn', label:'"Camera Plan" (in the 🗓 Plan & Scout drop-down)' },
-      'terrain-read': { tab:'sites', plan:true, el:'terrainReadBtn', label:'"Terrain Read" (in the 🗓 Plan & Scout drop-down)' },
+      'camera-plan': { tab:'sites', plan:true, el:'scoutModeBtn', label:'"📸 Cam Plan" on the on-map Scout Board toolbar (turn on 🔍 Scout Mode first)' },
+      'terrain-read': { tab:'sites', plan:true, el:'scoutModeBtn', label:'"🗺 Terrain" on the on-map Scout Board toolbar (turn on 🔍 Scout Mode first)' },
       'tab-sites': { tab:'sites', label:'the Sites tab' },
       'tab-log': { tab:'log', label:'the Log tab' },
       'tab-cameras': { tab:'cameras', label:'the Cameras tab' },
@@ -9074,14 +9104,60 @@
       b.style.color = scoutMode ? '#ffffff' : '#e9ddf5';
       b.style.borderColor = scoutMode ? '#7d5aa8' : '#5a3e78';
     }
-    // Add-a-Mark, Draw-a-Line and Scouting Report live INSIDE Scout Mode — only show when the board is on.
-    var show = (activeModule === 'hunting' && scoutMode) ? 'block' : 'none';
-    var add = document.getElementById('scoutSpotBtn'); if (add) add.style.display = show;
-    var draw = document.getElementById('scoutDrawBtn'); if (draw) draw.style.display = show;
-    var rep = document.getElementById('scoutReportBtn'); if (rep) rep.style.display = show;
-    var camp = document.getElementById('cameraPlanBtn'); if (camp) camp.style.display = show;
-    var terr = document.getElementById('terrainReadBtn'); if (terr) terr.style.display = show;
+    // The five markup-board tools now live ON THE MAP (the Scout Board toolbar), so you doodle where the
+    // board is instead of stacking buttons in the left list. Keep the old list buttons hidden — they still
+    // back the toolbar's taps (each toolbar button just .click()s its list button) — and show/hide the
+    // on-map toolbar with the board.
+    ['scoutSpotBtn','scoutDrawBtn','scoutReportBtn','cameraPlanBtn','terrainReadBtn'].forEach(function(id){ var e = document.getElementById(id); if (e) e.style.display = 'none'; });
+    var _stb = document.getElementById('scoutToolbar');
+    if (_stb){
+      var on = (activeModule === 'hunting' && scoutMode);
+      _stb.style.display = on ? 'flex' : 'none';
+      if (on && typeof restoreScoutToolbarPos === 'function') restoreScoutToolbarPos();
+    }
   }
+  // Put the Scout Board toolbar back where you last dragged it (remembered per browser). No saved spot →
+  // leave the CSS default (top-center on desktop, bottom on phone). Clamped so it can't land off-screen.
+  function restoreScoutToolbarPos(){
+    var tb = document.getElementById('scoutToolbar'); if (!tb) return;
+    var parent = tb.offsetParent || tb.parentElement; if (!parent) return;
+    var saved = null; try { saved = JSON.parse(localStorage.getItem('oc_scout_tb_pos') || 'null'); } catch(e){}
+    if (!saved) return;
+    var pw = parent.clientWidth, ph = parent.clientHeight, tw = tb.offsetWidth, th = tb.offsetHeight;
+    var left = Math.max(4, Math.min(saved.left, pw - tw - 4));
+    var top  = Math.max(4, Math.min(saved.top,  ph - th - 4));
+    tb.style.left = left + 'px'; tb.style.top = top + 'px'; tb.style.right = 'auto'; tb.style.bottom = 'auto'; tb.style.transform = 'none';
+  }
+  // Drag the Scout Board toolbar by its grip (or title) — pointer events so it works with mouse AND touch.
+  (function initScoutToolbarDrag(){
+    var tb = document.getElementById('scoutToolbar'); if (!tb) return;
+    var handles = tb.querySelectorAll('.stb-grip, .stb-title');
+    var dragging = false, sx = 0, sy = 0, startLeft = 0, startTop = 0, parent = null;
+    function begin(e){
+      parent = tb.offsetParent || tb.parentElement; if (!parent) return;
+      var pr = parent.getBoundingClientRect(), tr = tb.getBoundingClientRect();
+      startLeft = tr.left - pr.left; startTop = tr.top - pr.top;
+      tb.style.left = startLeft + 'px'; tb.style.top = startTop + 'px'; tb.style.right = 'auto'; tb.style.bottom = 'auto'; tb.style.transform = 'none';
+      sx = e.clientX; sy = e.clientY; dragging = true; tb.classList.add('dragging');
+      if (e.preventDefault) e.preventDefault();
+      document.addEventListener('pointermove', move, { passive:false });
+      document.addEventListener('pointerup', end);
+    }
+    function move(e){
+      if (!dragging) return;
+      var pr = parent.getBoundingClientRect(), tw = tb.offsetWidth, th = tb.offsetHeight;
+      var nl = Math.max(4, Math.min(startLeft + (e.clientX - sx), pr.width - tw - 4));
+      var nt = Math.max(4, Math.min(startTop + (e.clientY - sy), pr.height - th - 4));
+      tb.style.left = nl + 'px'; tb.style.top = nt + 'px';
+      if (e.cancelable) e.preventDefault();
+    }
+    function end(){
+      dragging = false; tb.classList.remove('dragging');
+      document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', end);
+      try { localStorage.setItem('oc_scout_tb_pos', JSON.stringify({ left: parseInt(tb.style.left, 10) || 0, top: parseInt(tb.style.top, 10) || 0 })); } catch(e){}
+    }
+    Array.prototype.forEach.call(handles, function(h){ h.addEventListener('pointerdown', begin); });
+  })();
   // ---------- ✏️ Scout line pen — tap-to-place rub lines / corridors / routes on the markup board ----------
   // Dashed purple conjecture lines, saved via the trail store (so they persist + sync) but tagged scoutKind
   // so they render distinctly and show ONLY in Scout Mode. Tap the map to drop points, Finish to name+save.
@@ -15487,6 +15563,18 @@
     if (modeBtn) modeBtn.addEventListener('click', function(){ setScoutMode(!scoutMode); showToast(scoutMode ? '🔍 Scout Mode ON — your conjecture marks & all sign are showing' : 'Scout Mode off — back to your clean hunt map'); });
     var drawBtn = document.getElementById('scoutDrawBtn');
     if (drawBtn) drawBtn.addEventListener('click', function(){ startScoutDraw(); });
+    // On-map Scout Board toolbar: each button just triggers the matching (hidden) list button, so all the
+    // real logic stays in one place. Grip = drag; ✕ = leave Scout Mode.
+    var _scoutTb = document.getElementById('scoutToolbar');
+    if (_scoutTb){
+      _scoutTb.addEventListener('click', function(e){
+        var b = e.target.closest('[data-scout]'); if (!b) return;
+        var act = b.getAttribute('data-scout');
+        if (act === 'exit'){ setScoutMode(false); showToast('Scout Mode off — back to your clean hunt map'); return; }
+        var _ids = { draw:'scoutDrawBtn', mark:'scoutSpotBtn', report:'scoutReportBtn', camplan:'cameraPlanBtn', terrain:'terrainReadBtn' };
+        var target = document.getElementById(_ids[act]); if (target) target.click();
+      });
+    }
     var fcBtn = document.getElementById('fieldCardBtn');
     if (fcBtn) fcBtn.addEventListener('click', function(){ if (typeof openFieldCard === 'function') openFieldCard(); });
   })();
