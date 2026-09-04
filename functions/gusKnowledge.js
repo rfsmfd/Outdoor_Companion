@@ -64,7 +64,9 @@ Left panel — laid out top-to-bottom the way a hunt actually goes, so it's not 
    you're hunting first. Then add-site (+ Add Site) and my-location (My Location).
 2) A "🗓 Plan & Scout" drop-down (tap to open) — the PRE-HUNT tools, done ahead of time (often at the
    computer): where-to-hunt (Where to Hunt), plan-hunt (Plan a Hunt), field-card (Field Card),
-   scout-mode (Scout Mode), terrain-read (Terrain Read), camera-plan (Camera Plan).
+   scout-mode (Scout Mode). NOTE: turning Scout Mode on pops a purple "Scout Board" toolbar ON THE MAP that
+   holds the board tools — ✏️ Draw, ➕ Mark, 🔍 Report, 📸 Cam Plan (camera-plan), 🗺 Terrain (terrain-read);
+   these are no longer buttons in the list. The toolbar is draggable (⠿ grip) and has an ✕ to close the board.
 3) A "🎯 Hunt" drop-down (tap to open) — the DURING-HUNT tools you reach for in the field:
    hunt-mode (Hunt Mode), walk-in (Walk-In), log-sit (End-of-Hunt Recap).
 4) Below those, the "🧰 Tools & Data" drop-down.
@@ -517,10 +519,16 @@ HOW TO run Terrain Read: pick a farm in the top Property dropdown, LEFT PANEL ->
 points out cover + terrain features (📌 Timber point, 📐 Inside corner, ⏳ Pinch/neck, saddles,
 benches...) as candidates to verify; tap a row to fly to it. (Run "Field vs woods" in Property Setup
 first if it asks.)
-HOW TO use Scout Mode: LEFT PANEL -> open "🗓 Plan & Scout" -> "🔍 Scout Mode" (shows all sign & conjecture marks at once). Then
-"➕ Add a Mark" to drop a pin, "✏️ Draw a Line" for a rub line/corridor, "🔍 Scouting Report" for the
-composite read. Tap "🔍 Scout Mode" again to turn it off.
-HOW TO run Camera Plan: pick a farm in the top dropdown, LEFT PANEL -> open "🗓 Plan & Scout" -> "📸 Camera Plan". Read
+HOW TO use Scout Mode: LEFT PANEL -> open "🗓 Plan & Scout" -> "🔍 Scout Mode" (shows all sign & conjecture
+marks at once). When it turns on, a purple "Scout Board" toolbar appears ON THE MAP with all the board tools
+— you doodle where the board is instead of digging in the list. On that toolbar: "✏️ Draw" (rub line /
+corridor / route), "➕ Mark" (drop a scout pin), "🔍 Report" (composite read), "📸 Cam Plan", and
+"🗺 Terrain". Drag the toolbar by its ⠿ grip to move it out of your way (it remembers where you put it).
+Tap the toolbar's "✕" (or "🔍 Scout Mode" in the list again) to turn the board off. NOTE: Camera Plan and
+Terrain Read live ON this Scout Board — they only show once Scout Mode is on, because they're markup-board
+tools that clear off your everyday map when you leave.
+HOW TO run Camera Plan: pick a farm in the top dropdown, turn on "🔍 Scout Mode" (Plan & Scout), then tap
+"📸 Cam Plan" on the on-map Scout Board toolbar. Read
 "📷 MY CAMERAS" (a verdict on each; set 📌 Anchor / 🎈 Float roles; ★ = shared, can't move), and
 "🎯 SUGGESTED SPOTS" (where to hang one to cover a gap — shown as 📷 map pins with capture rings). On
 a suggestion, "📍 Show on map" or "📷 Drop a mark".
