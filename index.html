@@ -2350,7 +2350,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 609</div>
+    <div id="buildBadge">BUILD 610</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4494,14 +4494,66 @@
   function selectTrail(id, origin){
     _trailClickAt = Date.now();
     if (selectedTrailId === id){ clearTrailSelection(); return; }   // re-selecting the same trail RELEASES it
+    if (selectedTrailId && selectedTrailId !== id) endShapeEdit(selectedTrailId);   // save/close the previous edit
     selectedTrailId = id;
     highlightTrail(id, { fit: origin === 'list' });
     markSelectedTrailRow(origin === 'map');
+    if (origin === 'map') beginShapeEdit(id);   // tapped on the map → arm it: corner handles + drag-to-move
   }
   function clearTrailSelection(){
+    var prev = selectedTrailId;
     selectedTrailId = null;
     clearTrailHighlight();
     markSelectedTrailRow(false);
+    if (prev) endShapeEdit(prev);   // save any geometry change + drop the handles
+  }
+  // ---------- Edit a drawn shape/line: tap to ARM → drag a corner to reshape, drag the body to MOVE,
+  // tap empty map to save. Reshape uses Leaflet.draw's built-in vertex/resize handles; the whole-shape drag
+  // is a small handler we run ourselves (no extra plugin). Geometry is read back and persisted on release.
+  var _editingLayerId = null;
+  function beginShapeEdit(id){
+    var layer = savedTrailPolylines[id];
+    if (!layer) return;
+    _editingLayerId = id;
+    try { if (layer.editing && layer.editing.enable) layer.editing.enable(); } catch (e) {}   // corner/resize handles
+    try { if (layer._path) layer._path.style.cursor = 'move'; } catch (e) {}                    // move cursor on hover (desktop)
+    _enableShapeDrag(layer);
+    showToast('Drag to move · drag a corner to reshape · tap the map when done ✋');
+  }
+  function endShapeEdit(id){
+    var layer = savedTrailPolylines[id], trail = trails.filter(function(t){ return t.id === id; })[0];
+    if (layer){
+      if (layer._ocDragOff){ try { layer._ocDragOff(); } catch (e) {} layer._ocDragOff = null; }
+      try { if (layer.editing && layer.editing.disable) layer.editing.disable(); } catch (e) {}
+      try { if (layer._path) layer._path.style.cursor = ''; } catch (e) {}
+      if (trail){
+        if (trail.shape === 'circle' && layer.getLatLng){ var c = layer.getLatLng(); trail.center = { lat: c.lat, lng: c.lng }; trail.radiusM = layer.getRadius(); }
+        else if (layer.getLatLngs){ var lls = layer.getLatLngs(); lls = Array.isArray(lls[0]) ? lls[0] : lls; trail.points = lls.map(function(p){ return { lat: p.lat, lng: p.lng }; }); }
+        if (typeof saveTrail === 'function') saveTrail(trail).catch(function(e){ console.error('Outdoor Companion: save edited drawing', e); });
+      }
+    }
+    _editingLayerId = null;
+    if (trail) renderSavedTrailOnMap(trail);   // redraw a clean layer (handles gone, label/popup re-attached)
+  }
+  function _shiftLatLngs(arr, dLat, dLng){ return arr.map(function(p){ return Array.isArray(p) ? _shiftLatLngs(p, dLat, dLng) : L.latLng(p.lat + dLat, p.lng + dLng); }); }
+  function _enableShapeDrag(layer){
+    var dragging = false, last = null;
+    function onMove(e){
+      if (!dragging || !last) return;
+      var dLat = e.latlng.lat - last.lat, dLng = e.latlng.lng - last.lng; last = e.latlng;
+      if (layer.getLatLng){ var c = layer.getLatLng(); layer.setLatLng([c.lat + dLat, c.lng + dLng]); }
+      else if (layer.getLatLngs){ layer.setLatLngs(_shiftLatLngs(layer.getLatLngs(), dLat, dLng)); }
+    }
+    function onUp(){ if (!dragging) return; dragging = false; last = null; map.dragging.enable();
+      try { if (layer.editing && layer.editing.disable){ layer.editing.disable(); layer.editing.enable(); } } catch (e) {}   // re-seat the corner handles at the moved spot
+      map.off('mousemove', onMove); map.off('mouseup', onUp); }
+    function onDown(e){
+      dragging = true; last = e.latlng; map.dragging.disable();
+      try { if (layer.editing && layer.editing.disable) layer.editing.disable(); } catch (e2) {}   // hide handles while sliding so they don't lag behind
+      map.on('mousemove', onMove); map.on('mouseup', onUp);
+    }
+    layer.on('mousedown', onDown);
+    layer._ocDragOff = function(){ layer.off('mousedown', onDown); map.off('mousemove', onMove); map.off('mouseup', onUp); if (map.dragging && !map.dragging.enabled()) map.dragging.enable(); };
   }
   // Release a trail selection by clicking empty map (not while placing a pin, and not the click that just
   // selected a trail — that bubbles up here a beat later, so the timestamp guard lets a fresh pick survive).
