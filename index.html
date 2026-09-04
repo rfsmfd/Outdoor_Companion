@@ -2345,7 +2345,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 606</div>
+    <div id="buildBadge">BUILD 607</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -11619,6 +11619,7 @@
   }
   function openCameraPlan(){
     if (typeof closeScoutPanels === 'function') closeScoutPanels();   // one panel at a time
+    var _prevCamFlags = showCameraFlags;   // remember the camera-number-icons setting so we can restore it on close
     var prop = activePropertyId ? (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === activePropertyId; })[0] : null;
     var data = cameraPlanData(prop), gaps = cameraGaps(prop);
     var suggestions = cameraSuggestions(prop, data, gaps);
@@ -11690,7 +11691,7 @@
     back.style.cssText = 'position:fixed;inset:0;z-index:100062;display:flex;align-items:flex-start;justify-content:flex-end;padding:16px;pointer-events:none;';
     var card = document.createElement('div');
     card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:16px;max-width:440px;width:94vw;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.5);pointer-events:auto;';
-    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); document.removeEventListener('keydown', onKey); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
+    function close(){ if (back.parentNode) document.body.removeChild(back); if (typeof clearCamPlanRings === 'function') clearCamPlanRings(); if (typeof clearCamSuggestPins === 'function') clearCamSuggestPins(); showCameraFlags = _prevCamFlags; if (typeof renderMarkers === 'function') renderMarkers(); document.removeEventListener('keydown', onKey); var ci = _scoutPanels.indexOf(close); if (ci >= 0) _scoutPanels.splice(ci, 1); }
     function onKey(e){ if (e.key === 'Escape') close(); }
     _scoutPanels.push(close);
     card.innerHTML =
@@ -11701,7 +11702,9 @@
     var _cpc2 = card.querySelector('.cp-close2'); if (_cpc2) _cpc2.addEventListener('click', close);
     document.addEventListener('keydown', onKey);
     // Show the capture-range rings around every deployed camera + the suggested-spot pins while the plan is open.
-    try { if (!scoutMode) setScoutMode(true); cameraCoverageOn = true; if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); if (typeof renderCamSuggestPins === 'function') renderCamSuggestPins(suggestions); } catch (e) {}
+    // Turn ON the numbered camera icons while planning, so each camera on the map reads its number (matching
+    // the #camNo in the rows). setScoutMode re-renders when it flips on; if the board was already on, re-render here.
+    try { showCameraFlags = true; if (!scoutMode) setScoutMode(true); else if (typeof renderMarkers === 'function') renderMarkers(); cameraCoverageOn = true; if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); if (typeof renderCamSuggestPins === 'function') renderCamSuggestPins(suggestions); } catch (e) {}
     function flyTo(la, ln){ try { map.flyTo([la, ln], Math.max(map.getZoom(), 16)); } catch (e) {} if (typeof flashSiteRing === 'function') flashSiteRing(la, ln); }
     Array.prototype.forEach.call(card.querySelectorAll('.cam-row'), function(el){ el.addEventListener('click', function(){ flyTo(parseFloat(el.getAttribute('data-lat')), parseFloat(el.getAttribute('data-lng'))); }); });
     // Anchor/Float toggle — persists on the CAMERA device, re-ranks. stopPropagation so it doesn't fire the row's fly.
