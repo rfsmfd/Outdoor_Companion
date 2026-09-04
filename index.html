@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 600</div>
+    <div id="buildBadge">BUILD 601</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2734,6 +2734,7 @@
         <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
         <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
         <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
+        <button type="button" class="btn-ghost" id="gallerySiteMoveBtn" style="width:100%;margin-top:6px;">📍 Move photos to another Site</button>
         <div style="border-top:1px solid var(--border,#33443a);margin:12px 0 0;padding-top:8px;">
           <button type="button" class="btn-ghost" id="galleryDiagnoseBtn" style="width:100%;font-size:11.5px;opacity:.8;">🔍 Diagnose locations</button>
           <button type="button" class="btn-ghost" id="galleryCameraAuditBtn" style="width:100%;font-size:11.5px;opacity:.8;margin-top:6px;">📷 Camera audit</button>
@@ -7866,6 +7867,74 @@
     refreshCount();
   }
   document.getElementById('galleryCameraMergeBtn').addEventListener('click', cameraMergeTool);
+
+  // ---------- Move photos to another SITE (site-first — the camera doesn't matter) ----------
+  // The founder's rule: a photo belongs to a PLACE on the ground, not a camera (a camera is a tool
+  // that gets moved around). This moves every photo currently at one site to another site and leaves
+  // the camera link exactly as it is — no camera in the conversation.
+  function siteMoveTool(){
+    if (!hasChatStorage){ alert('Sign in first — this edits your cloud data.'); return; }
+    // Which sites currently hold photos, how many, and a per-camera breakdown for a sanity check.
+    var bySite = {};
+    (typeof importedPhotos!=='undefined'?importedPhotos:[]).forEach(function(p){
+      if (!p.matchedSiteId) return;
+      var k = p.matchedSiteId;
+      if (!bySite[k]) bySite[k] = { name: ((sites.filter(function(s){ return s.id===k; })[0]||{}).name) || p.matchedSiteName || '(site)', count:0, cams:{} };
+      bySite[k].count++;
+      if (p.cameraId) bySite[k].cams[p.cameraId] = (bySite[k].cams[p.cameraId]||0)+1;
+    });
+    var fromKeys = Object.keys(bySite).sort(function(a,b){ return bySite[b].count - bySite[a].count; });
+    if (!fromKeys.length){ alert('No located photos to move yet.'); return; }
+    var destSites = sites.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); });
+    var back = document.createElement('div');
+    back.style.cssText = 'position:fixed;inset:0;z-index:100004;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:18px;font-family:inherit;';
+    var card = document.createElement('div');
+    card.style.cssText = 'background:#26332B;border:1px solid #35443A;border-radius:14px;padding:18px;max-width:460px;width:100%;max-height:88vh;overflow:auto;color:#e8f0ea;box-shadow:0 12px 40px rgba(0,0,0,.45);';
+    var fromOpts = fromKeys.map(function(k){ return '<option value="'+k+'">'+escapeHtml(bySite[k].name)+' — '+bySite[k].count+' photo'+(bySite[k].count===1?'':'s')+'</option>'; }).join('');
+    var toOpts = destSites.map(function(s){ return '<option value="'+s.id+'">'+escapeHtml(s.name||'(unnamed)')+'</option>'; }).join('');
+    card.innerHTML =
+      '<div style="font-weight:700;font-size:15px;margin-bottom:4px;">📍 Move photos to another Site</div>' +
+      '<div style="font-size:11.5px;color:#9db0a3;margin-bottom:12px;line-height:1.5;">Photos belong to a place on the ground — the camera doesn\'t matter. This moves every photo from one site to another and leaves the camera link alone.</div>' +
+      '<label style="font-size:12px;color:#9fb3a6;">Move photos FROM this site:</label>' +
+      '<select id="smFrom" style="width:100%;padding:9px;margin:4px 0 10px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">'+fromOpts+'</select>' +
+      '<label style="font-size:12px;color:#9fb3a6;">TO this site:</label>' +
+      '<select id="smTo" style="width:100%;padding:9px;margin:4px 0 12px;border-radius:8px;background:#16211B;color:#e8f0ea;border:1px solid #3c4d42;">'+toOpts+'</select>' +
+      '<div id="smInfo" style="font-size:12.5px;color:#f0dca0;margin-bottom:12px;">—</div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<button id="smGo" style="flex:1;padding:10px;border-radius:8px;border:none;background:#FF6A13;color:#fff;font-weight:700;cursor:pointer;">Move photos</button>' +
+        '<button id="smCancel" style="flex:1;padding:10px;border-radius:8px;border:1px solid #3c4d42;background:transparent;color:#c7d4cc;cursor:pointer;">Cancel</button>' +
+      '</div>';
+    back.appendChild(card); document.body.appendChild(back);
+    function close(){ if (back.parentNode) document.body.removeChild(back); }
+    var fromSel = card.querySelector('#smFrom'), toSel = card.querySelector('#smTo'), info = card.querySelector('#smInfo'), go = card.querySelector('#smGo');
+    // Don't leave the destination defaulted to the same site as the source.
+    (function(){ for (var i=0;i<toSel.options.length;i++){ if (toSel.options[i].value !== fromSel.value){ toSel.selectedIndex = i; break; } } })();
+    function refresh(){
+      var fk = fromSel.value, b = bySite[fk];
+      var camNames = b ? Object.keys(b.cams).map(function(cid){ var c = cameras.filter(function(x){ return x.id===cid; })[0]; return (c?c.name:'?')+' ('+b.cams[cid]+')'; }) : [];
+      var same = fromSel.value === toSel.value;
+      var toName = (destSites.filter(function(s){ return s.id===toSel.value; })[0]||{}).name || '(site)';
+      info.textContent = same ? '⚠️ Pick a different destination site.'
+        : ('Will move ' + (b?b.count:0) + ' photo' + ((b&&b.count===1)?'':'s') + ' → ' + toName + (camNames.length ? ('  ·  now on: ' + camNames.join(', ')) : ''));
+      go.disabled = same || !b || b.count===0;
+      go.style.opacity = go.disabled ? '.5' : '1';
+    }
+    fromSel.addEventListener('change', function(){ if (toSel.value===fromSel.value){ for (var i=0;i<toSel.options.length;i++){ if (toSel.options[i].value!==fromSel.value){ toSel.selectedIndex=i; break; } } } refresh(); });
+    toSel.addEventListener('change', refresh);
+    refresh();
+    card.querySelector('#smCancel').addEventListener('click', close);
+    go.addEventListener('click', async function(){
+      var fromId = fromSel.value, toSite = sites.filter(function(s){ return s.id === toSel.value; })[0];
+      if (!toSite) return;
+      var targets = (typeof importedPhotos!=='undefined'?importedPhotos:[]).filter(function(p){ return p.matchedSiteId === fromId; });
+      if (!targets.length){ close(); return; }
+      go.disabled = true; go.textContent = 'Moving…';
+      // cameraId '' = leave the camera link exactly as it is (the founder's point: the camera doesn't matter).
+      await assignFixToPhotos(targets, '', toSite);
+      close();
+    });
+  }
+  document.getElementById('gallerySiteMoveBtn').addEventListener('click', siteMoveTool);
 
   // ---------- Bulk cleanup: remove AI-flagged empty/misfire photos to free storage ----------
   // Every photo the AI tagged as non-game is a cleanup candidate — empty frames AND humans,
