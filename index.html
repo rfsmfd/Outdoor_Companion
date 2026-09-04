@@ -2175,8 +2175,8 @@
       <div id="toolsDivider" style="flex:1 1 100%;height:1px;background:#2c3f34;margin:8px 0 2px;"></div>
       <button class="btn-ghost oc-section-hdr" id="toolsToggleBtn" style="flex:1 1 100%;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
       <div id="toolsGroup" style="display:none;">
-        <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;">📸 Photo Gallery</button>
-        <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;">🦌 Buck Gallery</button>
+        <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;" title="All your trail-cam photos — filter, tag, and clean up">📸 Photo Gallery</button>
+        <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;" title="Your tagged bucks — each one's sightings over time">🦌 Tagged Bucks</button>
         <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
         <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
         <!-- 🥾 Trails moved to its own tab in the Sites folder (B575); managed there now. -->
@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 602</div>
+    <div id="buildBadge">BUILD 603</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2672,13 +2672,13 @@
     </div>
   </div>
 
-  <!-- Buck Gallery — named profiles for individual bucks, each showing every sighting
+  <!-- Tagged Bucks (formerly "Buck Gallery") — named profiles for individual bucks, each showing every sighting
        linked to it. Built to also work with future bulk-imported photos, once persistent
        import exists — a sighting's buckProfileId link doesn't care where the photo came
        from. -->
   <div class="oc-modal-backdrop" id="buckGalleryModalBackdrop">
     <div class="oc-modal">
-      <h3>🦌 Buck Gallery <button class="close-x" id="buckGalleryClose">&times;</button></h3>
+      <h3>🦌 Tagged Bucks <button class="close-x" id="buckGalleryClose">&times;</button></h3>
       <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Track individual bucks over time — tag any sighting (yours, or a photo a friend sends you) to a profile, and see everything linked to him here.</p>
       <div id="buckProfilesList" style="margin-bottom:14px;"></div>
       <div class="form-pop">
@@ -13693,7 +13693,7 @@
       (activeTab === 'log' && activeModule === 'fishing') ? 'block' : 'none';
   }
 
-  // ---------- Buck Gallery ----------
+  // ---------- Tagged Bucks (buck profiles; formerly "Buck Gallery") ----------
   function updateBuckGalleryButtonVisibility(){
     document.getElementById('buckGalleryBtn').style.display = activeModule === 'hunting' ? 'block' : 'none';
     // Trail cameras are a hunting concept — the Cameras tab (register/deploy/import/history) has no place
@@ -21588,7 +21588,7 @@
     section.querySelector('#qb_save_btn').addEventListener('click', function(){ saveCurrentQuery(); });
     section.querySelector('#qb_report_btn').addEventListener('click', openReportModal);
     section.querySelector('#qb_profile_btn').addEventListener('click', function(){
-      if (!buckProfiles.length){ alert('No named bucks yet — tag a buck (in a photo or the Buck Gallery) first, then build his movement profile.'); return; }
+      if (!buckProfiles.length){ alert('No named bucks yet — tag a buck (in a photo or under 🦌 Tagged Bucks) first, then build his movement profile.'); return; }
       chooseBuckForTemplate('Buck Movement Profile', function(buckId){ runMovementProfile(buckId); });   // buckId '' = all bucks
     });
     // Delegate the Add-to-report click on the stable #qb_results container (survives innerHTML rebuilds).

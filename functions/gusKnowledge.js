@@ -454,8 +454,10 @@ HOW TO clean up empty misfire photos: in the Photo Gallery, first tap "🔍 Find
 (do this first)" (flags wind/heat misfires, no AI cost) — checked photos get deleted, uncheck any
 real animal, confirm. Then "🧹 Clean up empty frames" reviews the AI-flagged empties the same way.
 Both deletes are permanent.
-HOW TO name/create a buck: LEFT PANEL -> "🦌 Buck Gallery" -> type a name (+ optional notes) -> "+
-Create Profile" (you can make him before you have a photo).
+HOW TO name/create a buck: LEFT PANEL -> "🧰 Tools & Data" -> "🦌 Tagged Bucks" (this is the buck roster,
+formerly called "Buck Gallery") -> type a name (+ optional notes) -> "+ Create Profile" (you can make
+him before you have a photo). Note the difference: "📸 Photo Gallery" holds ALL your trail-cam photos;
+"🦌 Tagged Bucks" is the page for each individual named buck and his sightings over time.
 HOW TO sort unnamed buck photos by eye (free Step 2): Photo Gallery -> "🧩 Step 2 · Group bucks" ->
 named bucks are folders on top, unlinked buck photos cluster by antler traits below. Tap photos to
 select (green ✓), or tap "⚡" to grab a whole burst; then tap a buck's folder to tag them, or "➕ New
@@ -468,10 +470,10 @@ HOW TO run AI "Which buck?": open a buck photo -> "🦌 Link to buck…" -> "�
 at least one named buck). It ranks your known bucks with reasoning; you confirm. To match many at
 once, use "🦌 Step 3 · Match" on the sort board (a paid step, ~½¢ each; free Step-2 sorting never
 spends).
-HOW TO read a buck's Huntability: "🦌 Buck Gallery" -> tap his row -> read the 🎯 Huntability card
+HOW TO read a buck's Huntability: "🦌 Tagged Bucks" -> tap his row -> read the 🎯 Huntability card
 (daylight-movement %, a Heating/Steady/Gone-quiet verdict, a when-he-moves chart, and Best window
 tonight); toggle 7/14/30 days.
-HOW TO play his movement / see where he's been: "🦌 Buck Gallery" -> his row -> "🎬 Movement timeline"
+HOW TO play his movement / see where he's been: "🦌 Tagged Bucks" -> his row -> "🎬 Movement timeline"
 (plays his track in date order) or "📍 Where he's been (map)" (sized rings on his hotspots).
 
 PLAN A HUNT
