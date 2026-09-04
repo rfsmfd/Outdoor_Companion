@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 604</div>
+    <div id="buildBadge">BUILD 605</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -17442,7 +17442,7 @@
     var _tparts = [ _tally.does ? (_tally.does + ' doe' + (_tally.does > 1 ? 's' : '')) : '', _tally.unk ? (_tally.unk + ' buck' + (_tally.unk > 1 ? 's' : '') + ' (unnamed)') : '', _tnames.join(', ') ].filter(Boolean);
     var tallyHtml = _tparts.length ? ('<b>' + _tparts.join(' · ') + '</b>') : '<span style="opacity:.8;">Nothing logged this sit</span>';
     // Tagged-buck picker for a harvest — one chip per shooter on the board, plus an Unknown/not-tagged option.
-    var harvBuckChips = (typeof buckProfiles !== 'undefined' && buckProfiles.length ? buckProfiles.map(function(b){ return '<button class="sl-hbuck" data-bid="' + escapeHtml(b.id) + '" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;">🦌 ' + escapeHtml(b.name) + '</button>'; }).join('') : '') + '<button class="sl-hbuck" data-bid="" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;">Unknown / not tagged</button>';
+    var harvBuckChips = (typeof buckProfiles !== 'undefined' && buckProfiles.length ? buckProfiles.map(function(b){ return '<button class="sl-hbuck" data-bid="' + escapeHtml(b.id) + '" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;display:inline-flex;align-items:center;gap:5px;">' + obsGlyphInline('buck', 16) + escapeHtml(b.name) + '</button>'; }).join('') : '') + '<button class="sl-hbuck" data-bid="" style="padding:6px 10px;border-radius:14px;border:1px solid #3c4d42;background:#1E2B23;color:#e8f0ea;cursor:pointer;font-size:12px;">Unknown / not tagged</button>';
     var dLbl = fcDayLabel(st.sitTime);
     card.innerHTML =
       '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:12px;"><div><div style="font-weight:800;font-size:16px;">📓 End-of-Hunt Recap</div><div style="font-size:11px;color:#8aa596;margin-top:2px;">' + escapeHtml(dLbl) + ' · feeds your rankings</div></div><button id="slX" style="background:transparent;border:none;color:#9db0a3;font-size:22px;cursor:pointer;line-height:1;">×</button></div>' +
@@ -18379,7 +18379,7 @@
     (typeof buckProfiles !== 'undefined' ? buckProfiles : []).forEach(function(b){
       var chip = document.createElement('button');
       chip.type = 'button'; chip.className = 'chip' + (_logBuckId === b.id ? ' active' : '');
-      chip.textContent = '🦌 ' + b.name;
+      chip.innerHTML = obsGlyphInline('buck', 16) + ' ' + escapeHtml(b.name);   // real antlered buck, matching the Tagged Bucks button
       chip.addEventListener('click', function(){ _logBuckId = (_logBuckId === b.id) ? null : b.id; renderLogBuckChips(); });
       wrap.appendChild(chip);
     });
@@ -22052,8 +22052,8 @@
         var html;
         if (cur){
           html = isSight
-            ? '<div class="bmv-blink" style="width:34px;height:34px;border-radius:50%;background:rgba(56,178,92,.92);border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 0 12px rgba(80,220,120,.95);">🦌</div>'
-            : '<div style="font-size:26px;line-height:34px;text-align:center;filter:drop-shadow(0 1px 3px #000);">🦌</div>';
+            ? '<div class="bmv-blink" style="width:34px;height:34px;border-radius:50%;background:rgba(56,178,92,.92);border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 0 12px rgba(80,220,120,.95);"><img src="icons/buck.png" alt="" style="width:22px;height:22px;object-fit:contain;"></div>'
+            : '<div style="width:34px;height:34px;display:flex;align-items:center;justify-content:center;filter:drop-shadow(0 1px 3px #000);"><img src="icons/buck.png" alt="" style="width:30px;height:30px;object-fit:contain;"></div>';
         } else {
           html = '<div style="width:12px;height:12px;border-radius:50%;background:' + (isSight ? '#38B25C' : '#E8862E') + ';opacity:.6;border:2px solid #12201a;"></div>';
         }
