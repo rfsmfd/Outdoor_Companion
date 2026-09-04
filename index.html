@@ -2176,8 +2176,8 @@
       <button class="btn-ghost oc-section-hdr" id="toolsToggleBtn" style="flex:1 1 100%;" aria-expanded="false">🧰 Tools &amp; Data ▾</button>
       <div id="toolsGroup" style="display:none;">
         <button class="btn-ghost" id="photoGalleryBtn" style="flex:1 1 100%;" title="All your trail-cam photos — filter, tag, and clean up">📸 Photo Gallery</button>
-        <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;" title="Your tagged bucks — each one's sightings over time">🦌 Tagged Bucks</button>
-        <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">⭐ Solunar Table</button>
+        <button class="btn-ghost" id="buckGalleryBtn" style="flex:1 1 100%;display:none;" title="Your tagged bucks — each one's sightings over time"><span style="display:inline-flex;width:22px;height:22px;border-radius:50%;background:#fff;border:2px solid #E0B23A;align-items:center;justify-content:center;overflow:hidden;vertical-align:-6px;margin-right:6px;"><img src="icons/buck.png" alt="" style="width:16px;height:16px;object-fit:contain;"></span>Tagged Bucks</button>
+        <button class="btn-ghost" id="solunarBtn" style="flex:1 1 100%;">🌙 Solunar Table</button>
         <button class="btn-ghost" id="huntLogBtn" style="flex:1 1 100%;">📋 Hunt Journal</button>
         <!-- 🥾 Trails moved to its own tab in the Sites folder (B575); managed there now. -->
         <button class="btn-ghost" id="importWaypointsBtn" title="Import sites, waypoints & trails from onX, HuntStand, Google Earth, Garmin, ArcGIS — or any GPS (KML / KMZ / GPX / GeoJSON / CSV)">📥 Import from other apps</button>
@@ -2326,7 +2326,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 603</div>
+    <div id="buildBadge">BUILD 604</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2678,7 +2678,7 @@
        from. -->
   <div class="oc-modal-backdrop" id="buckGalleryModalBackdrop">
     <div class="oc-modal">
-      <h3>🦌 Tagged Bucks <button class="close-x" id="buckGalleryClose">&times;</button></h3>
+      <h3><span style="display:inline-flex;width:26px;height:26px;border-radius:50%;background:#fff;border:2px solid #E0B23A;align-items:center;justify-content:center;overflow:hidden;vertical-align:-7px;margin-right:6px;"><img src="icons/buck.png" alt="" style="width:19px;height:19px;object-fit:contain;"></span>Tagged Bucks <button class="close-x" id="buckGalleryClose">&times;</button></h3>
       <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 12px 0;">Track individual bucks over time — tag any sighting (yours, or a photo a friend sends you) to a profile, and see everything linked to him here.</p>
       <div id="buckProfilesList" style="margin-bottom:14px;"></div>
       <div class="form-pop">
@@ -13701,7 +13701,7 @@
     var _camTab = document.querySelector('.tab-btn[data-tab="cameras"]');
     if (_camTab) _camTab.style.display = activeModule === 'hunting' ? '' : 'none';
     // The solunar table becomes the "When to Fish" bite forecast in fishing mode.
-    var _sb = document.getElementById('solunarBtn'); if (_sb) _sb.textContent = activeModule === 'fishing' ? '🎣 When to Fish' : '⭐ Solunar Table';
+    var _sb = document.getElementById('solunarBtn'); if (_sb) _sb.textContent = activeModule === 'fishing' ? '🎣 When to Fish' : '🌙 Solunar Table';
     // Scent cones / Thermals / Cover are deer-hunting map layers (scent management, deer bedding cover) —
     // no place on the fishing map. Hide their layer-bar buttons in fishing.
     ['thermalToggleBtn','scentToggleBtn','landcoverToggleBtn'].forEach(function(id){
