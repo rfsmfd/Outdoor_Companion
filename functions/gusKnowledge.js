@@ -160,6 +160,16 @@ TRAIL CAMERAS (hunting)
 PHOTOS & AI
 - Photo Gallery: browse and filter every trail-cam photo by farm, location, camera, or species;
   group bursts into a single visit.
+- Photos belong to a PLACE, not a camera (a camera is just a tool that gets moved around). A photo's
+  location is saved as the SITE where the camera sat when it was taken.
+- Fix photos on the WRONG spot: in the Photo Gallery tap "📍 Move photos to another Site", pick the
+  site they're wrongly on (FROM) and the site they belong on (TO), and Move — it moves every photo
+  from that site to the new one and leaves the camera alone. (This is the site-first way; the older
+  "🔧 Merge / fix camera" does the same move but framed around cameras, plus serial/junk-camera fixes.)
+- Unlocated photos (no site yet, e.g. they predate the camera's deploy date): use "🔄 Auto-match
+  unlocated to deployments", or "📍 Assign a location to unlocated" to stamp a site by hand. If a batch
+  came in unlocated, the usual cause is the camera's deploy date being NEWER than the photos — set the
+  camera's deploy date back (📅 Date on its Cameras-tab row) to when it actually went out, then re-match.
 - AI photo tagging: on import, the AI reads animal-vs-empty, the species, and whether it's a
   buck. Empty misfires can be reviewed and bulk-deleted to free storage.
 - Buck sorting funnel (cheap to paid): Step 1 AI tags on import (free); Step 2 you group the
