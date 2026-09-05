@@ -1660,7 +1660,27 @@
     border:1px solid var(--line);
     border-radius:6px;
     overflow:hidden;
+    position:relative;
   }
+  /* Multi-select mode: while selecting, every card shows an empty check-circle top-left; a selected
+     card fills it green with a ✓ and gets a gold outline. Works the same on phone (tap) and desktop
+     (Ctrl/Shift-click). */
+  #galleryGrid.oc-selecting .import-photo-card{ cursor:pointer; }
+  #galleryGrid.oc-selecting .import-photo-card::before{
+    content:''; position:absolute; top:6px; left:6px; width:24px; height:24px;
+    border:2px solid #fff; border-radius:50%; background:rgba(0,0,0,.5); z-index:3;
+    box-shadow:0 1px 3px rgba(0,0,0,.6); box-sizing:border-box;
+  }
+  #galleryGrid.oc-selecting .import-photo-card.oc-selected::before{
+    background:#2e7d32; border-color:#fff;
+  }
+  #galleryGrid.oc-selecting .import-photo-card.oc-selected::after{
+    content:'✓'; position:absolute; top:6px; left:6px; width:24px; height:24px;
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; font-size:15px; font-weight:900; z-index:4; pointer-events:none;
+  }
+  #galleryGrid.oc-selecting .import-photo-card.oc-selected{ outline:3px solid #E7B45A; outline-offset:-3px; }
+  #gallerySelectToggle.oc-on{ background:#7a5a2a; border-color:#E7B45A; color:#fff; }
   .import-photo-card img{ width:100%; height:90px; object-fit:cover; display:block; background:#000; }
   .import-photo-card .meta{ padding:6px 8px; }
   .import-photo-card .dt{ font-size:10px; color:var(--text-dim); }
@@ -2385,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 626</div>
+    <div id="buildBadge">BUILD 627</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2788,6 +2808,14 @@
           <option value="30" selected>30 min gap</option>
           <option value="60">60 min gap</option>
         </select>
+        <button type="button" id="gallerySelectToggle" title="Pick several photos at once, then delete them together. On a computer you can also Ctrl-click to pick, Shift-click to grab a whole run." style="flex:0 0 auto;font-size:12px;font-weight:600;padding:5px 11px;border-radius:7px;border:1px solid var(--line);background:var(--panel-alt);color:var(--text);cursor:pointer;">☑ Select</button>
+      </div>
+      <!-- Multi-select action bar — only shows while picking photos. -->
+      <div id="gallerySelectBar" style="display:none;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 8px 0;padding:8px 10px;background:#241b10;border:1px solid #7a5a2a;border-radius:8px;">
+        <span id="gallerySelectCount" style="font-size:12.5px;font-weight:700;color:#E6B871;flex:0 0 auto;">0 selected</span>
+        <span style="flex:1 1 auto;font-size:11px;color:#b79a72;min-width:90px;">Tap photos to pick — on a computer, Ctrl-click or Shift-click a run.</span>
+        <button type="button" class="btn-ghost" id="gallerySelectDeleteBtn" disabled style="flex:0 0 auto;border-color:#C9832E;color:#E7B45A;">🗑 Delete selected</button>
+        <button type="button" class="btn-ghost" id="gallerySelectDoneBtn" style="flex:0 0 auto;">Done</button>
       </div>
       <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 6px 0;"></div>
       <div id="galleryAiRow" style="margin:0 0 10px 0;">
@@ -5621,6 +5649,11 @@
 
   // ---------- Photo Gallery ----------
   var galleryLightboxDoc = null; // the photo currently shown in the lightbox (for delete)
+  // Multi-select (clean up bad shots in bulk, by eye — no AI). Works on the flat + by-location photo
+  // views (both use buildPhotoCardEl); not on visit-grouped cards (those are aggregates, not one photo).
+  var gallerySelectMode = false;
+  var gallerySelected = {};          // { photoId: true } for the current pick
+  var gallerySelectAnchorId = null;  // last card clicked, for Shift-range on desktop
 
   // ---------- Visit grouping ("independent detection events") ----------
   // The counting problem: a busy trail camera fires many frames of ONE animal in
@@ -5900,7 +5933,7 @@
   // hideLoc drops the per-card location line when the card already sits under a location header.
   function buildPhotoCardEl(p, navList, hideLoc){
     var card = document.createElement('div');
-    card.className = 'import-photo-card';
+    card.className = 'import-photo-card' + (gallerySelectMode && gallerySelected[p.id] ? ' oc-selected' : '');
     card.setAttribute('data-photo-id', p.id);
     var dateStr = new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit'});
     var src = p.thumb || p.downloadURL || '';
@@ -5919,7 +5952,16 @@
         photoAiBadgeHtml(p) +
         buckHtml +
       '</div>';
-    card.addEventListener('click', function(){ showGalleryPhoto(p, navList || [p]); });
+    card.addEventListener('click', function(ev){
+      // In select mode a plain tap toggles this photo (phone-friendly). Ctrl/Cmd or Shift click also
+      // enters select mode straight from a normal browse (the computer shortcut the founder asked for).
+      if (gallerySelectMode || ev.ctrlKey || ev.metaKey || ev.shiftKey){
+        if (ev.preventDefault) ev.preventDefault();
+        handleGallerySelectClick(p, navList || [p], ev);
+        return;
+      }
+      showGalleryPhoto(p, navList || [p]);
+    });
     return card;
   }
   function buildVisitCardEl(v, hideLoc){
@@ -7533,7 +7575,81 @@
     populateGalleryFilters(); renderGallery();
     showToast('Photo deleted');
   });
+
+  // ---------- Gallery multi-select (bulk clean-up by eye, no AI) ----------
+  function enterGallerySelectMode(){
+    // Visit-grouped cards are aggregates, not single photos — selecting them is ambiguous, so bounce.
+    if (galleryGroupVisits){ showToast('Turn off “👣 Group into visits” first to pick individual photos.'); return false; }
+    gallerySelectMode = true;
+    var bar = document.getElementById('gallerySelectBar'); if (bar) bar.style.display = 'flex';
+    var grid = document.getElementById('galleryGrid'); if (grid) grid.classList.add('oc-selecting');
+    var tog = document.getElementById('gallerySelectToggle'); if (tog){ tog.classList.add('oc-on'); tog.textContent = '✖ Cancel'; }
+    updateGallerySelectionUI();
+    return true;
+  }
+  function exitGallerySelectMode(){
+    gallerySelectMode = false; gallerySelected = {}; gallerySelectAnchorId = null;
+    var bar = document.getElementById('gallerySelectBar'); if (bar) bar.style.display = 'none';
+    var grid = document.getElementById('galleryGrid'); if (grid) grid.classList.remove('oc-selecting');
+    var tog = document.getElementById('gallerySelectToggle'); if (tog){ tog.classList.remove('oc-on'); tog.textContent = '☑ Select'; }
+    Array.prototype.forEach.call(document.querySelectorAll('#galleryGrid .import-photo-card.oc-selected'),
+      function(el){ el.classList.remove('oc-selected'); });
+  }
+  function updateGallerySelectionUI(){
+    // Sync every visible card's highlight to the selection set, and refresh the action-bar count.
+    Array.prototype.forEach.call(document.querySelectorAll('#galleryGrid .import-photo-card'), function(el){
+      var id = el.getAttribute('data-photo-id');
+      if (id && gallerySelected[id]) el.classList.add('oc-selected'); else el.classList.remove('oc-selected');
+    });
+    var n = Object.keys(gallerySelected).length;
+    var cnt = document.getElementById('gallerySelectCount'); if (cnt) cnt.textContent = n + ' selected';
+    var del = document.getElementById('gallerySelectDeleteBtn');
+    if (del){ del.disabled = n === 0; del.textContent = n ? ('🗑 Delete selected (' + n + ')') : '🗑 Delete selected'; }
+  }
+  function handleGallerySelectClick(p, navList, ev){
+    if (!gallerySelectMode){ if (!enterGallerySelectMode()) return; } // first Ctrl/Shift-click turns it on
+    if (ev && ev.shiftKey && gallerySelectAnchorId && gallerySelectAnchorId !== p.id){
+      // Shift-range: select every card between the anchor and this one, within the clicked view's list.
+      var ids = (navList || []).map(function(x){ return x.id; });
+      var a = ids.indexOf(gallerySelectAnchorId), b = ids.indexOf(p.id);
+      if (a !== -1 && b !== -1){
+        var lo = Math.min(a, b), hi = Math.max(a, b);
+        for (var i = lo; i <= hi; i++) gallerySelected[ids[i]] = true;
+      } else { gallerySelected[p.id] = true; }
+      // anchor stays put so you can widen the range
+    } else {
+      if (gallerySelected[p.id]) delete gallerySelected[p.id]; else gallerySelected[p.id] = true;
+      gallerySelectAnchorId = p.id;
+    }
+    updateGallerySelectionUI();
+  }
+  async function bulkDeleteSelectedGalleryPhotos(){
+    // Only ever delete photos that are BOTH selected AND currently on screen — a filter change can't
+    // strand a hidden pick into the delete set.
+    var visible = {}; galleryPhotoList().forEach(function(p){ visible[p.id] = true; });
+    var docs = importedPhotos.filter(function(p){ return gallerySelected[p.id] && visible[p.id]; });
+    if (!docs.length){ exitGallerySelectMode(); return; }
+    if (!confirm('Delete ' + docs.length + ' selected photo' + (docs.length === 1 ? '' : 's') + '?\n\n' +
+                 'They move to your delete folder (kept for training) and leave the gallery.')) return;
+    var del = document.getElementById('gallerySelectDeleteBtn'); if (del) del.disabled = true;
+    var cnt = document.getElementById('gallerySelectCount');
+    for (var i = 0; i < docs.length; i++){
+      if (cnt) cnt.textContent = 'Deleting ' + (i + 1) + ' of ' + docs.length + '…';
+      try { await vaultOrDeletePhoto(docs[i]); } catch(e){ console.error('Outdoor Companion: bulk delete failed', e); }
+      importedPhotos = importedPhotos.filter(function(x){ return x.id !== docs[i].id; });
+    }
+    exitGallerySelectMode();
+    populateGalleryFilters(); renderGallery();
+    showToast(docs.length + ' photo' + (docs.length === 1 ? '' : 's') + ' deleted');
+  }
+  document.getElementById('gallerySelectToggle').addEventListener('click', function(){
+    if (gallerySelectMode) exitGallerySelectMode(); else enterGallerySelectMode();
+  });
+  document.getElementById('gallerySelectDoneBtn').addEventListener('click', exitGallerySelectMode);
+  document.getElementById('gallerySelectDeleteBtn').addEventListener('click', bulkDeleteSelectedGalleryPhotos);
+
   function openPhotoGallery(){
+    exitGallerySelectMode(); // always open in normal browse mode
     var fishing = activeModule === 'fishing';
     // Fishing mode hides every trail-cam-only control (camera/species filters, group-by, the whole AI
     // buck-tagging funnel) — none of it applies to catch photos — and retitles the modal accordingly.
@@ -7564,15 +7680,17 @@
     if (e.target === this) this.classList.remove('show');
   });
   ['galleryFarmFilter','galleryCameraFilter','gallerySiteFilter','gallerySpeciesFilter','gallerySort'].forEach(function(id){
-    var _el = document.getElementById(id); if (_el) _el.addEventListener('change', function(){ renderGallery(); refreshTagAllButton(); });
+    var _el = document.getElementById(id); if (_el) _el.addEventListener('change', function(){ exitGallerySelectMode(); renderGallery(); refreshTagAllButton(); });
   });
   document.getElementById('galleryGroupVisits').addEventListener('change', function(){
     galleryGroupVisits = this.checked;
     document.getElementById('galleryVisitGap').style.display = this.checked ? '' : 'none';
+    exitGallerySelectMode(); // visit cards aren't single photos — leave select mode
     renderGallery();
   });
   document.getElementById('galleryGroupByLocation').addEventListener('change', function(){
     galleryGroupByLocation = this.checked;
+    exitGallerySelectMode();
     renderGallery();
   });
   document.getElementById('galleryVisitGap').addEventListener('change', function(){
