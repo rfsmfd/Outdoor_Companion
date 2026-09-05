@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 618</div>
+    <div id="buildBadge">BUILD 619</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -23466,15 +23466,40 @@
     bd.querySelector('.oc-dc-cancel').addEventListener('click', close);
   }
 
+  // Pull a real PLACE name out of a camera's name so a fresh deploy spot isn't just labelled after
+  // the camera (which tells you nothing about WHERE the photos are). Reveal/Tactacam names commonly
+  // carry the location after a dash, e.g. "CAMERA 16 (8V SK) - CUT TROUGH FIELD RS" -> "Cut Trough
+  // Field RS". Keeps short all-caps tokens (RS, NW). Returns '' when there's nothing but the camera.
+  function suggestSpotName(camName){
+    if (!camName) return '';
+    var s = String(camName).replace(/\([^)]*\)/g, ' ');   // drop "(8V SK)"-style chunks
+    var parts = s.split(/\s[-–—]\s/);                       // the place tends to follow " - "
+    var loc = parts.length > 1 ? parts[parts.length - 1] : '';
+    loc = loc.replace(/\s+/g, ' ').trim();
+    if (!loc || /^camera\b/i.test(loc)) return '';          // nothing useful, or still just the camera
+    return loc.split(' ').map(function(w){
+      if (!w) return w;
+      if (w.length <= 2 && w === w.toUpperCase()) return w; // keep RS, NW, SE, N, W upper (not 3-letter words like CUT/OAK)
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    }).join(' ');
+  }
+
   // Do the actual deploy: reuse the chosen named spot, or create a fresh unnamed one at GPS.
   async function finishDeploy(cam, reuseSite, pos){
     var site;
     if (reuseSite){ site = reuseSite; }
     else {
       var when = new Date().toLocaleDateString(undefined, { month:'short', day:'numeric' });
-      site = { id: uid(), name: cam.name + ' · ' + when, autoNamed:true, type:'camera',   // unnamed → name it later
+      var suggested = suggestSpotName(cam.name);   // pull the place out of the camera's own name if it's there
+      site = { id: uid(), name: suggested || (cam.name + ' · ' + when), autoNamed: !suggested, type:'camera',
         notes:'Deployed ' + new Date().toLocaleDateString(), lat: pos.lat, lng: pos.lng,
         createdAt: Date.now(), lastActivityAt: Date.now(), propertyId: (farmForPoint(pos.lat, pos.lng) || {}).id || null };
+      // Confirm/fix the spot's name RIGHT NOW (pre-filled with the guess) so the gallery never fills
+      // with placeholder "CAMERA 16" labels that don't say where the photos are. Blank keeps the guess.
+      try {
+        var entered = await showPrompt('Name this spot — where does ' + cam.name + ' sit?', site.name);
+        if (entered != null){ entered = entered.trim(); if (entered){ site.name = entered; site.autoNamed = false; } }
+      } catch(e){}
       sites.push(site);
     }
     // Close any deployment still open for this camera before opening the new one.
@@ -23607,7 +23632,9 @@
         if (depSite){
           // Only rewrite the name if it's still the auto "<cam> · <date>" form (don't clobber a name the user chose).
           if (depSite.autoNamed){
-            depSite.name = cam.name + ' · ' + new Date(newMs).toLocaleDateString(undefined, { month:'short', day:'numeric' });
+            var sug = suggestSpotName(cam.name);
+            depSite.name = sug || (cam.name + ' · ' + new Date(newMs).toLocaleDateString(undefined, { month:'short', day:'numeric' }));
+            if (sug) depSite.autoNamed = false;   // now it's a real place name, stop treating it as a placeholder
           }
           // Only rewrite the auto "Deployed <date>" note (leave a user's own notes alone).
           if (depSite.notes && /^Deployed\b/.test(depSite.notes)){
