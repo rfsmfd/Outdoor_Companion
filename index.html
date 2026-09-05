@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 622</div>
+    <div id="buildBadge">BUILD 623</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6202,7 +6202,11 @@
   var _vaultFullNotified = (function(){ try{ return localStorage.getItem('oc_vault_full') === '1'; }catch(e){ return false; } })();
   async function vaultOrDeletePhoto(doc){
     if (!doc) return;
-    if (vaultedPhotos.length >= VAULT_CAP){ await deletePhotoStorage(doc); return; }  // vault full → real delete
+    // ONLY bank the blanks / non-game junk (empty, person, dog, vehicle). A deleted real animal is NOT a
+    // blank — the animal training set comes from the photos you KEEP — so it just deletes. And a photo with
+    // no AI read yet we can't call empty, so it deletes too. This keeps the vault a clean pile of blanks.
+    var isBlank = !!(doc.ai) && !aiIsWildlife(doc.ai);
+    if (!isBlank || vaultedPhotos.length >= VAULT_CAP){ await deletePhotoStorage(doc); return; }  // not-a-blank, or vault full → real delete
     if (doc.cameraId && doc.timestamp && !doc.usedFallbackDate) addPhotoTombstone(doc.cameraId, doc.timestamp); // don't let an SD re-import resurrect it into the gallery
     doc.vaulted = true; doc.vaultedAt = Date.now();
     if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
