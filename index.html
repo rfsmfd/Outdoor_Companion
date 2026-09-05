@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 625</div>
+    <div id="buildBadge">BUILD 626</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -24904,6 +24904,43 @@
     if (imageJobs.length === 0){
       progress.textContent = 'No photos found in what was selected.';
       return;
+    }
+
+    // Undeployed-camera guard: in auto-match ("scanned") mode a camera with NO deployment on the map
+    // can't place ANY photo — the whole batch would silently land as "No site" (the founder's Camera-3
+    // mistake). Catch it BEFORE uploading anything: warn plainly, and route to the manual location
+    // picker so the batch gets stamped correctly. Skipped in manual mode (a location is chosen there),
+    // and skipped once the camera has any deployment (the setup-shot grace + end-of-import picker
+    // handle the partial-stranding cases).
+    if (getImportLocMode() !== 'manual'){
+      var camHasDeploy = deployments.some(function(d){ return d.cameraId === cameraId; });
+      if (!camHasDeploy){
+        var undCam = cameras.filter(function(c){ return c.id === cameraId; })[0];
+        var undName = undCam ? (undCam.name || 'This camera') : 'This camera';
+        var goPick = confirm(
+          '⚠ ' + undName + ' isn’t set up at any location yet.\n\n' +
+          'All ' + imageJobs.length + ' of these photos would come in as “No site,” because this camera ' +
+          'has never been deployed on your map.\n\n' +
+          'OK — pick where these photos were taken now\n' +
+          'Cancel — stop and check the camera'
+        );
+        // Restore the import UI either way (the picker was hidden above when processing began).
+        progress.style.display = 'none';
+        document.getElementById('importPickerArea').style.display = 'block';
+        if (goPick){
+          // Flip to manual-location mode so the whole batch is stamped with one site, then they
+          // press Import again — the same pick-then-reimport flow the manual path already uses.
+          var undRadio = document.querySelector('input[name="importLocModeRadio"][value="manual"]');
+          if (undRadio) undRadio.checked = true;
+          var undBox = document.getElementById('importManualLoc');
+          if (undBox) undBox.style.display = 'block';
+          importBatchLocation = null;
+          updateImportChosenLoc();
+          populateImportLocSelect();
+          alert('Pick the spot these came from (a saved location, or drop a pin), then press Import again.');
+        }
+        return; // stop this run in both cases — nothing lands as "No site" by accident
+      }
     }
 
     // Manual batch location: resolve the chosen location to a real Site now — reusing an
