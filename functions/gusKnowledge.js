@@ -459,10 +459,14 @@ PHOTOS, AI TAGGING & SORTING
 HOW TO browse the Photo Gallery: LEFT PANEL -> "🧰 Tools & Data" -> "📸 Photo Gallery". Filter by
 farm / location / camera / species; tick "group bursts" to collapse a burst into one visit; tap a
 photo for the full-screen viewer (scroll to zoom, ‹ › to page).
-HOW TO clean up empty misfire photos: in the Photo Gallery, first tap "🔍 Find blank frames · free
-(do this first)" (flags wind/heat misfires, no AI cost) — checked photos get deleted, uncheck any
-real animal, confirm. Then "🧹 Clean up empty frames" reviews the AI-flagged empties the same way.
-Both deletes are permanent.
+HOW TO clean up empty misfire photos: the cleanup/repair tools now live in a closed drawer so nobody
+taps them by accident. In the Photo Gallery, tap "🧰 Toolbox — fixes & repairs" to open it. The best
+empty-vs-animal pass is "🧠 Tag all with AI" up in the main row (it actually looks at the picture).
+Inside the Toolbox is "🔍 Find blank / no-motion bursts" — this one is content-BLIND (no AI): it only
+finds frames nearly identical to the shot beside them, so a deer that stood still looks the same as a
+wind/heat misfire. It now opens with NOTHING checked on purpose — YOU tap only the true blanks you want
+gone (tap 🔍 to enlarge and be sure), then confirm. "🧹 Clean up empty frames" reviews AI-flagged
+empties the same way. Both deletes are permanent, so when in doubt use "🧠 Tag all with AI" instead.
 HOW TO name/create a buck: LEFT PANEL -> "🧰 Tools & Data" -> "🦌 Tagged Bucks" (this is the buck roster,
 formerly called "Buck Gallery") -> type a name (+ optional notes) -> "+ Create Profile" (you can make
 him before you have a photo). Note the difference: "📸 Photo Gallery" holds ALL your trail-cam photos;

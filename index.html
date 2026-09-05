@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 613</div>
+    <div id="buildBadge">BUILD 614</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2791,24 +2791,27 @@
       </div>
       <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 6px 0;"></div>
       <div id="galleryAiRow" style="margin:0 0 10px 0;">
-        <!-- The buck workflow reads top-to-bottom as a cheap-to-expensive funnel: tag (done) →
-             group by eye (free) → review the AI's free guesses → and only LAST, pay to match the
-             hard leftovers. The DOM order here IS the funnel; don't reshuffle without reason. -->
-        <button type="button" class="btn-ghost" id="galleryBlankFinderBtn" style="width:100%;border-color:#3d7a52;color:#8fd6a6;">🔍 Find blank frames · free (do this first)</button>
+        <!-- FUNNEL — the normal photo workflow, front & center: tag → group by eye → review free
+             guesses → pay to match leftovers → clean up empties. The DOM order IS the funnel. -->
         <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
         <button type="button" class="btn-ghost" id="galleryBuckClusterBtn" style="width:100%;margin-top:6px;display:none;">🧩 Group look-alike bucks (free, no AI)</button>
         <button type="button" class="btn-ghost" id="galleryBuckReviewBtn" style="width:100%;margin-top:6px;display:none;">🦌 Review buck suggestions</button>
         <button type="button" class="btn-ghost" id="galleryBuckMatchBtn" style="width:100%;margin-top:6px;display:none;border-color:#C9832E;color:#E7B45A;">🦌 Match buck photos to known bucks</button>
         <div id="galleryTagAllStatus" style="font-size:11px;color:var(--text-dim);margin-top:5px;"></div>
         <button type="button" class="btn-ghost" id="galleryCleanupBtn" style="width:100%;margin-top:6px;display:none;">🧹 Clean up empty frames</button>
-        <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
-        <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
-        <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
-        <button type="button" class="btn-ghost" id="gallerySiteMoveBtn" style="width:100%;margin-top:6px;">📍 Move photos to another Site</button>
-        <div style="border-top:1px solid var(--border,#33443a);margin:12px 0 0;padding-top:8px;">
-          <button type="button" class="btn-ghost" id="galleryDiagnoseBtn" style="width:100%;font-size:11.5px;opacity:.8;">🔍 Diagnose locations</button>
-          <button type="button" class="btn-ghost" id="galleryCameraAuditBtn" style="width:100%;font-size:11.5px;opacity:.8;margin-top:6px;">📷 Camera audit</button>
-          <button type="button" class="btn-ghost" id="galleryCameraMergeBtn" style="width:100%;font-size:11.5px;opacity:.8;margin-top:6px;">🔧 Merge / fix camera</button>
+        <!-- TOOLBOX — fixes & repairs, tucked away from the normal flow (collapsed by default) so a
+             destructive/advanced tool is never one stray tap from your photos. -->
+        <button type="button" id="galleryToolboxToggle" style="width:100%;margin-top:12px;background:#18201b;border:1px dashed #45564a;color:#9db0a3;border-radius:8px;padding:10px;font-size:12.5px;font-weight:600;cursor:pointer;">🧰 Toolbox — fixes &amp; repairs <span id="galleryToolboxCaret">▸</span></button>
+        <div id="galleryToolbox" style="display:none;border:1px solid #33443a;border-radius:8px;padding:8px;margin-top:6px;">
+          <div style="font-size:10.5px;color:#8aa596;margin:0 0 7px;line-height:1.45;">Occasional cleanup &amp; repair tools — <strong>not part of the normal import</strong>. Some can delete photos; read each one before you use it.</div>
+          <button type="button" class="btn-ghost" id="galleryBlankFinderBtn" style="width:100%;">🔍 Find blank / no-motion bursts</button>
+          <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
+          <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
+          <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
+          <button type="button" class="btn-ghost" id="gallerySiteMoveBtn" style="width:100%;margin-top:6px;">📍 Move photos to another Site</button>
+          <button type="button" class="btn-ghost" id="galleryDiagnoseBtn" style="width:100%;font-size:11.5px;opacity:.85;margin-top:6px;">🔍 Diagnose locations</button>
+          <button type="button" class="btn-ghost" id="galleryCameraAuditBtn" style="width:100%;font-size:11.5px;opacity:.85;margin-top:6px;">📷 Camera audit</button>
+          <button type="button" class="btn-ghost" id="galleryCameraMergeBtn" style="width:100%;font-size:11.5px;opacity:.85;margin-top:6px;">🔧 Merge / fix camera</button>
         </div>
       </div>
       <div id="galleryGrid"></div>
@@ -8132,7 +8135,8 @@
   // Shared review-grid renderer for BOTH the AI cleanup and the free blank finder. `reasonFn(p)`
   // returns the plain-text "why flagged" line under each thumbnail. Every candidate starts checked;
   // the reviewer unchecks keepers (or taps 🔍 to enlarge) before deleting. Nothing auto-deletes.
-  function renderCleanupCards(list, emptyText, reasonFn){
+  function renderCleanupCards(list, emptyText, reasonFn, defaultChecked){
+    var _preChecked = (defaultChecked !== false);   // false = start with NOTHING checked (opt-in) — used by the content-blind blank finder so it can never one-tap delete real animals
     var grid = document.getElementById('cleanupGrid');
     var emptyMsg = document.getElementById('cleanupEmpty');
     document.getElementById('cleanupStatus').textContent = '';
@@ -8146,7 +8150,7 @@
         var src = p.thumb || p.downloadURL || '';
         var dateStr = p.timestamp ? new Date(p.timestamp).toLocaleString(undefined, {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : '';
         return '<label class="cleanup-card import-photo-card">' +
-          '<input type="checkbox" class="cleanup-cb" data-photo-id="' + p.id + '" checked>' +
+          '<input type="checkbox" class="cleanup-cb" data-photo-id="' + p.id + '"' + (_preChecked ? ' checked' : '') + '>' +
           '<span class="keep-badge">✓ keep</span>' +
           '<button type="button" class="cleanup-zoom" data-photo-id="' + p.id + '" title="Enlarge to check the background">🔍</button>' +
           '<img src="' + src + '" alt="" loading="lazy">' +
@@ -8250,16 +8254,27 @@
     }
     if (btn){ btn.disabled = false; btn.textContent = oldLabel; }
     candidates.sort(function(a, b){ return _tms(a) - _tms(b); });
-    setCleanupHeader('🔍 Blank / No-Motion Frames · free',
-      'Found <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' nearly identical to the shot beside them from the same camera — the classic wind/heat misfire burst, found with <strong>no AI and no cost</strong>. <strong style="color:#D94A2E;">Checked photos will be permanently deleted</strong>; this can\'t be undone. See an animal that just held still? Tap 🔍 to enlarge, then uncheck it to keep it.');
+    setCleanupHeader('🔍 Blank / No-Motion Bursts',
+      'Found <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' nearly identical to the shot beside them from the same camera. This tool is <strong>content-blind — it uses NO AI</strong>, so a deer that <strong>stood still</strong> looks the same as a wind/heat misfire. <strong style="color:#E8B04B;">Nothing is checked</strong> — go through and check ONLY the true blanks you want to delete (tap 🔍 to enlarge and be sure). <strong style="color:#D94A2E;">Checked photos are permanently deleted.</strong> For a reliable empty-vs-animal pass, use “🧠 Tag all with AI” instead.');
     renderCleanupCards(candidates,
-      'No obvious blank/duplicate bursts in this view. The free finder only catches frames nearly identical to a neighbor — isolated single blanks won\'t match. Run “Tag all with AI” to catch the rest.',
-      function(p){ return reasons[p.id] || 'no motion'; });
+      'No obvious blank/duplicate bursts in this view. This finder only catches frames nearly identical to a neighbor — isolated single blanks won\'t match. Use “🧠 Tag all with AI” to catch the rest.',
+      function(p){ return reasons[p.id] || 'no motion'; }, false);   // false = start UNCHECKED (opt-in), never pre-select for deletion
+    if (typeof updateCleanupDeleteBtn === 'function') updateCleanupDeleteBtn();
     closeAllModals();
     document.getElementById('photoCleanupModalBackdrop').classList.add('show');
   }
   var _blankFinderBtnEl = document.getElementById('galleryBlankFinderBtn');
   if (_blankFinderBtnEl) _blankFinderBtnEl.addEventListener('click', runBlankFinder);
+  // Toolbox (fixes & repairs) — collapsed by default, remembers open/closed. Keeps repair/destructive tools
+  // out of the normal photo funnel so they're never a stray tap away.
+  (function(){
+    var tgl = document.getElementById('galleryToolboxToggle'), box = document.getElementById('galleryToolbox'), car = document.getElementById('galleryToolboxCaret');
+    if (!tgl || !box) return;
+    var open = false; try { open = localStorage.getItem('oc_gallery_toolbox') === '1'; } catch(e){}
+    function apply(){ box.style.display = open ? 'block' : 'none'; if (car) car.textContent = open ? '▾' : '▸'; }
+    apply();
+    tgl.addEventListener('click', function(){ open = !open; apply(); try { localStorage.setItem('oc_gallery_toolbox', open ? '1' : '0'); } catch(e){} });
+  })();
   function closeCleanupModal(reopenGallery){
     document.getElementById('photoCleanupModalBackdrop').classList.remove('show');
     if (reopenGallery) openPhotoGallery();
