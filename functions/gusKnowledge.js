@@ -464,21 +464,16 @@ PHOTOS, AI TAGGING & SORTING
 HOW TO browse the Photo Gallery: LEFT PANEL -> "🧰 Tools & Data" -> "📸 Photo Gallery". Filter by
 farm / location / camera / species; tick "group bursts" to collapse a burst into one visit; tap a
 photo for the full-screen viewer (scroll to zoom, ‹ › to page).
-HOW TO clean up empty misfire photos: there are TWO ways, and they run at different times.
-FREE, BEFORE any AI — "① Clear empty frames — free (do this first)" — this is now STEP 1 right at the
-top of the Photo Gallery buttons (green outline), with "② Tag the rest with AI" under it. It costs
-NOTHING no matter how many photos. It learns
-what each camera's EMPTY scene looks like and flags only frames that match it (bare woods, nothing
-there) — a deer, even one standing dead still, is a shape that isn't in the empty scene, so it's KEPT.
-It even ignores the whole frame just getting brighter/darker (sun in and out). It opens with all the
-flagged empties ALREADY CHECKED for deletion — you skim them and UNCHECK anything that has an animal
-in it (tap 🔍 to enlarge if unsure), then delete the rest. One soft spot
-to know: at a bait/feeder site where a deer is in MOST frames it can slip one in, and a very small far-
-off animal is borderline — so glance before deleting. Use this FIRST to clear the wind/misfire bulk for
-free. AFTER AI — "🧹 Clean up empty frames" (appears once you've run "🧠 Tag all with AI"): it reviews
-the frames the AI itself judged empty. Both deletes are permanent; both let you uncheck any keeper first.
-Order that saves money: free empty-scene pass first -> then "🧠 Tag all with AI" only on what's left ->
-then AI cleanup if you want. That way you never pay AI to look at wind-blown blanks.
+HOW TO clean up empty misfire photos: the RELIABLE way is AI, because only AI actually looks at the
+picture and can tell an empty field from a deer standing in that field. Steps: "🧠 Tag all with AI"
+(top of the Photo Gallery) tags every photo empty/animal/species, then "🧹 Clean up empty frames"
+(appears after tagging) reviews only the ones AI judged empty — you uncheck any keeper, then delete.
+Deletes are permanent. NOTE about the free tool: there is also "🔍 Find empty-scene shots · free
+(EXPERIMENTAL)" inside the "🧰 Toolbox — fixes & repairs" drawer. It uses NO AI (compares each frame to
+the camera's usual scene), but on a BUSY deer camera it wrongly flags clear deer as empty, so it is NOT
+trustworthy — it opens with NOTHING checked and you must verify every single one yourself before
+deleting. Never tell a user the free finder is safe to bulk-delete; steer them to the AI pass for
+clearing empties.
 HOW TO name/create a buck: LEFT PANEL -> "🧰 Tools & Data" -> "🦌 Tagged Bucks" (this is the buck roster,
 formerly called "Buck Gallery") -> type a name (+ optional notes) -> "+ Create Profile" (you can make
 him before you have a photo). Note the difference: "📸 Photo Gallery" holds ALL your trail-cam photos;
