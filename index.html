@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 624</div>
+    <div id="buildBadge">BUILD 625</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -24446,12 +24446,27 @@
   // deployed to AT THAT TIME — using the permanent Deployment History, not just wherever
   // the camera happens to be sitting today. This is what makes matching meaningful even
   // for a camera that's been moved multiple times since.
+  var DEPLOY_SETUP_GRACE_MS = 24 * 60 * 60 * 1000; // a photo up to this long BEFORE a camera's first-ever
+                                                   // deployment is treated as a setup / walk-up shot at that spot
   function findSiteForCameraAtTime(cameraId, timestamp){
-    var priorDeployments = deployments.filter(function(d){ return d.cameraId === cameraId && d.deployedAt <= timestamp; });
-    if (priorDeployments.length === 0) return null; // photo predates any known deployment
-    priorDeployments.sort(function(a,b){ return b.deployedAt - a.deployedAt; });
-    var latest = priorDeployments[0];
-    return sites.filter(function(s){ return s.id === latest.siteId; })[0] || null;
+    var camDeps = deployments.filter(function(d){ return d.cameraId === cameraId; });
+    if (!camDeps.length) return null;
+    var priorDeployments = camDeps.filter(function(d){ return d.deployedAt <= timestamp; });
+    if (priorDeployments.length){
+      priorDeployments.sort(function(a,b){ return b.deployedAt - a.deployedAt; });
+      return sites.filter(function(s){ return s.id === priorDeployments[0].siteId; })[0] || null;
+    }
+    // SETUP-SHOT GRACE: the photo predates every deployment — but a shot taken shortly before a camera's
+    // FIRST-ever deployment is almost always the walk-up shot from placing it right there (you set the
+    // camera out, then deployed it in the app a bit later). Attach it to that first deployment's site,
+    // but ONLY within DEPLOY_SETUP_GRACE_MS so a genuinely-older photo still strands honestly. This never
+    // affects a moved camera's history (only the earliest deployment, only when nothing else covers it).
+    camDeps.sort(function(a,b){ return a.deployedAt - b.deployedAt; });
+    var earliest = camDeps[0];
+    if (earliest && (earliest.deployedAt - timestamp) <= DEPLOY_SETUP_GRACE_MS){
+      return sites.filter(function(s){ return s.id === earliest.siteId; })[0] || null;
+    }
+    return null; // photo predates any known deployment by more than the grace window
   }
 
   // ---------- Manual batch location (photos NOT from a scanned/deployed camera) ----------
