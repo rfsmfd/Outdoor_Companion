@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 621</div>
+    <div id="buildBadge">BUILD 622</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6194,6 +6194,32 @@
       try{ await firebase.storage().ref(doc.storagePath).delete(); }catch(e){ /* file may already be gone */ }
     }
   }
+  // 🗄 The DELETE FOLDER (vault). When you clean a photo out of your gallery, keep it — image + label —
+  // for training your own AI later, but pull it out of every working view. NON-DESTRUCTIVE: the Cloud
+  // Storage image is deliberately NOT removed here. Flag-based: the record stays in the photo store with
+  // vaulted:true, and loadImportedPhotos splits vaulted ones out of importedPhotos so no view ever sees
+  // them. Once the vault holds VAULT_CAP, further deletes fall back to a real delete (bounded storage).
+  var _vaultFullNotified = (function(){ try{ return localStorage.getItem('oc_vault_full') === '1'; }catch(e){ return false; } })();
+  async function vaultOrDeletePhoto(doc){
+    if (!doc) return;
+    if (vaultedPhotos.length >= VAULT_CAP){ await deletePhotoStorage(doc); return; }  // vault full → real delete
+    if (doc.cameraId && doc.timestamp && !doc.usedFallbackDate) addPhotoTombstone(doc.cameraId, doc.timestamp); // don't let an SD re-import resurrect it into the gallery
+    doc.vaulted = true; doc.vaultedAt = Date.now();
+    if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
+    // NOTE: intentionally NO firebase.storage().delete() — keeping the image is the whole point.
+    if (vaultedPhotos.indexOf(doc) === -1) vaultedPhotos.push(doc);
+    if (!_vaultFullNotified && vaultedPhotos.length >= VAULT_CAP){
+      _vaultFullNotified = true; try{ localStorage.setItem('oc_vault_full', '1'); }catch(e){}
+      showToast('🗄 Delete folder full — ' + VAULT_CAP + ' empties banked. Enough to train your free blank-catcher.');
+    }
+  }
+  // Heads-up once your KEPT good-animal photos (the species training set) reach the mark.
+  var _animalMarkNotified = (function(){ try{ return localStorage.getItem('oc_animal_mark') === '1'; }catch(e){ return false; } })();
+  function checkAnimalMilestone(){
+    if (_animalMarkNotified) return;
+    var n = 0; for (var i = 0; i < importedPhotos.length; i++){ var p = importedPhotos[i]; if (p && p.ai && aiIsWildlife(p.ai)) n++; }
+    if (n >= 5000){ _animalMarkNotified = true; try{ localStorage.setItem('oc_animal_mark', '1'); }catch(e){} showToast('🦌 5,000 good tagged animal photos banked — your species training set is ready too.'); }
+  }
   // Manual correction — a human label that overrides the AI and is trusted over it.
   var CORRECTION_MAP = {
     deer:     { hasAnimal:true, primarySpecies:'whitetail deer', isBuck:false },
@@ -7489,7 +7515,7 @@
     var doc = galleryLightboxDoc;
     if (!confirm('Delete this photo permanently from your cloud account?\n\nThis cannot be undone.')) return;
     var btn = this; btn.disabled = true; btn.textContent = 'Deleting…';
-    await deletePhotoStorage(doc);
+    await vaultOrDeletePhoto(doc);   // 🗄 keep it in the delete folder for training (unless the vault's full)
     importedPhotos = importedPhotos.filter(function(p){ return p.id !== doc.id; });
     btn.disabled = false; btn.textContent = '🗑 Delete';
     document.getElementById('photoLightboxBackdrop').classList.remove('show');
@@ -8308,7 +8334,7 @@
       var doc = importedPhotos.filter(function(p){ return p.id === ids[i]; })[0];
       if (!doc) continue;
       status.textContent = 'Deleting ' + (done+1) + ' of ' + ids.length + '…';
-      await deletePhotoStorage(doc);
+      await vaultOrDeletePhoto(doc);   // 🗄 keep it in the delete folder for training (unless the vault's full)
       importedPhotos = importedPhotos.filter(function(p){ return p.id !== doc.id; });
       done++;
     }
@@ -23993,6 +24019,8 @@
   // whose full image lives in Firebase Storage. `antler` is reserved for Phase 2.5
   // (auto-tagging & antler comparison) so the pipeline is ready to feed it.
   var importedPhotos = [];
+  var vaultedPhotos = [];   // 🗄 the "delete folder": photos you deleted are KEPT (image + label) for training your own AI later, but held OUT of every working view
+  var VAULT_CAP = 5000;     // stop growing the vault past this; deletes beyond it are real deletes so cloud storage stays bounded
 
   // Analysis-grade compression: resize to a generous max dimension at good JPEG quality,
   // returned as a Blob for upload to Storage. Deliberately NOT aggressive — trail-cam
@@ -24109,7 +24137,7 @@
   }
 
   async function loadImportedPhotos(){
-    if (!hasChatStorage){ importedPhotos = []; return; }
+    if (!hasChatStorage){ importedPhotos = []; vaultedPhotos = []; return; }
     try{
       var res = await window.storage.list('photo:', false);
       var keys = (res && res.keys) ? res.keys : [];
@@ -24117,8 +24145,13 @@
       for (var i=0; i<keys.length; i++){
         try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
       }
-      importedPhotos = dedupeById(loaded);
-    }catch(e){ importedPhotos = []; }
+      var deduped = dedupeById(loaded);
+      // 🗄 Split the delete-folder (vault) off here so the gallery, analytics, and every count only ever
+      // see the working photos. Vaulted records stay in the cloud (image kept) for training, out of view.
+      vaultedPhotos  = deduped.filter(function(p){ return p && p.vaulted; });
+      importedPhotos = deduped.filter(function(p){ return !(p && p.vaulted); });
+      checkAnimalMilestone();
+    }catch(e){ importedPhotos = []; vaultedPhotos = []; }
   }
 
   // ---------- Photo condition enrichment (moon/solunar/weather at capture time & place) ----------
