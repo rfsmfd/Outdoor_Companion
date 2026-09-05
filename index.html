@@ -831,6 +831,21 @@
   .shape-move-handle{ width:34px; height:34px; border-radius:50%; background:#7d5aa8; color:#fff; border:2px solid #fff;
     display:flex; align-items:center; justify-content:center; font-size:19px; line-height:1; cursor:move;
     box-shadow:0 2px 7px rgba(0,0,0,.55); }
+  /* Edit bar for a selected drawing — docked at the bottom so it never covers the shape you're editing. */
+  #shapeEditBar{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%); z-index:100056; display:flex; gap:10px;
+    align-items:center; flex-wrap:wrap; justify-content:center; max-width:calc(100% - 20px); background:#241E2E;
+    border:1px solid #5a3e78; border-radius:12px; padding:9px 12px; box-shadow:0 8px 30px rgba(0,0,0,.55); }
+  #shapeEditBar .seb-name{ color:#e9ddf5; font-size:13px; font-weight:700; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #shapeEditBar .seb-colors{ display:flex; gap:5px; }
+  #shapeEditBar .seb-swatch{ width:28px; height:28px; border-radius:50%; border:3px solid transparent; box-shadow:0 0 0 1px rgba(0,0,0,.25); cursor:pointer; padding:0; }
+  #shapeEditBar .seb-fillwrap{ display:flex; align-items:center; gap:6px; color:#c9b3e0; font-size:12px; }
+  #shapeEditBar .seb-fill{ width:92px; accent-color:#B06FE0; }
+  #shapeEditBar .seb-styles{ display:flex; gap:5px; }
+  #shapeEditBar .seb-style{ font-size:11.5px; padding:8px 9px; border-radius:7px; border:1px solid #4a3565; background:#1c1726; color:#c9b3e0; cursor:pointer; }
+  #shapeEditBar .seb-style.on{ background:#7d5aa8; border-color:#d8c4f0; color:#fff; }
+  #shapeEditBar .seb-btn{ font-size:13px; padding:8px 11px; border-radius:8px; border:1px solid #5a3e78; background:#1c1726; color:#e9ddf5; cursor:pointer; min-height:40px; }
+  #shapeEditBar .seb-del{ color:#ff9a80; }
+  #shapeEditBar .seb-done{ background:#2E4636; border-color:#3c6d42; color:#dff0e4; font-weight:700; }
   @keyframes recordPulse{
     0%, 100% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 0 rgba(217,74,46,0.5); }
     50% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 6px rgba(217,74,46,0); }
@@ -2370,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 612</div>
+    <div id="buildBadge">BUILD 613</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4461,15 +4476,16 @@
     if (trail.scoutKind && !scoutMode) return;   // scout conjecture shows ONLY on the markup board
     var _isSL = !!trail.scoutKind;
     var poly;
+    var _fillOp = (trail.fillOpacity != null ? trail.fillOpacity : 0.18);
     if (trail.shape === 'circle' && trail.center){
-      poly = L.circle([trail.center.lat, trail.center.lng], { radius: trail.radiusM || 30, color: trail.color || '#B06FE0', fillColor: trail.fillColor || trail.color || '#B06FE0', fillOpacity: 0.18, weight: 2, dashArray: _isSL ? '6,7' : lineStyleToDashArray(trail.lineStyle) }).addTo(map);
+      poly = L.circle([trail.center.lat, trail.center.lng], { radius: trail.radiusM || 30, color: trail.color || '#B06FE0', fillColor: trail.fillColor || trail.color || '#B06FE0', fillOpacity: _fillOp, weight: 2, dashArray: _isSL ? '6,7' : lineStyleToDashArray(trail.lineStyle) }).addTo(map);
     } else if (trail.shape === 'area' && trail.points && trail.points.length >= 3){
-      poly = L.polygon(trail.points.map(function(p){ return [p.lat, p.lng]; }), { color: trail.color || '#B06FE0', fillColor: trail.fillColor || trail.color || '#B06FE0', fillOpacity: 0.18, weight: 2, dashArray: _isSL ? '6,7' : lineStyleToDashArray(trail.lineStyle) }).addTo(map);
+      poly = L.polygon(trail.points.map(function(p){ return [p.lat, p.lng]; }), { color: trail.color || '#B06FE0', fillColor: trail.fillColor || trail.color || '#B06FE0', fillOpacity: _fillOp, weight: 2, dashArray: _isSL ? '6,7' : lineStyleToDashArray(trail.lineStyle) }).addTo(map);
     } else {
       poly = L.polyline(trail.points.map(function(p){ return [p.lat, p.lng]; }), { color: _isSL ? '#B06FE0' : trail.color, weight: _isSL ? 3 : 4, opacity: 0.9, dashArray: _isSL ? '6,7' : lineStyleToDashArray(trail.lineStyle) }).addTo(map);
     }
-    poly.bindPopup(buildTrailPopup(trail));   // tap it → name + color / line-style / rename / delete
-    poly.on('click', function(){ selectTrail(trail.id, 'map'); });   // …and highlight it + its row in the list
+    // Tap to SELECT → arms the edit handles + the non-covering edit bar (no popup on top of the shape anymore).
+    poly.on('click', function(){ selectTrail(trail.id, 'map'); });
     // A permanent map label on drawn SHAPES and any scout conjecture, so you can tell what it is at a glance.
     if (trail.name && (trail.shape || trail.scoutKind)){ try { poly.bindTooltip(trail.name, { permanent: true, direction: 'center', className: 'trail-shape-label' }); } catch (e) {} }
     savedTrailPolylines[trail.id] = poly;
@@ -4552,10 +4568,12 @@
       mv.on('dragend', function(){ try { if (layer.editing && layer.editing.enable) layer.editing.enable(); } catch (e) {} });   // re-seat corner handles at the moved spot
       layer._ocMoveMarker = mv;
     }
+    showShapeEditBar(trail);   // controls (color, fill transparency, style, rename, delete) in a bottom bar — never on top of the shape
     showToast('Drag ✥ to move · drag a corner to reshape · tap the map when done');
   }
   function endShapeEdit(id){
     var layer = savedTrailPolylines[id], trail = trails.filter(function(t){ return t.id === id; })[0];
+    hideShapeEditBar();
     if (layer){
       if (layer._ocMoveMarker){ try { map.removeLayer(layer._ocMoveMarker); } catch (e) {} layer._ocMoveMarker = null; }
       try { if (layer.editing && layer.editing.disable) layer.editing.disable(); } catch (e) {}
@@ -4569,6 +4587,43 @@
     if (trail) renderSavedTrailOnMap(trail);   // redraw a clean layer (handles gone, label/popup re-attached)
   }
   function _shiftLatLngs(arr, dLat, dLng){ return arr.map(function(p){ return Array.isArray(p) ? _shiftLatLngs(p, dLat, dLng) : L.latLng(p.lat + dLat, p.lng + dLng); }); }
+  // A non-covering EDIT BAR at the bottom for a selected drawing — replaces the popup that used to open on
+  // top of the shape. Color, fill transparency (shapes), line style (lines), rename, delete, done.
+  function hideShapeEditBar(){ var b = document.getElementById('shapeEditBar'); if (b && b.parentNode) b.parentNode.removeChild(b); }
+  function showShapeEditBar(trail){
+    hideShapeEditBar();
+    var layer = savedTrailPolylines[trail.id]; if (!layer) return;
+    var isShape = (trail.shape === 'area' || trail.shape === 'circle');
+    var bar = document.createElement('div'); bar.id = 'shapeEditBar';
+    bar.innerHTML =
+      '<span class="seb-name">' + escapeHtml(trail.name || 'Drawing') + '</span>' +
+      '<span class="seb-colors"></span>' +
+      (isShape ? '<span class="seb-fillwrap">Fill<input type="range" class="seb-fill" min="0" max="65" value="' + Math.round((trail.fillOpacity != null ? trail.fillOpacity : 0.18) * 100) + '"></span>' : '<span class="seb-styles"></span>') +
+      '<button type="button" class="seb-btn seb-rename" title="Rename">✏️</button>' +
+      '<button type="button" class="seb-btn seb-del" title="Delete">🗑</button>' +
+      '<button type="button" class="seb-btn seb-done">✓ Done</button>';
+    document.body.appendChild(bar);
+    var cw = bar.querySelector('.seb-colors');
+    TRAIL_COLORS.forEach(function(color){ var s = document.createElement('button'); s.type = 'button'; s.className = 'seb-swatch'; s.style.background = color; s.style.borderColor = (color === trail.color ? '#fff' : 'transparent');
+      s.addEventListener('click', function(){ trail.color = color; trail.fillColor = color; try { layer.setStyle({ color: color, fillColor: color }); } catch (e) {} if (typeof saveTrail === 'function') saveTrail(trail); showShapeEditBar(trail); }); cw.appendChild(s); });
+    var fill = bar.querySelector('.seb-fill');
+    if (fill){ fill.addEventListener('input', function(){ trail.fillOpacity = parseInt(fill.value, 10) / 100; try { layer.setStyle({ fillOpacity: trail.fillOpacity }); } catch (e) {} });
+      fill.addEventListener('change', function(){ if (typeof saveTrail === 'function') saveTrail(trail); }); }
+    var sw = bar.querySelector('.seb-styles');
+    if (sw){ [['solid','Solid'],['dashed','Dashed'],['dotted','Dotted']].forEach(function(p){ var c = document.createElement('button'); c.type = 'button'; c.className = 'seb-style' + (trail.lineStyle === p[0] ? ' on' : ''); c.textContent = p[1];
+      c.addEventListener('click', function(){ trail.lineStyle = p[0]; try { layer.setStyle({ dashArray: lineStyleToDashArray(p[0]) }); } catch (e) {} if (typeof saveTrail === 'function') saveTrail(trail); showShapeEditBar(trail); }); sw.appendChild(c); }); }
+    bar.querySelector('.seb-rename').addEventListener('click', function(){ var nm = window.prompt('Name this drawing:', trail.name || ''); if (nm != null){ nm = nm.trim(); if (nm){ trail.name = nm; if (typeof saveTrail === 'function') saveTrail(trail); try { if (layer.getTooltip && layer.getTooltip()) layer.setTooltipContent(nm); } catch (e) {} bar.querySelector('.seb-name').textContent = nm; } } });
+    bar.querySelector('.seb-del').addEventListener('click', async function(){ var ok = await showConfirm('Delete this drawing? This cannot be undone.'); if (!ok) return;
+      var lyr = savedTrailPolylines[trail.id];
+      if (lyr){ if (lyr._ocMoveMarker){ try { map.removeLayer(lyr._ocMoveMarker); } catch (e) {} } try { if (lyr.editing && lyr.editing.disable) lyr.editing.disable(); } catch (e) {} map.removeLayer(lyr); delete savedTrailPolylines[trail.id]; }
+      trails = trails.filter(function(t){ return t.id !== trail.id; });
+      try { await deleteTrailStorage(trail.id); } catch (e) {}
+      _editingLayerId = null; selectedTrailId = null; markSelectedTrailRow(false); clearTrailHighlight(); hideShapeEditBar();
+      if (typeof renderTrailsList === 'function') renderTrailsList();
+      showToast('Drawing deleted');
+    });
+    bar.querySelector('.seb-done').addEventListener('click', function(){ clearTrailSelection(); });
+  }
   // Release a trail selection by clicking empty map (not while placing a pin, and not the click that just
   // selected a trail — that bubbles up here a beat later, so the timestamp guard lets a fresh pick survive).
   map.on('click', function(){ if (selectedTrailId && !placing && (Date.now() - _trailClickAt > 350)) clearTrailSelection(); });
