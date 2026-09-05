@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 620</div>
+    <div id="buildBadge">BUILD 621</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2807,7 +2807,7 @@
         <button type="button" id="galleryToolboxToggle" style="width:100%;margin-top:12px;background:#18201b;border:1px dashed #45564a;color:#9db0a3;border-radius:8px;padding:10px;font-size:12.5px;font-weight:600;cursor:pointer;">🧰 Toolbox — fixes &amp; repairs <span id="galleryToolboxCaret">▸</span></button>
         <div id="galleryToolbox" style="display:none;border:1px solid #33443a;border-radius:8px;padding:8px;margin-top:6px;">
           <div style="font-size:10.5px;color:#8aa596;margin:0 0 7px;line-height:1.45;">Occasional cleanup &amp; repair tools — <strong>not part of the normal import</strong>. Some can delete photos; read each one before you use it.</div>
-          <button type="button" class="btn-ghost" id="galleryBlankFinderBtn" style="width:100%;">🔍 Find empty-scene shots · free (EXPERIMENTAL — verify every one)</button>
+          <button type="button" class="btn-ghost" id="galleryBlankFinderBtn" style="width:100%;">🔍 Find blank / no-motion bursts</button>
           <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
           <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
           <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
@@ -8193,23 +8193,14 @@
     document.getElementById('photoCleanupModalBackdrop').classList.add('show');
   }
 
-  // ---------- Free blank finder: BACKGROUND-SUBTRACTION empty detector, no AI, no cost ----------
-  // A blank photo is just the EMPTY SCENE. So instead of the old (broken) trick of comparing a
-  // frame to the frame beside it — which flagged a dead-still deer as "no motion" because two
-  // deer frames matched EACH OTHER — we build a picture of what this camera's empty scene looks
-  // like, then keep anything that DIFFERS from it (a deer is a blob that isn't in the empty woods)
-  // and flag anything that MATCHES it (nothing there).
-  //   How: each thumbnail -> 24x24 grayscale fingerprint (in-memory base64, no network, no cost).
-  //   Per camera, sorted by time, each frame's "background" = the per-cell MEDIAN of a rolling
-  //   window of its neighbors (itself excluded). Empties dominate any window, so the median is the
-  //   bare scene even if a deer sits across a few frames. Before scoring we cancel any uniform
-  //   lighting shift (sun in/out, day->night) by matching the frame's overall brightness to the
-  //   background's — so only a LOCAL change (an animal) raises the score, not the whole sky
-  //   dimming. Score = mean abs diff to that background; low = empty (flagged), high = something
-  //   there (kept). It errs toward KEEPING: a weird exposure scores high and survives (AI/you can
-  //   still catch it later) — far safer than deleting a real animal. Still review-first: it only
-  //   PROPOSES; nothing is deleted without your confirm. (Known soft spot: a bait site where a
-  //   deer is in MOST frames can pull the median toward the deer — that's why we review, not auto-delete.)
+  // ---------- Free blank finder: flag no-motion / near-duplicate frames WITHOUT any AI ----------
+  // Trail-cam blanks are almost always wind/heat misfire BURSTS: the same camera fires several
+  // near-identical frames of an empty scene. We downscale each thumbnail to a 24x24 grayscale
+  // fingerprint (all in-memory, base64 thumbs — no network, no cost) and flag any frame that's
+  // nearly identical to its neighbor from the SAME camera within a time window. It's "dumb" about
+  // WHAT changed (a dead-still animal can match too), so it only ever PROPOSES — nothing is checked
+  // and nothing is deleted without you picking it. It lives in the Toolbox, not the main flow; for a
+  // reliable empty-vs-animal pass use "🧠 Tag all with AI" (that one actually looks at the picture).
   var _blankFpCache = {}; // photoId -> Uint8Array (session-only; makes re-runs instant)
   function _blankFingerprint(src){
     return new Promise(function(resolve){
@@ -8229,27 +8220,6 @@
     });
   }
   function _blankMad(a, b){ if (!a || !b) return 255; var s = 0, n = a.length; for (var i=0; i<n; i++){ s += Math.abs(a[i]-b[i]); } return s/n; }
-  function _fpMean(a){ var s = 0, n = a.length; for (var i=0; i<n; i++){ s += a[i]; } return s/n; }
-  // Per-cell median across a set of fingerprints -> the "empty scene" for this window. Median (not
-  // mean) so a transient deer in a few frames can't drag the background toward itself.
-  function _blankBackground(fps){
-    if (!fps.length) return null;
-    var N = fps[0].length, bg = new Uint8Array(N), col = new Array(fps.length);
-    for (var c = 0; c < N; c++){
-      for (var f = 0; f < fps.length; f++){ col[f] = fps[f][c]; }
-      col.sort(function(x, y){ return x - y; });
-      bg[c] = col[(col.length - 1) >> 1];
-    }
-    return bg;
-  }
-  // MAD of frame vs background AFTER cancelling a uniform brightness offset (so the whole sky
-  // dimming doesn't read as motion — only a local blob, i.e. an animal, does).
-  function _blankScore(frame, bg){
-    if (!frame || !bg) return 255;
-    var off = _fpMean(frame) - _fpMean(bg), s = 0, n = frame.length;
-    for (var i = 0; i < n; i++){ var v = frame[i] - off - bg[i]; s += (v < 0 ? -v : v); }
-    return s / n;
-  }
   function _tms(p){ return (new Date(p.timestamp).getTime()) || 0; }
   async function runBlankFinder(){
     if (!cloudPhotosAvailable()){ alert('Sign in to use the blank finder.'); return; }
@@ -8258,18 +8228,11 @@
     var btn = document.getElementById('galleryBlankFinderBtn');
     var oldLabel = btn ? btn.textContent : '';
     if (btn){ btn.disabled = true; }
-    var THRESH = 3;         // mean abs diff (0=identical to the empty scene, 255=opposite). A frame
-                            // scoring BELOW this looks like the bare background = blank. Set from the
-                            // synthetic self-test (scratchpad blank_test.js): empties clustered at
-                            // ~1.5 (even a sun-in/out lighting burst, thanks to the brightness-cancel),
-                            // a clear deer 10.8–28, a STILL deer across frames 10.8 (kept — the case
-                            // that mis-flagged 2535 photos under the old neighbor method), and a tiny
-                            // distant deer ~3.6. 3 sits safely below that 3.6, so even a small animal
-                            // survives; the cost is missing noisier real-world empties (kept -> AI/you
-                            // catch them). CONSERVATIVE ON PURPOSE. Re-tune UP only after reading the
-                            // score spread on real photos and confirming no animal sits near the line.
-    var WIN = 10;           // rolling background = this many frames each side (same camera). Big enough
-                            // that empties dominate the median even if a deer sits across a few frames.
+    var THRESH = 6;         // mean abs diff (0=identical, 255=opposite). CONSERVATIVE: a small/distant
+                            // animal scores ~8 vs the empty scene, so 6 flags only truly near-identical
+                            // wind-burst frames and leaves small-animal frames alone. Better to miss a
+                            // blank (AI catches it) than to flag a real animal.
+    var WINDOW_MIN = 45;    // only compare frames within this many minutes (a burst), not across a day
     var byCam = {};
     all.forEach(function(p){ var k = p.cameraId || '?'; (byCam[k] = byCam[k] || []).push(p); });
     var cams = Object.keys(byCam), candidates = [], reasons = {}, total = all.length, done = 0;
@@ -8285,25 +8248,19 @@
       }
       for (var k=0; k<lst.length; k++){
         if (!fps[k]) continue;
-        // Build this frame's background from its time-neighbors, EXCLUDING itself (so a lone deer
-        // is measured against the surrounding empties and survives). Need a few neighbors to trust it.
-        var win = [];
-        for (var w = k - WIN; w <= k + WIN; w++){ if (w !== k && w >= 0 && w < lst.length && fps[w]) win.push(fps[w]); }
-        if (win.length < 4) continue; // too few neighbors to know the empty scene — leave it alone
-        var bg = _blankBackground(win), score = _blankScore(fps[k], bg);
-        if (score < THRESH){
-          candidates.push(lst[k]);
-          reasons[lst[k].id] = 'matches the empty scene · ' + Math.round((1 - score/255) * 100) + '% background';
-        }
+        var t = _tms(lst[k]), flagged = false, best = 255;
+        if (k>0 && fps[k-1] && Math.abs(t - _tms(lst[k-1]))/60000 <= WINDOW_MIN){ var m = _blankMad(fps[k], fps[k-1]); if (m < best) best = m; if (m < THRESH) flagged = true; }
+        if (k<lst.length-1 && fps[k+1] && Math.abs(t - _tms(lst[k+1]))/60000 <= WINDOW_MIN){ var m2 = _blankMad(fps[k], fps[k+1]); if (m2 < best) best = m2; if (m2 < THRESH) flagged = true; }
+        if (flagged){ candidates.push(lst[k]); reasons[lst[k].id] = 'no motion · ' + Math.round((1 - best/255) * 100) + '% match to neighbor'; }
       }
     }
     if (btn){ btn.disabled = false; btn.textContent = oldLabel; }
     candidates.sort(function(a, b){ return _tms(a) - _tms(b); });
-    setCleanupHeader('🔍 Empty-Scene Frames — EXPERIMENTAL',
-      '<strong style="color:#D94A2E;">⚠ Do not trust this list.</strong> It flagged <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' it <em>thinks</em> match the empty scene — but on a busy deer camera it wrongly flags clear animals, so <strong>NOTHING is checked</strong> and you must <strong>check only the true blanks yourself</strong> (tap 🔍 to enlarge). <strong style="color:#D94A2E;">Checked photos are permanently deleted.</strong> For a reliable empty-vs-animal pass, use <strong>🧠 Tag all with AI</strong> instead — it actually looks at the picture.');
+    setCleanupHeader('🔍 Blank / No-Motion Bursts',
+      'Found <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' nearly identical to the shot beside them from the same camera. This tool is <strong>content-blind — it uses NO AI</strong>, so a deer that <strong>stood still</strong> looks the same as a wind/heat misfire. <strong style="color:#E8B04B;">Nothing is checked</strong> — go through and check ONLY the true blanks you want to delete (tap 🔍 to enlarge and be sure). <strong style="color:#D94A2E;">Checked photos are permanently deleted.</strong> For a reliable empty-vs-animal pass, use “🧠 Tag all with AI” instead.');
     renderCleanupCards(candidates,
-      'Nothing flagged in this view. Use “🧠 Tag all with AI” for a reliable species pass.',
-      function(p){ return reasons[p.id] || 'empty scene'; }, false);   // false = start UNCHECKED. This method flags real deer as empty on busy cameras — NEVER pre-select for deletion.
+      'No obvious blank/duplicate bursts in this view. This finder only catches frames nearly identical to a neighbor — isolated single blanks won\'t match. Use “🧠 Tag all with AI” to catch the rest.',
+      function(p){ return reasons[p.id] || 'no motion'; }, false);   // false = start UNCHECKED (opt-in) — content-blind, never pre-select for deletion
     if (typeof updateCleanupDeleteBtn === 'function') updateCleanupDeleteBtn();
     closeAllModals();
     document.getElementById('photoCleanupModalBackdrop').classList.add('show');
