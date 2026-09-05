@@ -460,8 +460,9 @@ HOW TO browse the Photo Gallery: LEFT PANEL -> "🧰 Tools & Data" -> "📸 Phot
 farm / location / camera / species; tick "group bursts" to collapse a burst into one visit; tap a
 photo for the full-screen viewer (scroll to zoom, ‹ › to page).
 HOW TO clean up empty misfire photos: there are TWO ways, and they run at different times.
-FREE, BEFORE any AI — "🔍 Find empty-scene shots" (in the Photo Gallery's "🧰 Toolbox — fixes &
-repairs" drawer; tap the Toolbox to open it). It costs NOTHING no matter how many photos. It learns
+FREE, BEFORE any AI — "① Clear empty frames — free (do this first)" — this is now STEP 1 right at the
+top of the Photo Gallery buttons (green outline), with "② Tag the rest with AI" under it. It costs
+NOTHING no matter how many photos. It learns
 what each camera's EMPTY scene looks like and flags only frames that match it (bare woods, nothing
 there) — a deer, even one standing dead still, is a shape that isn't in the empty scene, so it's KEPT.
 It even ignores the whole frame just getting brighter/darker (sun in and out). It opens with all the
