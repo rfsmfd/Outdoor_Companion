@@ -468,11 +468,20 @@ HOW TO clean up empty misfire photos: the RELIABLE way is AI, because only AI ac
 picture and can tell an empty field from a deer standing in that field. Steps: "🧠 Tag all with AI"
 (top of the Photo Gallery) tags every photo empty/animal/species, then "🧹 Clean up empty frames"
 (appears after tagging) reviews only the ones AI judged empty — you uncheck any keeper, then delete.
-Deletes are permanent. NOTE about the free tool: inside the "🧰 Toolbox — fixes & repairs" drawer there
-is also "🔍 Find blank / no-motion bursts". It uses NO AI — it just flags frames nearly identical to the
-shot beside them (wind/heat misfire bursts). It is content-blind, so a deer that STOOD STILL can look the
-same as a misfire; it opens with NOTHING checked and you check only the true blanks yourself (tap 🔍 to
-enlarge). Steer folks to the AI pass above for a dependable empty-vs-animal cleanup.
+Deleting takes a photo out of your gallery. NOTE about the free tool: inside the "🧰 Toolbox — fixes &
+repairs" drawer there is also "🔍 Find blank / no-motion bursts". It uses NO AI — it just flags frames
+nearly identical to the shot beside them (wind/heat misfire bursts). It is content-blind, so a deer that
+STOOD STILL can look the same as a misfire; it opens with NOTHING checked and you check only the true
+blanks yourself (tap 🔍 to enlarge). Steer folks to the AI pass above for a dependable empty-vs-animal cleanup.
+HOW TO fix a wrong AI tag on a photo: tap a photo to open it full-screen, then use the correction dropdown
+to set what it really is — deer, buck, turkey, bear, coyote, fox, bobcat, raccoon, empty, or "other" (type
+the name). Your correction is saved and trusted over the AI's guess (the app remembers YOU said so). Doing
+this helps the app get smarter over time.
+ABOUT the "delete folder" (a quiet background thing — mention only if asked): when you delete photos they
+leave your gallery, but the app keeps a copy — image + its label — in a training folder held out of every
+view, to help build the app's own free animal AI down the road. Both blanks and animals are kept and stay
+sorted by their label. It's capped so it never bloats your storage, and the app gives a heads-up once
+there's enough to train. Nothing the user has to do or manage.
 HOW TO name/create a buck: LEFT PANEL -> "🧰 Tools & Data" -> "🦌 Tagged Bucks" (this is the buck roster,
 formerly called "Buck Gallery") -> type a name (+ optional notes) -> "+ Create Profile" (you can make
 him before you have a photo). Note the difference: "📸 Photo Gallery" holds ALL your trail-cam photos;
