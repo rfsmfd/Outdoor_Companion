@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 623</div>
+    <div id="buildBadge">BUILD 624</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6199,30 +6199,36 @@
   // Storage image is deliberately NOT removed here. Flag-based: the record stays in the photo store with
   // vaulted:true, and loadImportedPhotos splits vaulted ones out of importedPhotos so no view ever sees
   // them. Once the vault holds VAULT_CAP, further deletes fall back to a real delete (bounded storage).
-  var _vaultFullNotified = (function(){ try{ return localStorage.getItem('oc_vault_full') === '1'; }catch(e){ return false; } })();
+  var _blankMarkNotified  = (function(){ try{ return localStorage.getItem('oc_blank_mark')  === '1'; }catch(e){ return false; } })();
+  var _animalMarkNotified = (function(){ try{ return localStorage.getItem('oc_animal_mark') === '1'; }catch(e){ return false; } })();
+  var _vaultFullNotified  = (function(){ try{ return localStorage.getItem('oc_vault_full')  === '1'; }catch(e){ return false; } })();
   async function vaultOrDeletePhoto(doc){
     if (!doc) return;
-    // ONLY bank the blanks / non-game junk (empty, person, dog, vehicle). A deleted real animal is NOT a
-    // blank — the animal training set comes from the photos you KEEP — so it just deletes. And a photo with
-    // no AI read yet we can't call empty, so it deletes too. This keeps the vault a clean pile of blanks.
-    var isBlank = !!(doc.ai) && !aiIsWildlife(doc.ai);
-    if (!isBlank || vaultedPhotos.length >= VAULT_CAP){ await deletePhotoStorage(doc); return; }  // not-a-blank, or vault full → real delete
+    // Bank EVERYTHING you delete — blanks AND animals — as labeled training data (each photo carries its own
+    // ai label). Blanks feed the free blank-catcher; deleted animals (especially the uncommon critters you
+    // toss) feed a future species model, so nothing you'd want is thrown away. Bounded by VAULT_CAP.
+    if (vaultedPhotos.length >= VAULT_CAP){ await deletePhotoStorage(doc); return; }  // vault full → real delete (storage stays bounded)
     if (doc.cameraId && doc.timestamp && !doc.usedFallbackDate) addPhotoTombstone(doc.cameraId, doc.timestamp); // don't let an SD re-import resurrect it into the gallery
     doc.vaulted = true; doc.vaultedAt = Date.now();
     if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
     // NOTE: intentionally NO firebase.storage().delete() — keeping the image is the whole point.
     if (vaultedPhotos.indexOf(doc) === -1) vaultedPhotos.push(doc);
+    checkTrainingMilestones();
     if (!_vaultFullNotified && vaultedPhotos.length >= VAULT_CAP){
       _vaultFullNotified = true; try{ localStorage.setItem('oc_vault_full', '1'); }catch(e){}
-      showToast('🗄 Delete folder full — ' + VAULT_CAP + ' empties banked. Enough to train your free blank-catcher.');
+      showToast('🗄 Delete folder full — ' + VAULT_CAP + ' training photos banked.');
     }
   }
-  // Heads-up once your KEPT good-animal photos (the species training set) reach the mark.
-  var _animalMarkNotified = (function(){ try{ return localStorage.getItem('oc_animal_mark') === '1'; }catch(e){ return false; } })();
-  function checkAnimalMilestone(){
-    if (_animalMarkNotified) return;
-    var n = 0; for (var i = 0; i < importedPhotos.length; i++){ var p = importedPhotos[i]; if (p && p.ai && aiIsWildlife(p.ai)) n++; }
-    if (n >= 5000){ _animalMarkNotified = true; try{ localStorage.setItem('oc_animal_mark', '1'); }catch(e){} showToast('🦌 5,000 good tagged animal photos banked — your species training set is ready too.'); }
+  // Training-data milestones. BLANKS come only from the vault (you delete them). ANIMALS come from BOTH the
+  // photos you KEEP and the ones you delete, so the species set counts kept + vaulted together.
+  function _vaultBlankCount(){ var n=0,i; for (i=0;i<vaultedPhotos.length;i++){ if (vaultedPhotos[i] && !aiIsWildlife(vaultedPhotos[i].ai)) n++; } return n; }
+  function _trainingAnimalCount(){ var n=0,i;
+    for (i=0;i<importedPhotos.length;i++){ if (importedPhotos[i] && aiIsWildlife(importedPhotos[i].ai)) n++; }
+    for (i=0;i<vaultedPhotos.length;i++){ if (vaultedPhotos[i] && aiIsWildlife(vaultedPhotos[i].ai)) n++; }
+    return n; }
+  function checkTrainingMilestones(){
+    if (!_blankMarkNotified && _vaultBlankCount() >= 5000){ _blankMarkNotified = true; try{ localStorage.setItem('oc_blank_mark','1'); }catch(e){} showToast('🗄 5,000 blanks banked — enough to train your free blank-catcher.'); }
+    if (!_animalMarkNotified && _trainingAnimalCount() >= 5000){ _animalMarkNotified = true; try{ localStorage.setItem('oc_animal_mark','1'); }catch(e){} showToast('🦌 5,000 tagged animals banked — your species training set is ready.'); }
   }
   // Manual correction — a human label that overrides the AI and is trusted over it.
   var CORRECTION_MAP = {
@@ -24024,7 +24030,7 @@
   // (auto-tagging & antler comparison) so the pipeline is ready to feed it.
   var importedPhotos = [];
   var vaultedPhotos = [];   // 🗄 the "delete folder": photos you deleted are KEPT (image + label) for training your own AI later, but held OUT of every working view
-  var VAULT_CAP = 5000;     // stop growing the vault past this; deletes beyond it are real deletes so cloud storage stays bounded
+  var VAULT_CAP = 10000;    // total cap (blanks + animals, ~2GB). Past this, deletes are real deletes so cloud storage stays bounded
 
   // Analysis-grade compression: resize to a generous max dimension at good JPEG quality,
   // returned as a Blob for upload to Storage. Deliberately NOT aggressive — trail-cam
@@ -24154,7 +24160,7 @@
       // see the working photos. Vaulted records stay in the cloud (image kept) for training, out of view.
       vaultedPhotos  = deduped.filter(function(p){ return p && p.vaulted; });
       importedPhotos = deduped.filter(function(p){ return !(p && p.vaulted); });
-      checkAnimalMilestone();
+      checkTrainingMilestones();
     }catch(e){ importedPhotos = []; vaultedPhotos = []; }
   }
 
