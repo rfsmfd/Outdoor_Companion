@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 619</div>
+    <div id="buildBadge">BUILD 620</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2791,12 +2791,12 @@
       </div>
       <div id="galleryCount" style="font-size:11.5px;color:var(--text-dim);margin:4px 0 6px 0;"></div>
       <div id="galleryAiRow" style="margin:0 0 10px 0;">
-        <!-- FUNNEL — the normal photo workflow, front & center: (1) clear empties FREE → (2) tag the
-             rest with AI → group by eye → review free guesses → pay to match leftovers → clean up
-             AI-flagged empties. The DOM order IS the funnel. Step 1 is free so AI never pays to look
-             at wind/misfire blanks. -->
-        <button type="button" class="btn-ghost" id="galleryBlankFinderBtn" style="width:100%;border-color:#3f8f57;color:#8fe0a6;">① Clear empty frames — free (do this first)</button>
-        <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;margin-top:6px;">② Tag the rest with AI</button>
+        <!-- FUNNEL — the normal photo workflow, front & center: tag → group by eye → review free
+             guesses → pay to match leftovers → clean up empties. The DOM order IS the funnel.
+             (The free "empty-scene" finder was pulled back OUT of Step 1 into the Toolbox on 2026-09-05:
+             the background-subtraction method flagged clear deer as empty on a busy real camera, so it
+             is not trustworthy enough to lead the flow. AI tagging is the reliable empty-vs-animal pass.) -->
+        <button type="button" class="btn-ghost" id="galleryTagAllBtn" style="width:100%;">🧠 Tag all untagged with AI</button>
         <button type="button" class="btn-ghost" id="galleryBuckClusterBtn" style="width:100%;margin-top:6px;display:none;">🧩 Group look-alike bucks (free, no AI)</button>
         <button type="button" class="btn-ghost" id="galleryBuckReviewBtn" style="width:100%;margin-top:6px;display:none;">🦌 Review buck suggestions</button>
         <button type="button" class="btn-ghost" id="galleryBuckMatchBtn" style="width:100%;margin-top:6px;display:none;border-color:#C9832E;color:#E7B45A;">🦌 Match buck photos to known bucks</button>
@@ -2807,6 +2807,7 @@
         <button type="button" id="galleryToolboxToggle" style="width:100%;margin-top:12px;background:#18201b;border:1px dashed #45564a;color:#9db0a3;border-radius:8px;padding:10px;font-size:12.5px;font-weight:600;cursor:pointer;">🧰 Toolbox — fixes &amp; repairs <span id="galleryToolboxCaret">▸</span></button>
         <div id="galleryToolbox" style="display:none;border:1px solid #33443a;border-radius:8px;padding:8px;margin-top:6px;">
           <div style="font-size:10.5px;color:#8aa596;margin:0 0 7px;line-height:1.45;">Occasional cleanup &amp; repair tools — <strong>not part of the normal import</strong>. Some can delete photos; read each one before you use it.</div>
+          <button type="button" class="btn-ghost" id="galleryBlankFinderBtn" style="width:100%;">🔍 Find empty-scene shots · free (EXPERIMENTAL — verify every one)</button>
           <button type="button" class="btn-ghost" id="galleryRematchBtn" style="width:100%;margin-top:6px;display:none;">🔄 Auto-match unlocated to deployments</button>
           <button type="button" class="btn-ghost" id="galleryAssignLocBtn" style="width:100%;margin-top:6px;display:none;">📍 Assign a location to unlocated</button>
           <button type="button" class="btn-ghost" id="galleryWeatherBtn" style="width:100%;margin-top:6px;display:none;">⛅ Fetch weather for photos missing it</button>
@@ -8298,11 +8299,11 @@
     }
     if (btn){ btn.disabled = false; btn.textContent = oldLabel; }
     candidates.sort(function(a, b){ return _tms(a) - _tms(b); });
-    setCleanupHeader('🔍 Empty-Scene Frames (free)',
-      'Found <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' that match this camera’s <strong>empty scene</strong> — nothing there but the bare woods. <strong>Free, no AI.</strong> Anything with a deer-shaped thing that isn’t normally there was <strong>kept</strong>, even if it wasn’t moving. <strong style="color:#E8B04B;">These are all checked for deletion</strong> — skim them and <strong>UNCHECK anything with an animal</strong> in it (tap 🔍 to enlarge if unsure), then delete the rest. <strong style="color:#D94A2E;">Checked photos are permanently deleted.</strong> Soft spot to watch: a bait/feeder site where a deer sits in <em>most</em> frames can slip one in — so give them a glance before you delete.');
+    setCleanupHeader('🔍 Empty-Scene Frames — EXPERIMENTAL',
+      '<strong style="color:#D94A2E;">⚠ Do not trust this list.</strong> It flagged <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' it <em>thinks</em> match the empty scene — but on a busy deer camera it wrongly flags clear animals, so <strong>NOTHING is checked</strong> and you must <strong>check only the true blanks yourself</strong> (tap 🔍 to enlarge). <strong style="color:#D94A2E;">Checked photos are permanently deleted.</strong> For a reliable empty-vs-animal pass, use <strong>🧠 Tag all with AI</strong> instead — it actually looks at the picture.');
     renderCleanupCards(candidates,
-      'Nothing here looks like an empty scene — either these all have something in them, or there aren’t enough frames from one camera to know its empty background yet. Use “🧠 Tag all with AI” for a full species pass.',
-      function(p){ return reasons[p.id] || 'empty scene'; }, true);   // true = flagged empties PRE-CHECKED; you uncheck the rare keeper (a hand-pick of hundreds defeats the tool)
+      'Nothing flagged in this view. Use “🧠 Tag all with AI” for a reliable species pass.',
+      function(p){ return reasons[p.id] || 'empty scene'; }, false);   // false = start UNCHECKED. This method flags real deer as empty on busy cameras — NEVER pre-select for deletion.
     if (typeof updateCleanupDeleteBtn === 'function') updateCleanupDeleteBtn();
     closeAllModals();
     document.getElementById('photoCleanupModalBackdrop').classList.add('show');
