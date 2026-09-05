@@ -464,8 +464,9 @@ FREE, BEFORE any AI — "🔍 Find empty-scene shots" (in the Photo Gallery's "�
 repairs" drawer; tap the Toolbox to open it). It costs NOTHING no matter how many photos. It learns
 what each camera's EMPTY scene looks like and flags only frames that match it (bare woods, nothing
 there) — a deer, even one standing dead still, is a shape that isn't in the empty scene, so it's KEPT.
-It even ignores the whole frame just getting brighter/darker (sun in and out). It opens with nothing
-checked; skim the flagged empties (tap 🔍 to enlarge), check the ones to remove, delete. One soft spot
+It even ignores the whole frame just getting brighter/darker (sun in and out). It opens with all the
+flagged empties ALREADY CHECKED for deletion — you skim them and UNCHECK anything that has an animal
+in it (tap 🔍 to enlarge if unsure), then delete the rest. One soft spot
 to know: at a bait/feeder site where a deer is in MOST frames it can slip one in, and a very small far-
 off animal is borderline — so glance before deleting. Use this FIRST to clear the wind/misfire bulk for
 free. AFTER AI — "🧹 Clean up empty frames" (appears once you've run "🧠 Tag all with AI"): it reviews

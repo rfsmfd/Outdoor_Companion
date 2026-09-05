@@ -2385,7 +2385,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 615</div>
+    <div id="buildBadge">BUILD 616</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8297,10 +8297,10 @@
     if (btn){ btn.disabled = false; btn.textContent = oldLabel; }
     candidates.sort(function(a, b){ return _tms(a) - _tms(b); });
     setCleanupHeader('🔍 Empty-Scene Frames (free)',
-      'Found <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' that match this camera’s <strong>empty scene</strong> — nothing there but the bare woods. <strong>Free, no AI.</strong> Anything with a deer-shaped thing that isn’t normally there was <strong>kept</strong>, even if it wasn’t moving. <strong style="color:#E8B04B;">Nothing is checked yet</strong> — skim them (tap 🔍 to enlarge), check the ones to remove, then delete. <strong style="color:#D94A2E;">Checked photos are permanently deleted.</strong> Soft spot: a bait/feeder site where a deer is in <em>most</em> frames can slip one in — so glance before you delete.');
+      'Found <strong>' + candidates.length + '</strong> frame' + (candidates.length===1?'':'s') + ' that match this camera’s <strong>empty scene</strong> — nothing there but the bare woods. <strong>Free, no AI.</strong> Anything with a deer-shaped thing that isn’t normally there was <strong>kept</strong>, even if it wasn’t moving. <strong style="color:#E8B04B;">These are all checked for deletion</strong> — skim them and <strong>UNCHECK anything with an animal</strong> in it (tap 🔍 to enlarge if unsure), then delete the rest. <strong style="color:#D94A2E;">Checked photos are permanently deleted.</strong> Soft spot to watch: a bait/feeder site where a deer sits in <em>most</em> frames can slip one in — so give them a glance before you delete.');
     renderCleanupCards(candidates,
       'Nothing here looks like an empty scene — either these all have something in them, or there aren’t enough frames from one camera to know its empty background yet. Use “🧠 Tag all with AI” for a full species pass.',
-      function(p){ return reasons[p.id] || 'empty scene'; }, false);   // false = start UNCHECKED — until validated on real photos, never pre-select for deletion
+      function(p){ return reasons[p.id] || 'empty scene'; }, true);   // true = flagged empties PRE-CHECKED; you uncheck the rare keeper (a hand-pick of hundreds defeats the tool)
     if (typeof updateCleanupDeleteBtn === 'function') updateCleanupDeleteBtn();
     closeAllModals();
     document.getElementById('photoCleanupModalBackdrop').classList.add('show');
