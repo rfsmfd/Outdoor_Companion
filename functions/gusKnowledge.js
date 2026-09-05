@@ -468,12 +468,11 @@ HOW TO clean up empty misfire photos: the RELIABLE way is AI, because only AI ac
 picture and can tell an empty field from a deer standing in that field. Steps: "🧠 Tag all with AI"
 (top of the Photo Gallery) tags every photo empty/animal/species, then "🧹 Clean up empty frames"
 (appears after tagging) reviews only the ones AI judged empty — you uncheck any keeper, then delete.
-Deletes are permanent. NOTE about the free tool: there is also "🔍 Find empty-scene shots · free
-(EXPERIMENTAL)" inside the "🧰 Toolbox — fixes & repairs" drawer. It uses NO AI (compares each frame to
-the camera's usual scene), but on a BUSY deer camera it wrongly flags clear deer as empty, so it is NOT
-trustworthy — it opens with NOTHING checked and you must verify every single one yourself before
-deleting. Never tell a user the free finder is safe to bulk-delete; steer them to the AI pass for
-clearing empties.
+Deletes are permanent. NOTE about the free tool: inside the "🧰 Toolbox — fixes & repairs" drawer there
+is also "🔍 Find blank / no-motion bursts". It uses NO AI — it just flags frames nearly identical to the
+shot beside them (wind/heat misfire bursts). It is content-blind, so a deer that STOOD STILL can look the
+same as a misfire; it opens with NOTHING checked and you check only the true blanks yourself (tap 🔍 to
+enlarge). Steer folks to the AI pass above for a dependable empty-vs-animal cleanup.
 HOW TO name/create a buck: LEFT PANEL -> "🧰 Tools & Data" -> "🦌 Tagged Bucks" (this is the buck roster,
 formerly called "Buck Gallery") -> type a name (+ optional notes) -> "+ Create Profile" (you can make
 him before you have a photo). Note the difference: "📸 Photo Gallery" holds ALL your trail-cam photos;
