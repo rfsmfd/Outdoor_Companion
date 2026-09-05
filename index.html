@@ -826,6 +826,11 @@
   /* Map label for drawn shapes / scout conjecture — a small dark pill, no arrow. */
   .leaflet-tooltip.trail-shape-label{ background:rgba(20,24,18,0.74); color:#fff; border:none; box-shadow:0 1px 4px rgba(0,0,0,.5); font-weight:700; font-size:11px; padding:2px 7px; border-radius:7px; white-space:nowrap; }
   .leaflet-tooltip.trail-shape-label:before{ display:none; border:none; }
+  /* ✥ move handle shown at a selected drawing's center — drag it to slide the whole shape (marker drag, so it
+     never pans the map; works on touch). Big enough for a thumb. */
+  .shape-move-handle{ width:34px; height:34px; border-radius:50%; background:#7d5aa8; color:#fff; border:2px solid #fff;
+    display:flex; align-items:center; justify-content:center; font-size:19px; line-height:1; cursor:move;
+    box-shadow:0 2px 7px rgba(0,0,0,.55); }
   @keyframes recordPulse{
     0%, 100% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 0 rgba(217,74,46,0.5); }
     50% { box-shadow:0 2px 8px rgba(0,0,0,0.4), 0 0 0 6px rgba(217,74,46,0); }
@@ -2365,7 +2370,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 611</div>
+    <div id="buildBadge">BUILD 612</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -4527,20 +4532,33 @@
   // is a small handler we run ourselves (no extra plugin). Geometry is read back and persisted on release.
   var _editingLayerId = null;
   function beginShapeEdit(id){
-    var layer = savedTrailPolylines[id];
-    if (!layer) return;
+    var layer = savedTrailPolylines[id], trail = trails.filter(function(t){ return t.id === id; })[0];
+    if (!layer || !trail) return;
     _editingLayerId = id;
-    try { if (layer.editing && layer.editing.enable) layer.editing.enable(); } catch (e) {}   // corner/resize handles
-    try { if (layer._path) layer._path.style.cursor = 'move'; } catch (e) {}                    // move cursor on hover (desktop)
-    _enableShapeDrag(layer);
-    showToast('Drag to move · drag a corner to reshape · tap the map when done ✋');
+    try { if (layer.editing && layer.editing.enable) layer.editing.enable(); } catch (e) {}   // corner/resize handles (reshape)
+    // A dedicated ✥ MOVE handle at the center — a draggable MARKER. A marker drag never pans the map, so this
+    // works on touch (dragging the shape body was panning the map instead). Drag the handle to slide the whole shape.
+    var center = layer.getLatLng ? layer.getLatLng() : (layer.getBounds ? layer.getBounds().getCenter() : null);
+    if (center){
+      var mv = L.marker(center, { draggable: true, zIndexOffset: 1200, keyboard: false,
+        icon: L.divIcon({ className: '', iconSize: [34, 34], iconAnchor: [17, 17], html: '<div class="shape-move-handle">✥</div>' }) }).addTo(map);
+      var prev = center;
+      mv.on('dragstart', function(){ try { if (layer.editing && layer.editing.disable) layer.editing.disable(); } catch (e) {} });   // hide reshape handles while sliding
+      mv.on('drag', function(e){
+        var np = e.target.getLatLng(), dLat = np.lat - prev.lat, dLng = np.lng - prev.lng; prev = np;
+        if (layer.getLatLng){ var c = layer.getLatLng(); layer.setLatLng([c.lat + dLat, c.lng + dLng]); }
+        else if (layer.getLatLngs){ layer.setLatLngs(_shiftLatLngs(layer.getLatLngs(), dLat, dLng)); }
+      });
+      mv.on('dragend', function(){ try { if (layer.editing && layer.editing.enable) layer.editing.enable(); } catch (e) {} });   // re-seat corner handles at the moved spot
+      layer._ocMoveMarker = mv;
+    }
+    showToast('Drag ✥ to move · drag a corner to reshape · tap the map when done');
   }
   function endShapeEdit(id){
     var layer = savedTrailPolylines[id], trail = trails.filter(function(t){ return t.id === id; })[0];
     if (layer){
-      if (layer._ocDragOff){ try { layer._ocDragOff(); } catch (e) {} layer._ocDragOff = null; }
+      if (layer._ocMoveMarker){ try { map.removeLayer(layer._ocMoveMarker); } catch (e) {} layer._ocMoveMarker = null; }
       try { if (layer.editing && layer.editing.disable) layer.editing.disable(); } catch (e) {}
-      try { if (layer._path) layer._path.style.cursor = ''; } catch (e) {}
       if (trail){
         if (trail.shape === 'circle' && layer.getLatLng){ var c = layer.getLatLng(); trail.center = { lat: c.lat, lng: c.lng }; trail.radiusM = layer.getRadius(); }
         else if (layer.getLatLngs){ var lls = layer.getLatLngs(); lls = Array.isArray(lls[0]) ? lls[0] : lls; trail.points = lls.map(function(p){ return { lat: p.lat, lng: p.lng }; }); }
@@ -4551,25 +4569,6 @@
     if (trail) renderSavedTrailOnMap(trail);   // redraw a clean layer (handles gone, label/popup re-attached)
   }
   function _shiftLatLngs(arr, dLat, dLng){ return arr.map(function(p){ return Array.isArray(p) ? _shiftLatLngs(p, dLat, dLng) : L.latLng(p.lat + dLat, p.lng + dLng); }); }
-  function _enableShapeDrag(layer){
-    var dragging = false, last = null;
-    function onMove(e){
-      if (!dragging || !last) return;
-      var dLat = e.latlng.lat - last.lat, dLng = e.latlng.lng - last.lng; last = e.latlng;
-      if (layer.getLatLng){ var c = layer.getLatLng(); layer.setLatLng([c.lat + dLat, c.lng + dLng]); }
-      else if (layer.getLatLngs){ layer.setLatLngs(_shiftLatLngs(layer.getLatLngs(), dLat, dLng)); }
-    }
-    function onUp(){ if (!dragging) return; dragging = false; last = null; map.dragging.enable();
-      try { if (layer.editing && layer.editing.disable){ layer.editing.disable(); layer.editing.enable(); } } catch (e) {}   // re-seat the corner handles at the moved spot
-      map.off('mousemove', onMove); map.off('mouseup', onUp); }
-    function onDown(e){
-      dragging = true; last = e.latlng; map.dragging.disable();
-      try { if (layer.editing && layer.editing.disable) layer.editing.disable(); } catch (e2) {}   // hide handles while sliding so they don't lag behind
-      map.on('mousemove', onMove); map.on('mouseup', onUp);
-    }
-    layer.on('mousedown', onDown);
-    layer._ocDragOff = function(){ layer.off('mousedown', onDown); map.off('mousemove', onMove); map.off('mouseup', onUp); if (map.dragging && !map.dragging.enabled()) map.dragging.enable(); };
-  }
   // Release a trail selection by clicking empty map (not while placing a pin, and not the click that just
   // selected a trail — that bubbles up here a beat later, so the timestamp guard lets a fresh pick survive).
   map.on('click', function(){ if (selectedTrailId && !placing && (Date.now() - _trailClickAt > 350)) clearTrailSelection(); });
