@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 643</div>
+    <div id="buildBadge">BUILD 644</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -12761,6 +12761,14 @@
     var scoutInfo = isScout
       ? '<div class="notes" style="color:#c9b3e0;">' + (scoutKD ? escapeHtml(scoutKD.label) : '👁 Scout mark') + ' · ' + new Date(s.createdAt).toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'}) + ' · ' + (s.verified ? '✅ verified' : '📝 unproven — Scout Mode only') + '</div>'
       : '';
+    // One-tap: register the next numbered camera, deploy it onto THIS existing spot (no duplicate pin), and
+    // back-date it to just before the first photo already here — for standing up a camera-spot (e.g. handing
+    // shared cameras to a partner) without walking through three screens. Only on a camera spot of MINE that
+    // has no camera on it right now.
+    var _camDeployedHere = cameras.some(function(c){ return c.currentSiteId === s.id && (!c.__ownerUid || c.__ownerUid === myUid); });
+    var setupCamBtn = (isMine && s.type === 'camera' && !_camDeployedHere)
+      ? '<button class="btn-ghost" data-act="setupcam" data-id="'+s.id+'" style="width:100%;margin:3px 0;font-size:11px;background:#26331d;color:#eaf3e2;border-color:#8FA05C;font-weight:600;">📷 Set up a camera here</button>'
+      : '';
     return '' +
       '<div class="pop">' +
         '<h3>'+escapeHtml(s.name)+'</h3>' +
@@ -12772,6 +12780,7 @@
         buckNote +
         '<div class="coords">'+fmtCoord(s.lat)+', '+fmtCoord(s.lng)+'</div>' +
         photosBtn +
+        setupCamBtn +
         standHuntabilityHtml(s) +
         spotIntelHtml(s) +
         standDetailsBtn +
@@ -12894,6 +12903,8 @@
       if (s) sendRecordToPartner('site', s);
       map.closePopup();
     });
+    var setupCamActBtn = node.querySelector('[data-act="setupcam"]');
+    if (setupCamActBtn) setupCamActBtn.addEventListener('click', function(){ map.closePopup(); setupCameraOnSite(id); });
     var shareBtn = node.querySelector('[data-act="share"]');
     if (shareBtn) shareBtn.addEventListener('click', function(){
       var s = sites.filter(function(x){ return x.id === id; })[0];
@@ -25998,6 +26009,40 @@
     openEditCameraModal(cam);   // walk them into the optional name/make/model; already saved, so closing is fine
   }
   document.getElementById('registerCamBtn').addEventListener('click', registerByHand);
+
+  // One-tap "📷 Set up a camera here" (on a camera-spot popup): register the next numbered camera, deploy it
+  // onto THIS existing spot (reuses the site — never a duplicate pin), and back-date the deployment to just
+  // before the earliest photo already pinned here, so the camera's history covers every picture and any future
+  // scan-match lines up. Built for handing shared-camera spots to a partner without three separate screens.
+  async function setupCameraOnSite(siteId){
+    var site = sites.filter(function(s){ return s.id === siteId; })[0];
+    if (!site){ showToast('Spot not found.'); return; }
+    var _u = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+    var already = cameras.filter(function(c){ return c.currentSiteId === site.id && (!c.__ownerUid || c.__ownerUid === _u); })[0];
+    if (already && !confirm(already.name + ' is already set up here. Add ANOTHER camera to this spot?')) return;
+    var n = nextCameraNumber();
+    // Earliest photo already at this spot → deploy a minute before it so the window covers them all.
+    var stamps = importedPhotos.filter(function(p){ return p.matchedSiteId === site.id && p.timestamp && (!p.__ownerUid || p.__ownerUid === _u); }).map(function(p){ return p.timestamp; });
+    var earliest = stamps.length ? Math.min.apply(null, stamps) : null;
+    var when = earliest ? (earliest - 60000) : Date.now();
+    if (!confirm('Set up Camera ' + n + ' at ' + (site.name || 'this spot') + '?\n\nRegisters Camera ' + n + ', deploys it here, and dates it ' + new Date(when).toLocaleDateString() + (earliest ? ' — just before the first photo here.' : '.'))) return;
+    var cam = { id: uid(), name: 'Camera ' + n, nickname:'', createdAt: Date.now(), currentSiteId: site.id, lastDeployedAt: when, make:'', model:'', notes:'' };
+    cameras.push(cam);
+    var wd = new Date(when);
+    var dep = { id: uid(), cameraId: cam.id, siteId: site.id, lat: site.lat, lng: site.lng, deployedAt: when,
+      moonPhase: getMoonPhase(wd), solunarPeriod: classifyEventSolunarPeriod(wd, site.lat, site.lng),
+      weather: null, weatherStatus: 'unavailable' };  // back-dated → no live weather for a past date
+    deployments.push(dep);
+    site.lastActivityAt = Date.now();
+    try{ await saveCamera(cam); await saveDeployment(dep); await saveSite(site); }catch(e){ console.error('Outdoor Companion: set-up-camera-on-site save failed', e); }
+    if (typeof autoShareToPropertyGroups === 'function' && site.propertyId){
+      autoShareToPropertyGroups('site', site.id, site.propertyId);
+      autoShareToPropertyGroups('cam', cam.id, site.propertyId);
+      autoShareToPropertyGroups('dep', dep.id, site.propertyId);
+    }
+    renderCameraList(); renderAll();
+    showToast('Camera ' + n + ' set up at ' + (site.name || 'this spot') + ' · ' + new Date(when).toLocaleDateString());
+  }
 
   // ---------- Duplicate-camera cleanup ----------
   // Two cameras that ended up with the SAME number (a data mistake). Merge = move one's photos + deployments onto
