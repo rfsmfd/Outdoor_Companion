@@ -579,6 +579,7 @@
     align-items:center;
     justify-content:space-between;
     gap:8px;
+    flex-wrap:wrap;   /* phone: let the button bar drop below the text instead of overflowing off-screen */
     padding:9px 10px;
     border:1px solid var(--line);
     border-radius:4px;
@@ -587,6 +588,12 @@
   }
   .property-row .nm{font-size:13px;font-weight:500;}
   .property-row .count{font-size:10.5px;color:var(--text-dim);}
+  /* The farm's text column takes the row; the buttons wrap onto their own full-width line under it. */
+  .property-row > div:first-child{ flex:1 1 180px; min-width:0; }
+  .property-row > div:last-child{ flex:1 1 100%; }
+  /* Ghost buttons default to flex:1 1 100% (full-width stacked). In a farm's button bar that shoved them
+     off the right edge — here they must be content-width chips that wrap. */
+  .property-row .btn-ghost{ flex:0 0 auto; }
   .chips{display:flex;flex-wrap:wrap;gap:6px;}
   .chip{
     font-size:11px;
@@ -2405,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 644</div>
+    <div id="buildBadge">BUILD 645</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
