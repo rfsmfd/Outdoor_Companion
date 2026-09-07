@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 627</div>
+    <div id="buildBadge">BUILD 628</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -24213,6 +24213,11 @@
         contentHash: photoRecord.contentHash || null, // for duplicate-import detection
         matchedSiteId: photoRecord.matchedSiteId || null,
         matchedSiteName: photoRecord.matchedSiteName || null,
+        // A photo carries its OWN spot (from its matched site). This is what lets a photo draw on the
+        // map, sort itself by farm, feed the duplicate-fingerprint, and — the reason it must live ON the
+        // photo — travel to a teammate's account, where the owner's site record doesn't exist. (Milestone A.)
+        lat: condHasLoc ? condSite.lat : null,
+        lng: condHasLoc ? condSite.lng : null,
         storagePath: storagePath,
         downloadURL: downloadURL,
         thumb: thumb,
@@ -24264,6 +24269,29 @@
     }catch(e){ console.warn('Outdoor Companion: SD upgrade failed for ' + (doc && doc.id), e); return false; }
   }
 
+  // Milestone A backfill: give older photos their own coordinate too. In MEMORY for all of them (free,
+  // immediate — display + fingerprint work now); PERSISTED only for photos that are actually SHARED (a
+  // small set — those are the ones a teammate's account needs the coord written onto, since it can't see
+  // the owner's site record). New imports already get it stamped at import; this heals everything before it.
+  function backfillPhotoCoords(){
+    if (!Array.isArray(importedPhotos) || !importedPhotos.length) return;
+    var toPersist = [];
+    importedPhotos.forEach(function(p){
+      if (!p || typeof p.lat === 'number' || !p.matchedSiteId) return;
+      var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0];
+      if (s && typeof s.lat === 'number'){
+        p.lat = s.lat; p.lng = s.lng;                                   // in memory now
+        if (p.__sharedGroups && p.__sharedGroups.length) toPersist.push(p); // only shared ones get written
+      }
+    });
+    if (toPersist.length && hasChatStorage && window.storage && typeof window.storage.set === 'function'){
+      (async function(){   // background, throttled — never blocks load; set() strips the __ meta for us
+        for (var i=0;i<toPersist.length;i++){
+          try{ await window.storage.set('photo:' + toPersist[i].id, JSON.stringify(toPersist[i]), false); }catch(e){}
+        }
+      })();
+    }
+  }
   async function loadImportedPhotos(){
     if (!hasChatStorage){ importedPhotos = []; vaultedPhotos = []; return; }
     try{
@@ -24278,6 +24306,7 @@
       // see the working photos. Vaulted records stay in the cloud (image kept) for training, out of view.
       vaultedPhotos  = deduped.filter(function(p){ return p && p.vaulted; });
       importedPhotos = deduped.filter(function(p){ return !(p && p.vaulted); });
+      backfillPhotoCoords();   // Milestone A: give older photos their own lat/lng
       checkTrainingMilestones();
     }catch(e){ importedPhotos = []; vaultedPhotos = []; }
   }
