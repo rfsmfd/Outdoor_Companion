@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 638</div>
+    <div id="buildBadge">BUILD 639</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6420,7 +6420,7 @@
       opts = ['<option value="">🦌 Link to buck…</option>'];
       if (buckProfiles.length && canAI) opts.push('<option value="__identify__">🔍 Which buck? (AI)</option>');
       sorted.forEach(function(b){ opts.push('<option value="' + b.id + '">' + escapeHtml(b.name) + '</option>'); });
-      if (mode === 'own') opts.push('<option value="__new__">＋ New buck…</option>');   // creating a buck stays owner-only
+      if (mode === 'own' || mode === 'edit') opts.push('<option value="__new__">＋ New buck…</option>');   // F3: an Editor can create a buck inline too (it's their own buck; linking a shared photo auto-shares it back)
       if (doc.buckProfileId) opts.push('<option value="__unlink__">✕ Unlink</option>');
     }
     sel.innerHTML = opts.join('');
