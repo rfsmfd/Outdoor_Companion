@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 635</div>
+    <div id="buildBadge">BUILD 636</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13552,6 +13552,7 @@
           async function(){ await removeSite(_restore.id); }
         );
         showToast('Deleted "' + s.name + '".');
+        offerSendDelete('site', s.id, s.name);   // same send-removal offer as the map popup delete (Milestone D)
       });
       list.appendChild(row);
     });
