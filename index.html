@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 637</div>
+    <div id="buildBadge">BUILD 638</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -20268,9 +20268,11 @@
     var farmSiteIds = {}; siteKeys.forEach(function(s){ farmSiteIds[s.id] = 1; });
     var camKeys = (typeof cameras !== 'undefined' ? cameras : []).filter(function(c){ return c.currentSiteId && farmSiteIds[c.currentSiteId]; });
     var depKeys = (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return d.siteId && farmSiteIds[d.siteId]; });
-    // Photos belong to the farm if they're matched to one of its spots, or taken by a camera on it.
+    // Photos belong to the farm only if they're matched to one of its SPOTS. F6 (founder 2026-09-07): a
+    // photo attached to just a camera with NO site has no real place — sharing it leaked site-less test
+    // shots to a partner. "Photos are about sites," so require a real farm site to share.
     var farmCamIds = {}; camKeys.forEach(function(c){ farmCamIds[c.id] = 1; });
-    var photoKeys = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return (p.matchedSiteId && farmSiteIds[p.matchedSiteId]) || (p.cameraId && farmCamIds[p.cameraId]); });
+    var photoKeys = (typeof importedPhotos !== 'undefined' ? importedPhotos : []).filter(function(p){ return p.matchedSiteId && farmSiteIds[p.matchedSiteId]; });
     // Bucks seen on this farm — Phase 1 cross-member tracking. Any buck profile I OWN that has a linked
     // photo on this farm's cameras or a linked sighting on the farm rides along, so the group can view his
     // movement across everyone's cameras (the photos/sightings themselves are already shared above). Only
@@ -24504,11 +24506,10 @@
       await window.storage.set('photo:' + photoRecord.id, JSON.stringify(doc), false);
       importedPhotos.push(doc);
       photoRecord.cloudSaved = true;
-      // If this photo's spot (or its camera's spot) belongs to an already-shared farm, share the photo too.
+      // If this photo's SPOT belongs to an already-shared farm, share the photo too. F6: require a real
+      // site — a site-less photo (undeployed camera) has no place and must not auto-share to a partner.
       var _psite = doc.matchedSiteId ? sites.filter(function(s){ return s.id === doc.matchedSiteId; })[0] : null;
-      var _ppid = _psite && _psite.propertyId;
-      if (!_ppid && doc.cameraId){ var _pc = cameras.filter(function(c){ return c.id === doc.cameraId; })[0]; var _cs = (_pc && _pc.currentSiteId) ? sites.filter(function(s){ return s.id === _pc.currentSiteId; })[0] : null; if (_cs) _ppid = _cs.propertyId; }
-      if (typeof autoShareToPropertyGroups === 'function' && _ppid) autoShareToPropertyGroups('photo', doc.id, _ppid);
+      if (typeof autoShareToPropertyGroups === 'function' && _psite && _psite.propertyId) autoShareToPropertyGroups('photo', doc.id, _psite.propertyId);
     }catch(e){
       console.warn('Outdoor Companion: photo upload failed', e);
       photoRecord.cloudSaved = false;
