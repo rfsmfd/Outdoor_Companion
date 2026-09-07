@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 634</div>
+    <div id="buildBadge">BUILD 635</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9919,6 +9919,7 @@
           (canBeHome ? '<button class="btn-ghost" data-act="home-prop" data-id="' + p.id + '" title="Set as your default map view when the app opens (before GPS)" style="font-size:11px;padding:5px 10px;' + (isHome ? 'background:#3a3320;color:#f0dca0;border-color:#c9a24a;' : '') + '">' + (isHome ? '🏠 Home ✓' : '🏠 Set home') + '</button>' : '') +
           (((p.boundary && p.boundary.length >= 3) || p.bounds) ? '<button class="btn-ghost" data-act="attach-prop" data-id="' + p.id + '" title="Link any stands, camera sites, trails or sightings inside the farm to it" style="font-size:11px;padding:5px 10px;">🔗 Attach inside</button>' : '') +
           ((myGroups && myGroups.length && (!p.__ownerUid || p.__ownerUid === (firebase.auth().currentUser && firebase.auth().currentUser.uid))) ? '<button class="btn-ghost" data-act="share-prop" data-id="' + p.id + '" title="Share this whole farm with a group" style="font-size:11px;padding:5px 10px;background:#243b52;color:#dbeafe;border-color:#2f5573;">' + ((p.__sharedGroups || []).length ? '🤝 Shared (' + p.__sharedGroups.length + ')' : '🤝 Share') + '</button>' : '') +
+          ((myGroups && myGroups.length && (!p.__ownerUid || p.__ownerUid === (firebase.auth().currentUser && firebase.auth().currentUser.uid))) ? '<button class="btn-ghost" data-act="send-prop" data-id="' + p.id + '" title="Send this farm (boundary/name) to a partner\'s copy" style="font-size:11px;padding:5px 10px;">🤝 Send</button>' : '') +
           '<button class="btn-ghost" data-act="move-prop" data-id="' + p.id + '" title="Wrong list? Move this to the other module" style="font-size:11px;padding:5px 9px;">→ ' + otherLabel + '</button>' +
           '<button class="btn-ghost" data-act="delete-prop" data-id="' + p.id + '" style="color:#D94A2E;font-size:11px;padding:5px 9px;">Delete</button>' +
         '</div>';
@@ -9935,6 +9936,7 @@
       });
       var _atb = row.querySelector('[data-act="attach-prop"]'); if (_atb) _atb.addEventListener('click', async function(){ await attachInsideFarm(p); renderPropertiesManageList(); });
       var _shb = row.querySelector('[data-act="share-prop"]'); if (_shb) _shb.addEventListener('click', function(){ sharePropertyFlow(p); });
+      var _spb = row.querySelector('[data-act="send-prop"]'); if (_spb) _spb.addEventListener('click', function(){ sendRecordToPartner('property', p); });
       row.querySelector('[data-act="move-prop"]').addEventListener('click', async function(){
         p.module = otherMod;
         try{ await saveProperty(p); }catch(e){ console.error('Outdoor Companion: failed to move property', e); }
@@ -13439,7 +13441,7 @@
         '<div class="site-badge" style="background:'+ (trail.color || '#7A8A94') +';color:#0A1A2E;">〰</div>' +
         '<div class="site-meta"><div class="nm">'+ escapeHtml(trail.name) +'</div><div class="ty">'+ escapeHtml(trailTypeLabel(trail.type)) +' · '+ escapeHtml(trailLenLabel(trail)) + (trail.hidden ? ' · hidden' : '') +'</div></div>' +
         (sel
-          ? '<div class="site-row-actions"><button class="btn-ghost" data-act="toggle-trail-visibility" style="font-size:11px;padding:5px 8px;">'+(trail.hidden?'Show':'Hide')+'</button><button class="btn-ghost" data-act="edit-trail" style="font-size:11px;padding:5px 8px;">Edit</button><button class="site-del-btn" data-act="delete-trail" title="Delete this trail">🗑</button></div>'
+          ? '<div class="site-row-actions"><button class="btn-ghost" data-act="toggle-trail-visibility" style="font-size:11px;padding:5px 8px;">'+(trail.hidden?'Show':'Hide')+'</button><button class="btn-ghost" data-act="edit-trail" style="font-size:11px;padding:5px 8px;">Edit</button>' + (myGroups.length ? '<button class="btn-ghost" data-act="send-trail" title="Send this trail to a partner" style="font-size:11px;padding:5px 8px;">🤝</button>' : '') + '<button class="site-del-btn" data-act="delete-trail" title="Delete this trail">🗑</button></div>'
           : '');
       // Tap the row → select + ride the line on the map (reveals its actions).
       row.addEventListener('click', function(e){ if (e.target.closest('button')) return; selectTrail(trail.id, 'list'); renderList('trails'); });
@@ -13447,6 +13449,8 @@
       if (tv) tv.addEventListener('click', async function(e){ e.stopPropagation(); trail.hidden = !trail.hidden; try{ await saveTrail(trail); }catch(err){ console.error('Outdoor Companion: trail visibility save failed', err); } renderSavedTrailOnMap(trail); renderList('trails'); });
       var ed = row.querySelector('[data-act="edit-trail"]');
       if (ed) ed.addEventListener('click', function(e){ e.stopPropagation(); selectTrail(trail.id, 'list'); openSaveTrailModal(true, trail); });
+      var strl = row.querySelector('[data-act="send-trail"]');
+      if (strl) strl.addEventListener('click', function(e){ e.stopPropagation(); sendRecordToPartner('trail', trail); });
       var dl = row.querySelector('[data-act="delete-trail"]');
       if (dl) dl.addEventListener('click', async function(e){
         e.stopPropagation();
@@ -13457,6 +13461,7 @@
         try{ await deleteTrailStorage(trail.id); }catch(err){ console.error('Outdoor Companion: trail delete failed', err); }
         if (selectedTrailId === trail.id) clearTrailSelection();
         renderList('trails');
+        offerSendDelete('trail', trail.id, trail.name);
       });
       listEl.appendChild(row);
     });
