@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 629</div>
+    <div id="buildBadge">BUILD 630</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6358,11 +6358,14 @@
   function photoContribMode(doc){
     var me = _permMyUid();
     if (!doc || !doc.__ownerUid || doc.__ownerUid === me) return 'own';
-    if (activeScope.type === 'group'){
-      var gid = activeScope.id;
-      if (grantAllows(gid, 'bucks', 'edit') || grantAllows(gid, 'photos', 'edit')) return 'edit';       // Phase 2b: direct write
-      if (grantAllows(gid, 'bucks', 'suggest') || grantAllows(gid, 'photos', 'suggest')) return 'suggest';
-    }
+    // Which groups authorize me on this shared item? In the camp scope, the active group; in MY OWN view
+    // (Milestone B — shared photos now appear in your own gallery), any group the item is shared to. This
+    // is the UI twin of the generalized write-routing in makeCloudStorage.set — keep the two in lockstep.
+    var gids = (activeScope.type === 'group') ? [activeScope.id]
+             : (Array.isArray(doc.__sharedGroups) ? doc.__sharedGroups : []);
+    var i;
+    for (i = 0; i < gids.length; i++){ if (grantAllows(gids[i], 'bucks', 'edit') || grantAllows(gids[i], 'photos', 'edit')) return 'edit'; }
+    for (i = 0; i < gids.length; i++){ if (grantAllows(gids[i], 'bucks', 'suggest') || grantAllows(gids[i], 'photos', 'suggest')) return 'suggest'; }
     return 'view';
   }
   function populateLightboxBuckSelect(doc){
