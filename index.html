@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 632</div>
+    <div id="buildBadge">BUILD 633</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2599,6 +2599,14 @@
         <button class="btn-primary" id="fullBackupBtn" style="width:100%;margin-bottom:8px;background:#8FA05C;color:#14201A;">💾 Download Full Backup</button>
         <label class="btn-ghost" for="restoreBackupInput" style="width:100%;display:block;text-align:center;box-sizing:border-box;cursor:pointer;">📤 Restore From Backup File</label>
         <input type="file" accept=".json" id="restoreBackupInput" style="display:none;" />
+      </div>
+
+      <div style="border-top:1px solid var(--line);padding-top:14px;margin-top:14px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:var(--text-dim);margin-bottom:8px;">Set Up a Hunting Partner</div>
+        <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 10px 0;">Send a partner a <strong>starting copy of your hunting map</strong> — every farm &amp; boundary, your stands, feeders &amp; other spots, and trails — so they open the app already loaded instead of drawing it all over. It lands as <em>their own</em> editable copy; your map isn't touched. (Your <strong>cameras and photos stay yours</strong> — they're not part of the copy.)</p>
+        <button class="btn-primary" id="seedTeammateBtn" style="width:100%;margin-bottom:8px;background:#C9832E;color:#1A1204;">🤝 Send a Starting Copy (for a partner)</button>
+        <label class="btn-ghost" for="importSeedInput" style="width:100%;display:block;text-align:center;box-sizing:border-box;cursor:pointer;">📥 Import a Starting Copy someone sent me</label>
+        <input type="file" accept=".json" id="importSeedInput" style="display:none;" />
       </div>
     </div>
   </div>
@@ -18559,6 +18567,66 @@
       alert('Could not read that backup file — it may be corrupted or not a valid export from this app.');
     }
     this.value = '';
+  });
+
+  // ---------- Milestone C: Seed a teammate — a one-time starting COPY of the whole MAP ----------
+  // Carries the map only: properties (+boundaries), every site type, and trails. NOT cameras, photos,
+  // observations, or bucks — each hunter keeps their own gear + records. ORIGINAL ids are kept on purpose:
+  // the id doubles as the permanent "twin" link so a later send-a-change (Milestone D) finds the matching
+  // record, AND so a shared photo's site reference resolves on the receiver's side (fixes the B filter gap).
+  // Import is ADDITIVE — it adds the map to whatever the receiver already has, never replaces, and skips
+  // anything they already have (so a re-seed is safe and won't clobber their edits).
+  function _seedStrip(rec){ var o = {}; for (var k in rec){ if (k.indexOf('__') !== 0 && k !== 'blob' && k !== 'objectUrl') o[k] = rec[k]; } return o; }
+  function gatherTeammateSeed(){
+    return {
+      seedFormat: 'outdoor-companion-teammate-seed-v1',
+      exportedAt: new Date().toISOString(),
+      seededBy: (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? (firebase.auth().currentUser.email || '') : '',
+      properties: (typeof properties !== 'undefined' ? properties : []).map(_seedStrip),
+      // EXCLUDE camera-location sites (type 'camera') — nobody wants a partner's camera spots cluttering
+      // their own list, and a shared photo already carries its own location name + coordinate, so it still
+      // shows the right spot without them. (Founder call 2026-09-07.) Camera DEVICES are never seeded either.
+      sites: (typeof sites !== 'undefined' ? sites : []).filter(function(s){ return s && s.type !== 'camera'; }).map(_seedStrip),
+      trails: (typeof trails !== 'undefined' ? trails : []).map(_seedStrip)
+    };
+  }
+  var _seedBtn = document.getElementById('seedTeammateBtn');
+  if (_seedBtn) _seedBtn.addEventListener('click', function(){
+    var seed = gatherTeammateSeed();
+    var n = seed.properties.length + seed.sites.length + seed.trails.length;
+    if (!n){ showToast('Nothing to send yet — add some farms & stands first.'); return; }
+    var dateStr = new Date().toISOString().slice(0,10);
+    downloadTextFile('outdoor-companion-starting-copy-' + dateStr + '.json', 'application/json', JSON.stringify(seed, null, 2));
+    showToast('Starting copy downloaded — ' + seed.properties.length + ' farms, ' + seed.sites.length + ' spots, ' + seed.trails.length + ' trails. Send that file to your partner.');
+    document.getElementById('exportModalBackdrop').classList.remove('show');
+  });
+  var _importSeedEl = document.getElementById('importSeedInput');
+  if (_importSeedEl) _importSeedEl.addEventListener('change', async function(){
+    var file = this.files[0]; if (!file){ return; }
+    var self = this;
+    try{
+      var seed = JSON.parse(await file.text());
+      if (!seed || seed.seedFormat !== 'outdoor-companion-teammate-seed-v1'){ alert('That doesn\'t look like a Starting Copy file from Outdoor Companion.'); self.value=''; return; }
+      var idSet = function(arr){ var m={}; (arr||[]).forEach(function(x){ if(x&&x.id) m[x.id]=true; }); return m; };
+      var haveProp = idSet(properties), haveSite = idSet(sites), haveTrail = idSet(trails);
+      var newProps=[], newSites=[], newTrails=[], skip=0;
+      (seed.properties||[]).forEach(function(p){ if(!p||!p.id) return; if(haveProp[p.id]){ skip++; return; } newProps.push(_seedStrip(p)); });
+      (seed.sites||[]).forEach(function(s){ if(!s||!s.id) return; if(haveSite[s.id]){ skip++; return; } newSites.push(_seedStrip(s)); });
+      (seed.trails||[]).forEach(function(t){ if(!t||!t.id) return; if(haveTrail[t.id]){ skip++; return; } newTrails.push(_seedStrip(t)); });
+      var addN = newProps.length + newSites.length + newTrails.length;
+      if (!addN){ alert('Nothing new to import — you already have everything in that Starting Copy.'); self.value=''; return; }
+      if (!confirm('Import a starting copy from ' + (seed.seededBy || 'a partner') + '?\n\nThis ADDS ' + newProps.length + ' farms, ' + newSites.length + ' spots, and ' + newTrails.length + ' trails to your map as your OWN editable copy. It does NOT touch anything you already have' + (skip ? (' (' + skip + ' already-present items skipped).') : '.'))){ self.value=''; return; }
+      newProps.forEach(function(p){ properties.push(p); });
+      newSites.forEach(function(s){ sites.push(s); });
+      newTrails.forEach(function(t){ trails.push(t); });
+      for (var i=0;i<newProps.length;i++){ try{ await saveProperty(newProps[i]); }catch(e){ console.error('seed import: property', e); } }
+      for (var j=0;j<newSites.length;j++){ try{ await saveSite(newSites[j]); }catch(e){ console.error('seed import: site', e); } }
+      for (var k=0;k<newTrails.length;k++){ try{ await saveTrail(newTrails[k]); }catch(e){ console.error('seed import: trail', e); } }
+      try{ renderPropertySelect(); renderAll(); renderAllSavedTrails(); }catch(e){}
+      showToast('Starting copy imported — added ' + newProps.length + ' farms, ' + newSites.length + ' spots, ' + newTrails.length + ' trails. It\'s yours to edit now.');
+      document.getElementById('exportModalBackdrop').classList.remove('show');
+    }catch(e){ console.error('Outdoor Companion: seed import failed', e); alert('Could not read that Starting Copy file — it may be corrupted.'); }
+    self.value='';
   });
 
   function gatherExportRecords(){
