@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 631</div>
+    <div id="buildBadge">BUILD 632</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5811,18 +5811,23 @@
   function populateGalleryFilters(){
     var camSel = document.getElementById('galleryCameraFilter');
     var siteSel = document.getElementById('gallerySiteFilter');
-    var camIds = {}, siteIds = {}, hasUnlocated = false;
+    // Build id→name maps from my OWN records first, then fall back to the name each PHOTO carries — so a
+    // SHARED photo (whose camera/site records I don't have) still contributes a filter option. (Milestone B.)
+    var camIds = {}, siteIds = {}, hasUnlocated = false, camNames = {}, siteNames = {};
+    cameras.forEach(function(c){ camNames[c.id] = c.name || '(unnamed)'; });
+    sites.forEach(function(s){ siteNames[s.id] = s.name || '(unnamed)'; });
     importedPhotos.forEach(function(p){
-      if (p.cameraId) camIds[p.cameraId] = true;
-      if (p.matchedSiteId) siteIds[p.matchedSiteId] = true; else hasUnlocated = true;
+      if (p.cameraId){ camIds[p.cameraId] = true; if (!camNames[p.cameraId] && p.cameraName) camNames[p.cameraId] = p.cameraName; }
+      if (p.matchedSiteId){ siteIds[p.matchedSiteId] = true; if (!siteNames[p.matchedSiteId] && p.matchedSiteName) siteNames[p.matchedSiteId] = p.matchedSiteName; }
+      else hasUnlocated = true;
     });
     var camOpts = ['<option value="">All cameras</option>'];
-    cameras.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
-      .forEach(function(c){ if (camIds[c.id]) camOpts.push('<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>'); });
+    Object.keys(camIds).sort(function(a,b){ return (camNames[a]||'').localeCompare(camNames[b]||'', undefined, {numeric:true}); })
+      .forEach(function(id){ camOpts.push('<option value="'+id+'">'+escapeHtml(camNames[id] || '(camera)')+'</option>'); });
     var prevCam = camSel.value; camSel.innerHTML = camOpts.join(''); camSel.value = prevCam;
     var siteOpts = ['<option value="">📍 All locations</option>'];
-    sites.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
-      .forEach(function(s){ if (siteIds[s.id]) siteOpts.push('<option value="'+s.id+'">'+escapeHtml(s.name||'(unnamed)')+'</option>'); });
+    Object.keys(siteIds).sort(function(a,b){ return (siteNames[a]||'').localeCompare(siteNames[b]||'', undefined, {numeric:true}); })
+      .forEach(function(id){ siteOpts.push('<option value="'+id+'">'+escapeHtml(siteNames[id] || '(unnamed)')+'</option>'); });
     if (hasUnlocated) siteOpts.push('<option value="__none__">No site match</option>');
     var prevSite = siteSel.value; siteSel.innerHTML = siteOpts.join(''); siteSel.value = prevSite;
 
@@ -5831,7 +5836,11 @@
     var farmSel = document.getElementById('galleryFarmFilter');
     if (farmSel){
       var farmIds = {};
-      importedPhotos.forEach(function(p){ if (p.matchedSiteId){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; if (s && s.propertyId) farmIds[s.propertyId] = true; } });
+      importedPhotos.forEach(function(p){
+        if (p.matchedSiteId){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; if (s && s.propertyId){ farmIds[s.propertyId] = true; return; } }
+        // shared photo (owner's site not in my data) — resolve its farm by its own coordinate against MY farms
+        if (typeof p.lat === 'number' && typeof farmForPoint === 'function'){ var f = farmForPoint(p.lat, p.lng); if (f) farmIds[f.id] = true; }
+      });
       var farmOpts = ['<option value="">🌲 All farms</option>'];
       (typeof properties !== 'undefined' ? properties : []).filter(function(pr){ return !pr.module || pr.module === 'hunting'; })
         .slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true}); })
@@ -24297,6 +24306,9 @@
         contentHash: photoRecord.contentHash || null, // for duplicate-import detection
         matchedSiteId: photoRecord.matchedSiteId || null,
         matchedSiteName: photoRecord.matchedSiteName || null,
+        // Carry the camera NAME too (like the site name) so a shared photo is filterable-by-camera on a
+        // teammate's side, where they don't have the owner's camera record. (Milestone B follow-up.)
+        cameraName: (function(){ var _pc = cameras.filter(function(c){ return c.id === photoRecord.cameraId; })[0]; return _pc ? (_pc.name || null) : null; })(),
         // A photo carries its OWN spot (from its matched site). This is what lets a photo draw on the
         // map, sort itself by farm, feed the duplicate-fingerprint, and — the reason it must live ON the
         // photo — travel to a teammate's account, where the owner's site record doesn't exist. (Milestone A.)
@@ -24361,12 +24373,17 @@
     if (!Array.isArray(importedPhotos) || !importedPhotos.length) return;
     var toPersist = [];
     importedPhotos.forEach(function(p){
-      if (!p || typeof p.lat === 'number' || !p.matchedSiteId) return;
-      var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0];
-      if (s && typeof s.lat === 'number'){
-        p.lat = s.lat; p.lng = s.lng;                                   // in memory now
-        if (p.__sharedGroups && p.__sharedGroups.length) toPersist.push(p); // only shared ones get written
+      if (!p) return;
+      var changed = false;
+      if (typeof p.lat !== 'number' && p.matchedSiteId){                 // give it its own coordinate
+        var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0];
+        if (s && typeof s.lat === 'number'){ p.lat = s.lat; p.lng = s.lng; changed = true; }
       }
+      if (!p.cameraName && p.cameraId){                                  // give it its own camera name
+        var c = cameras.filter(function(x){ return x.id === p.cameraId; })[0];
+        if (c && c.name){ p.cameraName = c.name; changed = true; }
+      }
+      if (changed && p.__sharedGroups && p.__sharedGroups.length) toPersist.push(p); // persist only shared
     });
     if (toPersist.length && hasChatStorage && window.storage && typeof window.storage.set === 'function'){
       (async function(){   // background, throttled — never blocks load; set() strips the __ meta for us
