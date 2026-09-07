@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 642</div>
+    <div id="buildBadge">BUILD 643</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3098,8 +3098,10 @@
     <div class="oc-modal form-pop">
       <h3>Camera Details <button class="close-x" id="editCamClose">&times;</button></h3>
       <input type="hidden" id="editCamId" />
-      <label>Name</label>
-      <input type="text" id="editCamName" placeholder="e.g. Cam #1 — North Fence" />
+      <label>Camera number</label>
+      <input type="text" id="editCamName" inputmode="numeric" placeholder="e.g. 12" />
+      <label>Name <span style="font-weight:400;color:var(--text-dim);">— your reference only, not shown on the map</span></label>
+      <input type="text" id="editCamNickname" placeholder="e.g. Reveal X on the north fence (optional)" />
       <label>Make</label>
       <input type="text" id="editCamMake" placeholder="e.g. Tactacam, Moultrie, Bushnell" />
       <label>Model</label>
@@ -24023,6 +24025,16 @@
       return;
     }
     list.innerHTML = '';
+    // Two cameras sharing a number is a data mistake — surface it up top with a one-tap way to review + merge.
+    var _dupGroups = duplicateCameraGroups();
+    if (_dupGroups.length){
+      var warn = document.createElement('div');
+      warn.style.cssText = 'background:#3a2a12;border:1px solid #7a5a1e;border-radius:10px;padding:10px 12px;margin-bottom:10px;color:#f0dfae;font-size:13px;line-height:1.5;';
+      warn.innerHTML = '⚠ ' + _dupGroups.length + ' duplicate camera number' + (_dupGroups.length===1?'':'s') + ' found. <button id="oc-review-dupcams" style="margin-left:6px;padding:6px 11px;border:1px solid #c9a24a;border-radius:8px;background:#4a3718;color:#f5e6bd;font-weight:700;cursor:pointer;">Review &amp; merge</button>';
+      list.appendChild(warn);
+      var _rb = document.getElementById('oc-review-dupcams');
+      if (_rb) _rb.addEventListener('click', reviewDuplicateCameras);
+    }
     mine.slice().sort(function(a,b){ return a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'}); }).forEach(function(cam){
       var site = cam.currentSiteId ? sites.filter(function(s){ return s.id === cam.currentSiteId; })[0] : null;
       var row = document.createElement('div');
@@ -24050,6 +24062,7 @@
         '<div class="cam-meta">' +
           '<div class="nm">'+escapeHtml(cam.name)+'</div>' +
           '<div class="st'+(site ? ' deployed' : '')+'">'+(site ? 'Deployed at ' + escapeHtml(site.name) + sinceStr : 'Not deployed')+(makeModel ? ' · ' + escapeHtml(makeModel) : '')+'</div>' +
+          (cam.nickname ? '<div class="st" style="color:var(--text-dim);font-style:italic;">'+escapeHtml(cam.nickname)+'</div>' : '') +
         '</div>' +
         '<div class="cam-actions">' +
           primaryBtn +
@@ -25038,10 +25051,16 @@
     // over onto a different camera's next import.
     importBatchLocation = null;
     importLocSelectedPropertyId = null;
-    var scanned = document.querySelector('input[name="importLocModeRadio"][value="scanned"]');
-    if (scanned) scanned.checked = true;
+    // Remember the last location mode this device used, so a scanner stays on "scanned" and a non-scanner (e.g.
+    // someone who always names the site at import) lands on "Set the location" without hunting for the radio.
+    // We reset the chosen LOCATION every time (so it can't bleed onto the next camera), but keep the MODE.
+    var savedMode = 'scanned';
+    try{ savedMode = localStorage.getItem('oc_import_locmode') || 'scanned'; }catch(e){}
+    var modeRadio = document.querySelector('input[name="importLocModeRadio"][value="'+savedMode+'"]')
+                 || document.querySelector('input[name="importLocModeRadio"][value="scanned"]');
+    if (modeRadio) modeRadio.checked = true;
     var manual = document.getElementById('importManualLoc');
-    if (manual) manual.style.display = 'none';
+    if (manual) manual.style.display = (savedMode === 'manual') ? 'block' : 'none';
     var sel = document.getElementById('importLocSiteSelect');
     if (sel) sel.value = '';
     updateImportChosenLoc();
@@ -25052,6 +25071,7 @@
       var manual = getImportLocMode() === 'manual';
       document.getElementById('importManualLoc').style.display = manual ? 'block' : 'none';
       if (!manual){ importBatchLocation = null; updateImportChosenLoc(); }
+      try{ localStorage.setItem('oc_import_locmode', getImportLocMode()); }catch(e){}
     });
   });
   document.getElementById('importLocSiteSelect').addEventListener('change', function(){
@@ -25942,18 +25962,137 @@
     openScanModal();
   });
 
-  // "✍ Register by Hand" — add a camera with no tag: name it, then fill optional make/model/notes.
+  // Cameras are NUMBERED devices ("Camera 12"), one number per camera — the SITE carries the place-name, never
+  // the camera. (A camera moves between spots through the season; a place-name on it would start lying the moment
+  // you move it.) These helpers keep the numbering unique so you can't accidentally end up with two "Camera 10".
+  function myCamerasOnly(){
+    var _u = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+    return cameras.filter(function(c){ return !c.__ownerUid || c.__ownerUid === _u; });
+  }
+  function camNumberOf(cam){ var m = ((cam && cam.name) || '').match(/(\d+)/); return m ? parseInt(m[1], 10) : null; }
+  function nextCameraNumber(){
+    var max = 0; myCamerasOnly().forEach(function(c){ var n = camNumberOf(c); if (n && n > max) max = n; });
+    return max + 1;
+  }
+  function cameraNumberTaken(n, exceptId){
+    return myCamerasOnly().some(function(c){ return c.id !== exceptId && camNumberOf(c) === n; });
+  }
+
+  // "✍ Register by Hand" — add a camera as a NUMBER (auto-suggests the next free one; digits only). Its optional
+  // reference name + make/model/notes go on the next screen. The number is the label everywhere (list + map icon).
   async function registerByHand(){
-    var name = await showPrompt('New camera name (e.g. "Cam 12" or "Reveal — North Line"):', '');
-    if (name == null) return; name = name.trim(); if (!name) return;
-    var cam = { id: uid(), name: name, createdAt: Date.now(), currentSiteId: null, lastDeployedAt: null, make:'', model:'', notes:'' };
+    var next = nextCameraNumber();
+    var raw = await showPrompt('New camera — enter its number (just the number; the label becomes "Camera ' + next + '"):', String(next));
+    if (raw == null) return;
+    var digits = String(raw).replace(/[^0-9]/g, '');
+    var n = digits ? parseInt(digits, 10) : next;
+    if (cameraNumberTaken(n)){
+      alert('Camera ' + n + ' already exists. The next free number is ' + nextCameraNumber() + '.');
+      return;
+    }
+    var cam = { id: uid(), name: 'Camera ' + n, nickname:'', createdAt: Date.now(), currentSiteId: null, lastDeployedAt: null, make:'', model:'', notes:'' };
     cameras.push(cam);
     try{ await saveCamera(cam); }catch(e){ console.error('Outdoor Companion: register-by-hand save failed', e); }
     renderCameraList();
-    showToast(name + ' added — deploy it from the list');
-    openEditCameraModal(cam);   // walk them into make/model/notes; already saved, so closing is fine
+    showToast('Camera ' + n + ' added — deploy it from the list');
+    openEditCameraModal(cam);   // walk them into the optional name/make/model; already saved, so closing is fine
   }
   document.getElementById('registerCamBtn').addEventListener('click', registerByHand);
+
+  // ---------- Duplicate-camera cleanup ----------
+  // Two cameras that ended up with the SAME number (a data mistake). Merge = move one's photos + deployments onto
+  // the one you keep, then remove the empty extra. NON-DESTRUCTIVE to photos: only which camera they're filed
+  // under changes — their SITE, tags and images are untouched. Only ever operates on YOUR OWN cameras.
+  function duplicateCameraGroups(){
+    var groups = {};
+    myCamerasOnly().forEach(function(c){
+      var n = camNumberOf(c); var key = (n !== null) ? ('n' + n) : ('x' + c.id);
+      (groups[key] = groups[key] || []).push(c);
+    });
+    return Object.keys(groups).map(function(k){ return groups[k]; }).filter(function(g){ return g.length > 1; });
+  }
+  function camPhotoCount(cid){
+    var _u = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+    return importedPhotos.filter(function(p){ return p.cameraId === cid && (!p.__ownerUid || p.__ownerUid === _u); }).length;
+  }
+  function camDeployCount(cid){ return deployments.filter(function(d){ return d.cameraId === cid; }).length; }
+
+  async function mergeCamerasInto(keeperId, group){
+    var keeper = cameras.filter(function(c){ return c.id === keeperId; })[0];
+    if (!keeper) return;
+    var losers = group.filter(function(c){ return c.id !== keeperId; });
+    var loserIds = losers.map(function(c){ return c.id; });
+    var _u = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+    var photos = importedPhotos.filter(function(p){ return loserIds.indexOf(p.cameraId) !== -1 && (!p.__ownerUid || p.__ownerUid === _u); });
+    var deps = deployments.filter(function(d){ return loserIds.indexOf(d.cameraId) !== -1; });
+    if (!confirm('Merge into ' + keeper.name + '?\n\nThis moves ' + photos.length + ' photo(s) and ' + deps.length + ' deployment(s) onto ' + keeper.name + ', then removes ' + losers.length + ' duplicate camera(s).\n\nYour photos, their sites and tags are NOT deleted — only which camera they’re filed under changes. This can’t be undone.')) return;
+    showToast('Merging…');
+    for (var i=0;i<photos.length;i++){
+      var p = photos[i]; p.cameraId = keeper.id; p.cameraName = keeper.name;
+      try{ if (hasChatStorage){ await window.storage.set('photo:' + p.id, JSON.stringify(p), false); } }catch(e){ console.error('Outdoor Companion: merge photo save failed', e); }
+    }
+    for (var j=0;j<deps.length;j++){
+      var d = deps[j]; d.cameraId = keeper.id;
+      // Update in place (not saveDeployment — its signed-out path APPENDS, which would duplicate the deployment).
+      try{ if (hasChatStorage){ await window.storage.set('dep:' + d.id, JSON.stringify(d), false); } else { depLocalSaveAll(depLocalLoadAll().map(function(x){ return x.id === d.id ? d : x; })); } }catch(e){ console.error('Outdoor Companion: merge deployment save failed', e); }
+    }
+    // If the keeper isn't currently placed but a merged-in deployment is open, let the keeper adopt that spot.
+    if (!keeper.currentSiteId){
+      var openDep = deployments.filter(function(x){ return x.cameraId === keeper.id && !x.pickedUpAt; })
+        .sort(function(a,b){ return (b.deployedAt||0)-(a.deployedAt||0); })[0];
+      if (openDep){ keeper.currentSiteId = openDep.siteId; keeper.lastDeployedAt = openDep.deployedAt || keeper.lastDeployedAt; try{ await saveCamera(keeper); }catch(e){} }
+    }
+    for (var k=0;k<losers.length;k++){
+      cameras = cameras.filter(function(c){ return c.id !== losers[k].id; });
+      try{ await deleteCameraStorage(losers[k].id); }catch(e){ console.error('Outdoor Companion: merge delete failed', e); }
+    }
+    renderCameraList(); renderAll();
+    showToast('Merged into ' + keeper.name);
+  }
+
+  // Shows each duplicate group with what each copy holds (photos / deployments / where) so you can SEE the truth
+  // before anything is removed — pick which one to keep, and the rest fold into it.
+  function reviewDuplicateCameras(){
+    var groups = duplicateCameraGroups();
+    if (!groups.length){ showToast('No duplicate cameras.'); return; }
+    var ex = document.getElementById('oc-dupcam-modal'); if (ex) ex.parentNode.removeChild(ex);
+    var bd = document.createElement('div'); bd.id = 'oc-dupcam-modal';
+    bd.style.cssText = 'position:fixed;inset:0;z-index:100040;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;font-family:inherit;';
+    var html = '<div style="width:100%;max-width:460px;max-height:85vh;overflow:auto;background:#1E2B23;border:1px solid #35443A;border-radius:14px;padding:18px;color:#eaf3e2;">';
+    html += '<div style="font-size:19px;font-weight:700;margin-bottom:4px;">Duplicate cameras</div>';
+    html += '<div style="font-size:13.5px;color:#9db0a3;margin-bottom:14px;line-height:1.5;">Two or more cameras share the same number. Pick the one to <strong>keep</strong> — the others’ photos and deployments move onto it, then the extras are removed. Your photos’ sites and tags don’t change.</div>';
+    groups.forEach(function(g, gi){
+      var num = camNumberOf(g[0]);
+      html += '<div style="border:1px solid #35443A;border-radius:10px;padding:10px;margin-bottom:12px;">';
+      html += '<div style="font-weight:700;margin-bottom:4px;">' + (num!==null ? ('Camera ' + num) : 'Unnumbered') + ' — ' + g.length + ' copies</div>';
+      g.forEach(function(c){
+        var pc = camPhotoCount(c.id), dc = camDeployCount(c.id);
+        var site = c.currentSiteId ? sites.filter(function(s){ return s.id === c.currentSiteId; })[0] : null;
+        var where = site ? ('deployed at ' + escapeHtml(site.name)) : 'not deployed';
+        var nick = c.nickname ? (' · ' + escapeHtml(c.nickname)) : '';
+        html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid #2a382f;">';
+        html += '<div style="font-size:13px;line-height:1.4;">' + pc + ' photo' + (pc===1?'':'s') + ' · ' + dc + ' deployment' + (dc===1?'':'s') + '<br><span style="color:#9db0a3;">' + where + nick + '</span></div>';
+        html += '<button class="oc-dup-keep" data-group="' + gi + '" data-id="' + c.id + '" style="flex:0 0 auto;padding:9px 12px;border:1px solid #8FA05C;border-radius:9px;background:#26331d;color:#eaf3e2;font-size:13.5px;font-weight:700;cursor:pointer;">Keep this one</button>';
+        html += '</div>';
+      });
+      html += '</div>';
+    });
+    html += '<button class="oc-dup-cancel" style="display:block;width:100%;margin-top:4px;padding:12px;border:none;border-radius:11px;background:transparent;color:#9db0a3;font-size:15px;cursor:pointer;">Close</button>';
+    html += '</div>';
+    bd.innerHTML = html;
+    document.body.appendChild(bd);
+    function close(){ if (bd.parentNode) bd.parentNode.removeChild(bd); }
+    bd.addEventListener('click', function(e){ if (e.target === bd) close(); });
+    bd.querySelector('.oc-dup-cancel').addEventListener('click', close);
+    Array.prototype.forEach.call(bd.querySelectorAll('.oc-dup-keep'), function(btn){
+      btn.addEventListener('click', async function(){
+        var gi = parseInt(this.getAttribute('data-group'), 10);
+        var keeperId = this.getAttribute('data-id');
+        close();
+        await mergeCamerasInto(keeperId, groups[gi]);
+      });
+    });
+  }
 
   // "🏷 Scan Register" — the tagged workflow lives here: scan a tag to register, plus make/print tag sheets.
   function showScanRegisterMenu(){
@@ -26254,7 +26393,10 @@
   // ---------- Edit camera details (name, make, model, notes) ----------
   function openEditCameraModal(cam){
     document.getElementById('editCamId').value = cam.id;
-    document.getElementById('editCamName').value = cam.name || '';
+    // The label is "Camera N" — show just the number to edit; keep a legacy word-name visible if it has no number.
+    var _nm = (cam.name || '').match(/(\d+)/);
+    document.getElementById('editCamName').value = _nm ? _nm[1] : (cam.name || '');
+    document.getElementById('editCamNickname').value = cam.nickname || '';
     document.getElementById('editCamMake').value = cam.make || '';
     document.getElementById('editCamModel').value = cam.model || '';
     document.getElementById('editCamNotes').value = cam.notes || '';
@@ -26274,8 +26416,19 @@
     var camId = document.getElementById('editCamId').value;
     var cam = cameras.filter(function(c){ return c.id === camId; })[0];
     if (!cam) return;
-    var newName = document.getElementById('editCamName').value.trim();
-    cam.name = newName || cam.name;
+    // Label is a number → "Camera N". Digits only; refuse a number already used by another of MY cameras so
+    // we never re-create the two-"Camera 10" mistake. (A legacy word-name is kept only if the field is cleared
+    // of digits but still has text.)
+    var raw = document.getElementById('editCamName').value.trim();
+    var digits = raw.replace(/[^0-9]/g, '');
+    if (digits){
+      var n = parseInt(digits, 10);
+      if (cameraNumberTaken(n, cam.id)){ alert('Camera ' + n + ' already exists — pick a different number.'); return; }
+      cam.name = 'Camera ' + n;
+    } else if (raw){
+      cam.name = raw;
+    }
+    cam.nickname = document.getElementById('editCamNickname').value.trim();
     cam.make = document.getElementById('editCamMake').value.trim();
     cam.model = document.getElementById('editCamModel').value.trim();
     cam.notes = document.getElementById('editCamNotes').value.trim();
