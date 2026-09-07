@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 639</div>
+    <div id="buildBadge">BUILD 640</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -20377,6 +20377,24 @@
     try { await loadSuggestions(); } catch (e) {}
     try { await loadSuggestionAcks(); } catch (e) {}
   }
+
+  // F4 (2026-09-07): quiet auto-refresh of shared data when you return to the app tab — so a partner's
+  // edits/photos appear without a manual reload. Debounced to at most once a minute; signed-in only; fully
+  // guarded. Not full real-time (no live listeners), but it covers the common "switch away, come back" flow.
+  var _lastSharedRefresh = 0;
+  document.addEventListener('visibilitychange', function(){
+    if (document.hidden || !hasChatStorage) return;
+    if (Date.now() - _lastSharedRefresh < 60000) return;   // don't hammer on quick tab flips
+    _lastSharedRefresh = Date.now();
+    (async function(){
+      try {
+        await reloadAllShareable();
+        try { renderAll(); } catch(e){}
+        try { var gm = document.getElementById('photoGalleryModalBackdrop'); if (gm && gm.classList.contains('show')) renderGallery(); } catch(e){}
+        try { renderAllSavedTrails(); } catch(e){}
+      } catch(e){}
+    })();
+  });
 
   // One-time import of anything already in THIS browser's localStorage into the user's cloud
   // account, so nothing entered before the cloud existed is lost. Runs at most once per (device,
