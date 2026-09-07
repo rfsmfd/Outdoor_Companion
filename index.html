@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 630</div>
+    <div id="buildBadge">BUILD 631</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -6417,6 +6417,21 @@
       doc.buckProfileId = val || null;
     }
     if (hasChatStorage){ try{ await window.storage.set('photo:' + doc.id, JSON.stringify(doc), false); }catch(e){} }
+    // When a buck I OWN gets linked to a SHARED photo, share that buck to the same group(s) so the photo's
+    // owner and the whole camp can resolve its NAME — otherwise the link crosses but shows as untagged on
+    // their side (a buck born in "My Data" is private until it's tied to shared ground). Milestone B fix.
+    try{
+      if (doc.buckProfileId && Array.isArray(doc.__sharedGroups) && doc.__sharedGroups.length && window.storage && typeof window.storage.setSharing === 'function'){
+        var _lb = buckProfiles.filter(function(b){ return b.id === doc.buckProfileId; })[0];
+        var _meU = (typeof _permMyUid === 'function') ? _permMyUid() : null;
+        if (_lb && (!_lb.__ownerUid || _lb.__ownerUid === _meU)){   // only a buck I own
+          var _cur = Array.isArray(_lb.__sharedGroups) ? _lb.__sharedGroups.slice() : [];
+          var _changed = false;
+          doc.__sharedGroups.forEach(function(g){ if (_cur.indexOf(g) === -1){ _cur.push(g); _changed = true; } });
+          if (_changed){ await window.storage.setSharing('buck:' + _lb.id, _cur); _lb.__sharedGroups = _cur; }
+        }
+      }
+    }catch(e){ console.warn('Outdoor Companion: buck auto-share on link failed', e); }
     if (galleryLightboxDoc === doc) showGalleryPhoto(doc);
     renderGallery();
     var bp = buckProfiles.filter(function(b){ return b.id === doc.buckProfileId; })[0];
@@ -19605,7 +19620,14 @@
         var pk = cloudParseKey(key);
         // Writes normally target the writer's own tree — never another member's item. This guard stops a
         // stray edit from forking a copy under the wrong owner (single-source-of-truth invariant).
-        if (owners[key] && owners[key] !== myUid){
+        // Determine the item's TRUE owner from the value's own __ownerUid (reliable — it travels with the
+        // record across every load), falling back to the owners[] lookup. This makes an Editor's cross-owner
+        // write robust even if the lookup map wasn't primed for this key (which was letting a shared-photo tag
+        // silently fork a copy into MY tree instead of routing to the owner). A brand-new own record has no
+        // __ownerUid yet → falls through to the normal own-write below.
+        var _trueOwner = owners[key] || null;
+        try{ var _ov = JSON.parse(value); if (_ov && _ov.__ownerUid) _trueOwner = _ov.__ownerUid; }catch(e){}
+        if (_trueOwner && _trueOwner !== myUid){
           // Phase 2b EDITOR tier (Milestone B generalizes it to work in USER scope too, so an Editor can
           // tag a teammate's shared photo right from their OWN gallery — not only inside a group scope):
           // if I hold an Editor grant for this item's category in a group the item is shared to, write
@@ -19617,14 +19639,14 @@
             if (isGroup && grantAllows(scope.id, _cat, 'edit')){ _okGid = scope.id; }
             else {
               // user scope — find a group this item is shared to where I'm an editor of this category
-              var _sg = []; try{ var _o = JSON.parse(value); _sg = (_o && _o.__sharedGroups) || []; }catch(e){}
+              var _sg = []; try{ var _o2 = JSON.parse(value); _sg = (_o2 && _o2.__sharedGroups) || []; }catch(e){}
               for (var _si = 0; _si < _sg.length; _si++){ if (grantAllows(_sg[_si], _cat, 'edit')){ _okGid = _sg[_si]; break; } }
             }
           }
           if (_okGid){
-            var oref = db.collection('users').doc(owners[key]).collection(pk.coll).doc(pk.id);
-            await oref.set({ data: stripMeta(value), updatedAt: firebase.firestore.FieldValue.serverTimestamp(), ownerUid: owners[key] }, { merge: true });
-            cache[key] = value;   // owners[key] stays the real owner — I never take ownership
+            var oref = db.collection('users').doc(_trueOwner).collection(pk.coll).doc(pk.id);
+            await oref.set({ data: stripMeta(value), updatedAt: firebase.firestore.FieldValue.serverTimestamp(), ownerUid: _trueOwner }, { merge: true });
+            cache[key] = value; owners[key] = _trueOwner;   // remember the real owner; I never take ownership
             return;
           }
           throw new Error('That item belongs to another group member — you can view it but not edit it.');
