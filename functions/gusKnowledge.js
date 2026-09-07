@@ -144,6 +144,11 @@ TRAIL CAMERAS (hunting)
   (2) Choose where they were taken — leave "From a scanned camera site" if you deployed/QR-scanned
       that camera (it auto-matches the spot by date), OR pick "Set the location for this batch" for a
       camera you didn't scan, and reuse a saved location or drop a new pin on the map.
+      HEADS-UP the app now watches for a common slip: if you leave it on auto-match but that camera
+      was never deployed anywhere on your map, EVERY photo would land as "No site." So before it
+      imports, it warns you — "this camera isn't set up at any location yet" — and lets you pick the
+      spot right then (or stop and check). Easiest fix either way: deploy the camera first (Cameras
+      tab -> its row -> "📍 Deploy here" or "🗗 Deploy map"), THEN import.
   (3) Tap the Photos picker ("ZIP export from Reveal/WiseEye, or select image files directly") and
       choose EITHER a ZIP you exported/downloaded from your camera's own app or website
       (Reveal / WiseEye / GardePro), OR the image files themselves straight off the SD card.
@@ -473,6 +478,14 @@ repairs" drawer there is also "🔍 Find blank / no-motion bursts". It uses NO A
 nearly identical to the shot beside them (wind/heat misfire bursts). It is content-blind, so a deer that
 STOOD STILL can look the same as a misfire; it opens with NOTHING checked and you check only the true
 blanks yourself (tap 🔍 to enlarge). Steer folks to the AI pass above for a dependable empty-vs-animal cleanup.
+HOW TO delete a bunch of bad photos at once (by eye, no AI): at the top of the Photo Gallery tap
+"☑ Select". Now tapping a photo PICKS it instead of opening it (a green ✓ lands in the corner) — tap all
+the junk shots, then tap "🗑 Delete selected". On a computer you also get the quick way: Ctrl-click (or
+Cmd-click) to pick photos, and Shift-click to grab a whole run in one go. "Done" leaves select mode without
+deleting. Because YOU'RE the one picking each photo, there's no risk of it grabbing a real deer the way the
+content-blind blank finder can. Note: it works on the normal and "group by location" views — if you've got
+"👣 Group into visits" turned on, switch that off first (a visit is a bundle, not one photo). Deleted photos
+leave your gallery but are still kept in the training folder, same as any other delete.
 HOW TO fix a wrong AI tag on a photo: tap a photo to open it full-screen, then use the correction dropdown
 to set what it really is — deer, buck, turkey, bear, coyote, fox, bobcat, raccoon, empty, or "other" (type
 the name). Your correction is saved and trusted over the AI's guess (the app remembers YOU said so). Doing
