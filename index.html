@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 628</div>
+    <div id="buildBadge">BUILD 629</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5786,7 +5786,13 @@
     var spF = document.getElementById('gallerySpeciesFilter').value;
     var sort = document.getElementById('gallerySort').value;
     var list = importedPhotos.slice();
-    if (farmF) list = list.filter(function(p){ if (!p.matchedSiteId) return false; var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; return !!(s && s.propertyId === farmF); });
+    if (farmF) list = list.filter(function(p){
+      // Own photo: resolve its farm through its matched site. Shared photo (owner's site not in my data):
+      // resolve its farm by its OWN coordinate (Milestone A/B) — the "photos route themselves by location".
+      if (p.matchedSiteId){ var s = sites.filter(function(x){ return x.id === p.matchedSiteId; })[0]; if (s) return !!(s.propertyId === farmF); }
+      if (typeof p.lat === 'number' && typeof farmForPoint === 'function'){ var f = farmForPoint(p.lat, p.lng); return !!(f && f.id === farmF); }
+      return false;
+    });
     if (camF) list = list.filter(function(p){ return p.cameraId === camF; });
     if (siteF === '__none__') list = list.filter(function(p){ return !p.matchedSiteId; });
     else if (siteF) list = list.filter(function(p){ return p.matchedSiteId === siteF; });
@@ -5929,6 +5935,12 @@
     if (id){ var s = sites.filter(function(x){ return x.id === id; })[0]; if (s) return s.name; }
     return fallback || null;
   }
+  // Whose ground a shared photo came off — resolve the owner uid to a name via my group member lists.
+  function photoOwnerName(uid){
+    if (!uid) return 'Shared';
+    for (var i=0;i<(typeof myGroups!=='undefined'&&myGroups?myGroups.length:0);i++){ var m = myGroups[i].members; if (m && m[uid] && m[uid].name) return m[uid].name; }
+    return 'Shared';
+  }
   // ---- Shared gallery card builders (used by the flat, visit, and by-location renders) ----
   // hideLoc drops the per-card location line when the card already sits under a location header.
   function buildPhotoCardEl(p, navList, hideLoc){
@@ -5941,9 +5953,14 @@
     var buckHtml = '';
     var _bids = photoBuckIds(p);
     if (_bids.length){ var _names = _bids.map(function(id){ var b = buckProfiles.filter(function(x){ return x.id === id; })[0]; return b ? b.name : null; }).filter(Boolean); if (_names.length) buckHtml = '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#ffb066;">🦌 ' + escapeHtml(_names.join(', ')) + '</div>'; }
+    // Milestone B: a teammate's shared photo gets a small owner chip so you always know whose ground it's off.
+    var _me = (typeof _permMyUid === 'function') ? _permMyUid() : null;
+    var ownerChip = (p.__ownerUid && _me && p.__ownerUid !== _me)
+      ? '<div style="font-size:9px;font-weight:700;margin-top:2px;color:#7fb0ff;">🤝 ' + escapeHtml(photoOwnerName(p.__ownerUid)) + '</div>' : '';
     card.innerHTML =
       '<img src="' + src + '" alt="' + escapeHtml(p.filename||'') + '">' +
       '<div class="meta">' +
+        ownerChip +
         (hideLoc ? '' : (function(){ var ln = siteNameById(p.matchedSiteId, p.matchedSiteName); return '<div class="loc' + (ln ? '' : ' unmatched') + '">📍 ' + (ln ? escapeHtml(ln) : 'No location yet') + '</div>'; })()) +
         (cam ? '<div class="cam">📷 ' + escapeHtml(cam.name) + '</div>' : '') +
         '<div class="dt">' + escapeHtml(dateStr) + '</div>' +
@@ -6230,6 +6247,10 @@
   function addPhotoTombstone(cameraId, ts){ if (!cameraId || !ts) return; try { var t = getPhotoTombstones(); t[tombstoneKey(cameraId, ts)] = 1; localStorage.setItem('oc_photo_tombstones', JSON.stringify(t)); } catch(e){} }
   function isPhotoTombstoned(cameraId, ts){ if (!cameraId || !ts) return false; return !!getPhotoTombstones()[tombstoneKey(cameraId, ts)]; }
   async function deletePhotoStorage(doc){
+    // Data-safety guard (Milestone B): a teammate's SHARED photo is not yours to delete. Now that shared
+    // photos appear in your own gallery, this stops a stray delete from wiping the OWNER's copy.
+    var _delMe = (typeof _permMyUid === 'function') ? _permMyUid() : null;
+    if (doc && doc.__ownerUid && _delMe && doc.__ownerUid !== _delMe){ try{ showToast("That's a teammate's photo — only they can delete it."); }catch(e){} return; }
     if (doc && doc.cameraId && doc.timestamp && !doc.usedFallbackDate) addPhotoTombstone(doc.cameraId, doc.timestamp);
     if (hasChatStorage){ try{ await window.storage.delete('photo:' + doc.id, false); }catch(e){} }
     if (doc.storagePath && typeof firebase !== 'undefined' && firebase.storage){
@@ -6246,6 +6267,9 @@
   var _vaultFullNotified  = (function(){ try{ return localStorage.getItem('oc_vault_full')  === '1'; }catch(e){ return false; } })();
   async function vaultOrDeletePhoto(doc){
     if (!doc) return;
+    // Data-safety guard (Milestone B): never vault/delete a teammate's SHARED photo — only its owner can.
+    var _vaultMe = (typeof _permMyUid === 'function') ? _permMyUid() : null;
+    if (doc.__ownerUid && _vaultMe && doc.__ownerUid !== _vaultMe){ try{ showToast("That's a teammate's photo — only they can delete it."); }catch(e){} return; }
     // Bank EVERYTHING you delete — blanks AND animals — as labeled training data (each photo carries its own
     // ai label). Blanks feed the free blank-catcher; deleted animals (especially the uncommon critters you
     // toss) feed a future species model, so nothing you'd want is thrown away. Bounded by VAULT_CAP.
@@ -19534,6 +19558,30 @@
           owners[k] = d.ownerUid || myUid;
           keys.push(k);
         });
+        // Milestone B: pull SHARED photos & bucks from my groups into my OWN view — so a teammate's photos
+        // appear right in my normal gallery, no scope switch, no separate camp view. ONLY these two pool
+        // in-place; the map (sites/properties/trails) stays independent (each hunter keeps their own, seeded).
+        // My own shared items are skipped (already loaded from my tree). Errors degrade to own-only — never
+        // break the load. The owner is recorded, so an Editor's tag routes back to the owner's copy (set()).
+        if ((coll === 'photos' || coll === 'bucks') && typeof myGroups !== 'undefined' && myGroups && myGroups.length){
+          for (var _gi = 0; _gi < myGroups.length; _gi++){
+            var _gid = myGroups[_gi].id;
+            try{
+              var sqs = await db.collectionGroup(coll).where('sharedGroups', 'array-contains', _gid).get();
+              sqs.forEach(function(sdoc){
+                var sOwner = (sdoc.ref.parent && sdoc.ref.parent.parent) ? sdoc.ref.parent.parent.id : null;
+                if (!sOwner || sOwner === myUid) return;                     // mine — already loaded
+                var sk = p + ':' + sdoc.id;
+                if (Object.prototype.hasOwnProperty.call(cache, sk)) return; // dedupe across groups
+                var sd = sdoc.data() || {};
+                var sraw = (typeof sd.data === 'string') ? sd.data : JSON.stringify(sd);
+                cache[sk] = injectMeta(sraw, sOwner, sd.sharedGroups || []);
+                owners[sk] = sOwner;
+                keys.push(sk);
+              });
+            }catch(e){ /* missing index / transient — keep the own-tree results, don't break the gallery */ }
+          }
+        }
         return { keys: keys };
       },
       get: async function(key){
@@ -19554,12 +19602,23 @@
         var pk = cloudParseKey(key);
         // Writes normally target the writer's own tree — never another member's item. This guard stops a
         // stray edit from forking a copy under the wrong owner (single-source-of-truth invariant).
-        if (isGroup && owners[key] && owners[key] !== myUid){
-          // Phase 2b EDITOR tier: if I hold an Editor grant for this item's category in THIS group, write
-          // straight into the OWNER's tree (only the data changes; ownerUid + sharedGroups are left exactly
-          // as the owner set them). The security rule independently re-checks the grant + the guards.
+        if (owners[key] && owners[key] !== myUid){
+          // Phase 2b EDITOR tier (Milestone B generalizes it to work in USER scope too, so an Editor can
+          // tag a teammate's shared photo right from their OWN gallery — not only inside a group scope):
+          // if I hold an Editor grant for this item's category in a group the item is shared to, write
+          // straight into the OWNER's tree (only the data changes; ownerUid + sharedGroups untouched). The
+          // security rule independently re-checks the grant + the guards.
           var _pfx = String(key).split(':')[0], _cat = PERM_PREFIX_CAT[_pfx];
-          if (_cat && typeof grantAllows === 'function' && grantAllows(scope.id, _cat, 'edit')){
+          var _okGid = null;
+          if (_cat && typeof grantAllows === 'function'){
+            if (isGroup && grantAllows(scope.id, _cat, 'edit')){ _okGid = scope.id; }
+            else {
+              // user scope — find a group this item is shared to where I'm an editor of this category
+              var _sg = []; try{ var _o = JSON.parse(value); _sg = (_o && _o.__sharedGroups) || []; }catch(e){}
+              for (var _si = 0; _si < _sg.length; _si++){ if (grantAllows(_sg[_si], _cat, 'edit')){ _okGid = _sg[_si]; break; } }
+            }
+          }
+          if (_okGid){
             var oref = db.collection('users').doc(owners[key]).collection(pk.coll).doc(pk.id);
             await oref.set({ data: stripMeta(value), updatedAt: firebase.firestore.FieldValue.serverTimestamp(), ownerUid: owners[key] }, { merge: true });
             cache[key] = value;   // owners[key] stays the real owner — I never take ownership
