@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 641</div>
+    <div id="buildBadge">BUILD 642</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -2606,7 +2606,7 @@
         <p style="font-size:11.5px;color:var(--text-dim);margin:0 0 10px 0;">Send a partner a <strong>starting copy of your hunting map</strong> — every farm &amp; boundary, your stands, feeders &amp; other spots, and trails — so they open the app already loaded instead of drawing it all over. It lands as <em>their own</em> editable copy; your map isn't touched. (Your <strong>cameras and photos stay yours</strong> — they're not part of the copy.)</p>
         <button class="btn-primary" id="seedTeammateBtn" style="width:100%;margin-bottom:8px;background:#C9832E;color:#1A1204;">🤝 Send a Starting Copy (for a partner)</button>
         <label class="btn-ghost" for="importSeedInput" style="width:100%;display:block;text-align:center;box-sizing:border-box;cursor:pointer;">📥 Import a Starting Copy someone sent me</label>
-        <input type="file" accept=".json" id="importSeedInput" style="display:none;" />
+        <input type="file" accept=".json" id="importSeedInput" multiple style="display:none;" />
       </div>
     </div>
   </div>
@@ -18770,43 +18770,53 @@
   }
   var _importSeedEl = document.getElementById('importSeedInput');
   if (_importSeedEl) _importSeedEl.addEventListener('change', async function(){
-    var file = this.files[0]; if (!file){ return; }
+    var files = Array.prototype.slice.call(this.files || []);   // accepts several at once
     var self = this;
+    if (!files.length){ return; }
     try{
-      var parsed = JSON.parse(await file.text());
-      // A CHANGE file (Milestone D) — apply targeted upserts/deletes to my copy, then stop.
-      if (parsed && parsed.changeFormat === 'outdoor-companion-change-v1'){
-        var chs = parsed.changes || [];
-        if (!chs.length){ alert('That change file is empty.'); self.value=''; return; }
-        var nUp=0,nDel=0; chs.forEach(function(c){ if(c&&c.op==='delete')nDel++; else nUp++; });
-        if (!confirm('Apply ' + chs.length + ' change' + (chs.length===1?'':'s') + ' from ' + (parsed.from||'your partner') + '?\n\n• ' + nUp + ' to add/update\n• ' + nDel + ' to remove\n\nThis updates YOUR copy of those records.')){ self.value=''; return; }
-        var sum = await applyChangeFile(parsed);
-        try{ renderPropertySelect(); renderAll(); renderAllSavedTrails(); }catch(e){}
-        showToast('Applied — ' + sum.add + ' added, ' + sum.upd + ' updated, ' + sum.del + ' removed' + (sum.skipped?(', ' + sum.skipped + ' skipped'):'') + '.');
-        document.getElementById('exportModalBackdrop').classList.remove('show');
-        self.value=''; return;
+      var parsedList = [];
+      for (var fi=0; fi<files.length; fi++){ try { parsedList.push(JSON.parse(await files[fi].text())); } catch(e){ /* skip an unreadable file */ } }
+      // Sort what we got: combine every CHANGE file's changes into ONE batch; keep SEED files separate.
+      var allChanges = [], seeds = [], fromWho = '';
+      parsedList.forEach(function(p){
+        if (p && p.changeFormat === 'outdoor-companion-change-v1'){ (p.changes||[]).forEach(function(c){ allChanges.push(c); }); if (!fromWho && p.from) fromWho = p.from; }
+        else if (p && p.seedFormat === 'outdoor-companion-teammate-seed-v1'){ seeds.push(p); }
+      });
+      if (!allChanges.length && !seeds.length){ alert('None of those look like a Starting Copy or Change file from Outdoor Companion.'); self.value=''; return; }
+
+      // --- CHANGE files (D): one confirm, one apply, no matter how many files you picked ---
+      if (allChanges.length){
+        var nUp=0,nDel=0; allChanges.forEach(function(c){ if(c&&c.op==='delete')nDel++; else nUp++; });
+        if (confirm('Apply ' + allChanges.length + ' change' + (allChanges.length===1?'':'s') + ' from ' + (fromWho||'your partner') + '?\n\n• ' + nUp + ' to add/update\n• ' + nDel + ' to remove\n\nThis updates YOUR copy of those records.')){
+          var sum = await applyChangeFile({ changes: allChanges });
+          try{ renderPropertySelect(); renderAll(); renderAllSavedTrails(); }catch(e){}
+          showToast('Applied — ' + sum.add + ' added, ' + sum.upd + ' updated, ' + sum.del + ' removed' + (sum.skipped?(', ' + sum.skipped + ' skipped'):'') + '.');
+        }
       }
-      var seed = parsed;
-      if (!seed || seed.seedFormat !== 'outdoor-companion-teammate-seed-v1'){ alert('That doesn\'t look like a Starting Copy or Change file from Outdoor Companion.'); self.value=''; return; }
-      var idSet = function(arr){ var m={}; (arr||[]).forEach(function(x){ if(x&&x.id) m[x.id]=true; }); return m; };
-      var haveProp = idSet(properties), haveSite = idSet(sites), haveTrail = idSet(trails);
-      var newProps=[], newSites=[], newTrails=[], skip=0;
-      (seed.properties||[]).forEach(function(p){ if(!p||!p.id) return; if(haveProp[p.id]){ skip++; return; } newProps.push(_seedStrip(p)); });
-      (seed.sites||[]).forEach(function(s){ if(!s||!s.id) return; if(haveSite[s.id]){ skip++; return; } newSites.push(_seedStrip(s)); });
-      (seed.trails||[]).forEach(function(t){ if(!t||!t.id) return; if(haveTrail[t.id]){ skip++; return; } newTrails.push(_seedStrip(t)); });
-      var addN = newProps.length + newSites.length + newTrails.length;
-      if (!addN){ alert('Nothing new to import — you already have everything in that Starting Copy.'); self.value=''; return; }
-      if (!confirm('Import a starting copy from ' + (seed.seededBy || 'a partner') + '?\n\nThis ADDS ' + newProps.length + ' farms, ' + newSites.length + ' spots, and ' + newTrails.length + ' trails to your map as your OWN editable copy. It does NOT touch anything you already have' + (skip ? (' (' + skip + ' already-present items skipped).') : '.'))){ self.value=''; return; }
-      newProps.forEach(function(p){ properties.push(p); });
-      newSites.forEach(function(s){ sites.push(s); });
-      newTrails.forEach(function(t){ trails.push(t); });
-      for (var i=0;i<newProps.length;i++){ try{ await saveProperty(newProps[i]); }catch(e){ console.error('seed import: property', e); } }
-      for (var j=0;j<newSites.length;j++){ try{ await saveSite(newSites[j]); }catch(e){ console.error('seed import: site', e); } }
-      for (var k=0;k<newTrails.length;k++){ try{ await saveTrail(newTrails[k]); }catch(e){ console.error('seed import: trail', e); } }
-      try{ renderPropertySelect(); renderAll(); renderAllSavedTrails(); }catch(e){}
-      showToast('Starting copy imported — added ' + newProps.length + ' farms, ' + newSites.length + ' spots, ' + newTrails.length + ' trails. It\'s yours to edit now.');
+
+      // --- SEED files (C): each is an additive restore ---
+      for (var si=0; si<seeds.length; si++){
+        var seed = seeds[si];
+        var idSet = function(arr){ var m={}; (arr||[]).forEach(function(x){ if(x&&x.id) m[x.id]=true; }); return m; };
+        var haveProp = idSet(properties), haveSite = idSet(sites), haveTrail = idSet(trails);
+        var newProps=[], newSites=[], newTrails=[], skip=0;
+        (seed.properties||[]).forEach(function(p){ if(!p||!p.id) return; if(haveProp[p.id]){ skip++; return; } newProps.push(_seedStrip(p)); });
+        (seed.sites||[]).forEach(function(s){ if(!s||!s.id) return; if(haveSite[s.id]){ skip++; return; } newSites.push(_seedStrip(s)); });
+        (seed.trails||[]).forEach(function(t){ if(!t||!t.id) return; if(haveTrail[t.id]){ skip++; return; } newTrails.push(_seedStrip(t)); });
+        var addN = newProps.length + newSites.length + newTrails.length;
+        if (!addN){ if (seeds.length===1) alert('Nothing new to import — you already have everything in that Starting Copy.'); continue; }
+        if (!confirm('Import a starting copy from ' + (seed.seededBy || 'a partner') + '?\n\nThis ADDS ' + newProps.length + ' farms, ' + newSites.length + ' spots, and ' + newTrails.length + ' trails to your map as your OWN editable copy. It does NOT touch anything you already have' + (skip ? (' (' + skip + ' already-present items skipped).') : '.'))){ continue; }
+        newProps.forEach(function(p){ properties.push(p); });
+        newSites.forEach(function(s){ sites.push(s); });
+        newTrails.forEach(function(t){ trails.push(t); });
+        for (var i=0;i<newProps.length;i++){ try{ await saveProperty(newProps[i]); }catch(e){ console.error('seed import: property', e); } }
+        for (var j=0;j<newSites.length;j++){ try{ await saveSite(newSites[j]); }catch(e){ console.error('seed import: site', e); } }
+        for (var k=0;k<newTrails.length;k++){ try{ await saveTrail(newTrails[k]); }catch(e){ console.error('seed import: trail', e); } }
+        try{ renderPropertySelect(); renderAll(); renderAllSavedTrails(); }catch(e){}
+        showToast('Starting copy imported — added ' + newProps.length + ' farms, ' + newSites.length + ' spots, ' + newTrails.length + ' trails.');
+      }
       document.getElementById('exportModalBackdrop').classList.remove('show');
-    }catch(e){ console.error('Outdoor Companion: seed import failed', e); alert('Could not read that Starting Copy file — it may be corrupted.'); }
+    }catch(e){ console.error('Outdoor Companion: import failed', e); alert('Could not read one of those files — it may be corrupted.'); }
     self.value='';
   });
 
