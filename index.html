@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 636</div>
+    <div id="buildBadge">BUILD 637</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5813,8 +5813,28 @@
       if ((p.ai.primarySpecies || '') === spF) return true;
       return Array.isArray(p.ai.allSpecies) && p.ai.allSpecies.indexOf(spF) !== -1;
     });
+    list = dedupePooledPhotos(list);   // Milestone E: one card per photo even if own + a teammate's copy overlap
     list.sort(function(a,b){ return sort === 'oldest' ? (a.timestamp||0)-(b.timestamp||0) : (b.timestamp||0)-(a.timestamp||0); });
     return list;
+  }
+  // ---------- Milestone E: duplicate-catcher (safe, exact-image, non-destructive) ----------
+  // If the SAME underlying photo shows up twice in the pooled view — e.g. your own copy AND a teammate's
+  // shared copy of the same shot — show it ONCE. "Same" = same content hash (the exact-bytes fingerprint we
+  // already compute at import) — zero risk of merging two genuinely different photos. Nothing is deleted;
+  // this only collapses the DISPLAY, keeping the richer copy (the one with AI tags / a buck link / a site).
+  // (The perceptual where+when+what layer, for re-compressed near-dups, is designed but deferred — it needs
+  // per-image processing that rarely earns its keep in a one-downloader workflow. See the blueprint.)
+  function dedupePooledPhotos(list){
+    var byHash = {}, out = [];
+    function richness(x){ return (x && x.ai ? 2 : 0) + ((x && photoBuckIds(x).length) ? 2 : 0) + (x && x.matchedSiteId ? 1 : 0); }
+    for (var i=0;i<list.length;i++){
+      var p = list[i], h = p && p.contentHash;
+      if (!h){ out.push(p); continue; }              // no fingerprint → can't be sure → keep it
+      if (!(h in byHash)){ byHash[h] = out.length; out.push(p); continue; }
+      var idx = byHash[h];                            // seen this exact image already — keep the richer one
+      if (richness(p) > richness(out[idx])) out[idx] = p;
+    }
+    return out;
   }
   function populateGalleryFilters(){
     var camSel = document.getElementById('galleryCameraFilter');
