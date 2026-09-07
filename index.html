@@ -2405,7 +2405,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 640</div>
+    <div id="buildBadge">BUILD 641</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -9763,7 +9763,7 @@
       container.appendChild(traySection('Catches', typeVisibleKeys(getActiveObsTypes()).map(trayObsRow)));
       return;
     }
-    container.appendChild(traySection('Stands & Cameras', [trayCamIconsRow()].concat(['camera','stand','access'].map(traySiteRow))));
+    container.appendChild(traySection('Stands & Cameras', [trayCamIconsRow()].concat(['camera','stand','access'].map(traySiteRow)).concat((sharedCameras && sharedCameras.length) ? [traySharedCamerasRow()] : [])));
     container.appendChild(traySection('Habitat', ['bedding','feeding','water'].map(traySiteRow)));
     container.appendChild(traySection('Sign &amp; Sightings', ['buck','doe','bear','turkey','scrape','rub','track','trail','hunt','custom'].map(trayObsRow)));
     container.appendChild(traySection('Other Markers', ['sighting','custom'].map(traySiteRow)));   // 'sighting' is retired (hidden) → only Custom Point shows
@@ -13578,7 +13578,7 @@
     });
   }
 
-  function renderAll(){ renderMarkers(); renderList(); if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries(); if (typeof renderLandcoverOverlay === 'function') renderLandcoverOverlay(); if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); }
+  function renderAll(){ renderMarkers(); renderList(); if (typeof renderPropertyBoundaries === 'function') renderPropertyBoundaries(); if (typeof renderLandcoverOverlay === 'function') renderLandcoverOverlay(); if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); if (typeof renderSharedCameras === 'function') renderSharedCameras(); }
   // ---------- 📷 Camera coverage map — "where am I blind?" ----------
   // Rings every spot a camera has SAT AND recorded photos in the last 3 months. The GAPS (uncircled ground
   // inside your property) are the parts of the farm with no recent surveillance — where to scout/deploy next.
@@ -13606,6 +13606,78 @@
     });
   }
   function clearCamPlanRings(){ cameraCoverageOn = false; if (typeof renderCameraCoverage === 'function') renderCameraCoverage(); }
+
+  // ================= Milestone G: Shared Cameras (a partner's cameras, on-demand) =================
+  // A partner's SHARED cameras — kept ENTIRELY separate from your own (never mixed into your camera list),
+  // read-only, and only shown when you flip the Right-Slider toggle. The point (founder): when placing a
+  // camera or reading coverage, see where a partner's cameras already are so you don't double-cover the same
+  // ground. Position comes from the shared DEPLOYMENT (which carries lat/lng and is shared with the farm) —
+  // so no dependency on the owner's site records, which a teammate doesn't have.
+  var sharedCameras = [], sharedDeployments = [];
+  var sharedCamLayer = null;
+  var sharedCamerasOn = (function(){ try { return localStorage.getItem('oc_shared_cams') === '1'; } catch(e){ return false; } })();
+  async function loadSharedCameras(){
+    sharedCameras = []; sharedDeployments = [];
+    if (!hasChatStorage || typeof firebase === 'undefined' || !firebase.auth || !firebase.auth().currentUser) return;
+    if (typeof myGroups === 'undefined' || !myGroups || !myGroups.length) return;
+    var db = firebase.firestore();
+    var myUid = firebase.auth().currentUser.uid;
+    var seenC = {}, seenD = {};
+    function pull(coll, into, seen){
+      var jobs = myGroups.map(function(g){
+        return db.collectionGroup(coll).where('sharedGroups', 'array-contains', g.id).get().then(function(qs){
+          qs.forEach(function(doc){
+            var owner = (doc.ref.parent && doc.ref.parent.parent) ? doc.ref.parent.parent.id : null;
+            if (!owner || owner === myUid || seen[doc.id]) return;   // mine or already have it
+            seen[doc.id] = true;
+            var d = doc.data() || {};
+            var raw = (typeof d.data === 'string') ? d.data : JSON.stringify(d);
+            var obj; try { obj = JSON.parse(raw); } catch(e){ obj = null; }
+            if (obj && typeof obj === 'object'){ obj.__ownerUid = owner; into.push(obj); }
+          });
+        }).catch(function(){ /* missing index / transient — degrade quietly */ });
+      });
+      return Promise.all(jobs);
+    }
+    try { await pull('cameras', sharedCameras, seenC); } catch(e){}
+    try { await pull('deployments', sharedDeployments, seenD); } catch(e){}
+  }
+  // A shared camera's current position = its most-recent shared deployment's coordinate.
+  function sharedCamPosition(c){
+    var deps = sharedDeployments.filter(function(d){ return d && d.cameraId === c.id && typeof d.lat === 'number'; });
+    if (!deps.length) return null;
+    deps.sort(function(a,b){ return (b.deployedAt || 0) - (a.deployedAt || 0); });
+    return { lat: deps[0].lat, lng: deps[0].lng };
+  }
+  function renderSharedCameras(){
+    if (!sharedCamLayer) sharedCamLayer = L.layerGroup();
+    sharedCamLayer.clearLayers();
+    if (!sharedCamerasOn){ if (map.hasLayer(sharedCamLayer)) map.removeLayer(sharedCamLayer); return; }
+    if (!map.hasLayer(sharedCamLayer)) sharedCamLayer.addTo(map);
+    (sharedCameras || []).forEach(function(c){
+      if (!c || !c.currentSiteId) return;                 // only ACTIVE (currently-deployed) cameras
+      var pos = sharedCamPosition(c); if (!pos) return;
+      var owner = (typeof photoOwnerName === 'function') ? photoOwnerName(c.__ownerUid) : 'a partner';
+      var icon = L.divIcon({ className: 'oc-shared-cam-pin', html: '<div style="width:24px;height:24px;border-radius:50%;background:#2f6d94;border:2px solid #9fd3ef;box-shadow:0 1px 4px rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-size:13px;">📷</div>', iconSize:[24,24], iconAnchor:[12,12] });
+      var m = L.marker([pos.lat, pos.lng], { icon: icon, zIndexOffset: -100 });
+      m.bindPopup('<div style="min-width:150px;"><b>📷 ' + escapeHtml(c.name || 'Camera') + '</b><br><span style="color:#5FB6E6;">🤝 Shared by ' + escapeHtml(owner) + '</span><br><span style="font-size:11px;color:#9db0a3;">A partner\'s camera — view only, so you can see their coverage.</span></div>');
+      m.addTo(sharedCamLayer);
+    });
+  }
+  function traySharedCamerasRow(){
+    var row = document.createElement('div');
+    row.className = 'toggle-row';
+    row.setAttribute('data-tray-toggle', 'shared-cameras');
+    row.innerHTML =
+      '<div class="toggle-row-label"><span style="display:inline-block;width:11px;text-align:center;">🤝</span> Partner\'s cameras</div>' +
+      '<div class="toggle-switch' + (sharedCamerasOn ? ' on' : '') + '"><div class="knob"></div></div>';
+    row.querySelector('.toggle-switch').addEventListener('click', function(){
+      sharedCamerasOn = !sharedCamerasOn;
+      try { localStorage.setItem('oc_shared_cams', sharedCamerasOn ? '1' : '0'); } catch(e){}
+      renderChips(); renderSharedCameras();
+    });
+    return row;
+  }
   // The catchment ring is the AREA OF DEER MOVEMENT a camera is likely sampling (founder's model: "deer in here
   // probably get caught; outside, maybe not") — NOT the lens field-of-view. It's bigger on ground that funnels
   // deer from a wide area (a field EDGE, an open field, a scrape/food site, a trail junction) and tighter in dead
@@ -19643,6 +19715,7 @@
     await loadBuckProfiles();
     await loadImportedPhotos();
     try { await loadSuggestions(); await loadSuggestionAcks(); } catch (e) {}
+    try { await loadSharedCameras(); } catch (e) {}   // Milestone G: a partner's shared cameras (self-guards if no group)
     renderAllSavedTrails();
     // If a hunt was left active from a previous session (app closed without tapping End
     // Hunt), pick that state back up rather than silently losing track of it.
@@ -20376,6 +20449,7 @@
     try { await loadBuckProfiles(); } catch (e) {}
     try { await loadSuggestions(); } catch (e) {}
     try { await loadSuggestionAcks(); } catch (e) {}
+    try { await loadSharedCameras(); } catch (e) {}   // Milestone G: a partner's shared cameras (separate list)
   }
 
   // F4 (2026-09-07): quiet auto-refresh of shared data when you return to the app tab — so a partner's
