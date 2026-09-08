@@ -2412,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 648</div>
+    <div id="buildBadge">BUILD 649</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3381,6 +3381,10 @@
     }),
     aerial: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 22,
+      // Esri's aerial imagery has real tiles only to ~z18 over rural land; past that it returned NOTHING and you
+      // saw the dark map background through the gap (a "black box" when zoomed in). maxNativeZoom makes Leaflet
+      // UPSCALE the last real tile instead — same fix already applied to the topo layers below.
+      maxNativeZoom: 18,
       attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
     }),
     // USGS Topo — official U.S. government topographic data (The National Map), public
