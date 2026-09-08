@@ -2412,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 645</div>
+    <div id="buildBadge">BUILD 646</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5374,12 +5374,20 @@
         var numMatch = cam.name ? cam.name.match(/\d+/) : null;
         var lens = numMatch ? numMatch[0] : (cam.name ? cam.name.replace(/[^A-Za-z0-9]/g, '').slice(0, 2).toUpperCase() : '');
         var lensFont = lens.length >= 2 ? 8 : 10;
+        // Colour the flag by owner, relative to whoever's signed in: YOUR OWN cameras stay blaze orange; a
+        // PARTNER'S (a teammate's, seen in the shared Camp view) turn blue — the same blue as the "Partner's
+        // cameras" layer. Both people number their cameras from 1, so without this a shared "Camera 1" is
+        // indistinguishable from your own "Camera 1" on the map.
+        var _cvUid = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+        var _camShared = !!(cam.__ownerUid && _cvUid && cam.__ownerUid !== _cvUid);
+        var _flagFill = _camShared ? '#2f6d94' : '#FF6A13';
+        var _lensText = _camShared ? '#cfeaf9' : '#FF6A13';
         var flag =
           '<div class="place-cam-flag"><svg class="cam-svg" width="36" height="30" viewBox="0 0 36 30" aria-hidden="true">' +
-            '<rect x="12" y="2" width="12" height="7" rx="2" fill="#FF6A13" stroke="#14201A" stroke-width="2"/>' +
-            '<rect x="1.5" y="7" width="33" height="21" rx="4" fill="#FF6A13" stroke="#14201A" stroke-width="2"/>' +
+            '<rect x="12" y="2" width="12" height="7" rx="2" fill="' + _flagFill + '" stroke="#14201A" stroke-width="2"/>' +
+            '<rect x="1.5" y="7" width="33" height="21" rx="4" fill="' + _flagFill + '" stroke="#14201A" stroke-width="2"/>' +
             '<circle cx="18" cy="18.5" r="6.5" fill="#14201A"/>' +
-            '<text x="18" y="21.7" text-anchor="middle" fill="#FF6A13" font-size="' + lensFont + '" font-weight="700" font-family="IBM Plex Mono,monospace">' + escapeHtml(lens) + '</text>' +
+            '<text x="18" y="21.7" text-anchor="middle" fill="' + _lensText + '" font-size="' + lensFont + '" font-weight="700" font-family="IBM Plex Mono,monospace">' + escapeHtml(lens) + '</text>' +
           '</svg></div>';
         return L.divIcon({
           className: '',
