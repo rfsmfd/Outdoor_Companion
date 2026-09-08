@@ -3,7 +3,7 @@
   "description": "Cloud Functions for Outdoor Companion (AI photo tagging)",
   "private": true,
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "main": "index.js",
   "dependencies": {
