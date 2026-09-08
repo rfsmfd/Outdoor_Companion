@@ -2412,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 650</div>
+    <div id="buildBadge">BUILD 651</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3381,10 +3381,12 @@
     }),
     aerial: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 22,
-      // Esri's aerial imagery has real tiles only to ~z18 over rural land; past that it returned NOTHING and you
-      // saw the dark map background through the gap (a "black box" when zoomed in). maxNativeZoom makes Leaflet
-      // UPSCALE the last real tile instead — same fix already applied to the topo layers below.
-      maxNativeZoom: 18,
+      maxNativeZoom: 19,   // Esri imagery is native to ~z19 here; upscale past that
+      zIndex: 2,
+      // Where Esri is missing a tile for a spot (a genuine hole in the FREE imagery, not a bug), a failed tile
+      // used to leave the dark map background showing = the "black box." Make failed tiles TRANSPARENT so the
+      // low-zoom fallback layer below shows soft imagery through the hole instead of a black gap.
+      errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
       attribution: 'Imagery &copy; Esri, Maxar, Earthstar Geographics'
     }),
     // USGS Topo — official U.S. government topographic data (The National Map), public
@@ -3408,6 +3410,19 @@
 
   baseLayers.aerial.addTo(map); // aerial default — best for precise pin placement
 
+  // Fallback aerial: the SAME imagery capped at a low native zoom (always present everywhere), sitting BENEATH
+  // the main aerial. Where the main aerial has a hole (a missing Esri tile → transparent via errorTileUrl above),
+  // this shows a soft, upscaled low-zoom tile through the gap instead of the dark "black box." Only present while
+  // aerial is the active base; hidden under Street/Topo.
+  var aerialFallback = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 22, maxNativeZoom: 13, zIndex: 1
+  });
+  function syncAerialFallback(){
+    if (currentBase === 'aerial'){ if (!map.hasLayer(aerialFallback)) aerialFallback.addTo(map); }
+    else if (map.hasLayer(aerialFallback)){ map.removeLayer(aerialFallback); }
+  }
+  aerialFallback.addTo(map); // aerial is the default base on load
+
   // Aerial imagery resolution genuinely varies by location — confirmed directly against
   // Esri's own service documentation: 0.5m resolution is the standard tier across the US,
   // with sharper imagery reserved for specific metropolitan areas. Rural land can run out
@@ -3423,7 +3438,8 @@
     tileErrorToastAt = now;
     showToast('No ' + layerLabel + ' imagery at this zoom for this location — try Street or USGS Topo, or zoom out slightly');
   }
-  baseLayers.aerial.on('tileerror', function(){ handleTileError('aerial'); });
+  // Aerial holes are now filled by the low-zoom fallback layer, so we no longer nag about them with a banner.
+  // (Street has no fallback, so keep its notice.)
   baseLayers.street.on('tileerror', function(){ handleTileError('street map'); });
 
   // Mobile browsers (especially iOS Safari) often finish resizing their address-bar
@@ -17428,6 +17444,7 @@
       map.removeLayer(baseLayers[currentBase]);
       baseLayers[layer].addTo(map);
       currentBase = layer;
+      syncAerialFallback();   // show the soft fallback under aerial; remove it under Street/Topo
       document.querySelectorAll('.layer-btn[data-layer]').forEach(function(b){ b.classList.remove('active'); });
       btn.classList.add('active');
       raiseOverlaysAndMarkers(); // keep roads overlay + site markers above the new base
