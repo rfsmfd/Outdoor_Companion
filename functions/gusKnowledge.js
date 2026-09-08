@@ -268,6 +268,14 @@ SHARE WITH YOUR CAMP (group sharing)
   photos — read-only.
 - Targeted and private by default: share only what you choose, to only the groups you choose;
   everything else stays private. Your camera LIST stays yours; the camp only sees shared data.
+- Onboard a partner fast: "Send a Starting Copy" hands them a copy of your map (properties, stands, trails —
+  not cameras/photos) to import as their own; then "Send to partner" pushes single changes (a moved stand, etc.)
+  so their copy stays current — without rebuilding anything.
+- Partner's cameras, both ways: a teammate's cameras show as a read-only "Partner's Cameras" panel in your
+  Cameras tab and as BLUE markers on the map (your own are orange). Sharing is two-way — each person shares
+  their farm to the camp for their stuff to reach the others.
+- Secret spots: mark any spot 🔒 secret to keep that pin (and its cameras/photos) off the shared camp even on a
+  shared farm — your honey hole stays yours.
 - Cross-member buck tracking: the same buck aggregates across everyone's cameras.
 - Camp buck sort: the whole camp sorts the pooled buck photos together.
 - Per-member permissions: each member is a Viewer, Suggester, or Editor, scoped by category,
@@ -402,7 +410,9 @@ missed one, close the Recap and tap the "+"). Then pick the stand + who sat it, 
 PRE-PICKED from how many deer you logged; tap another if it's off), answer Did you harvest? (None / 🎯 Buck / 🎯 Doe — pick Buck and it asks WHICH tagged
 buck), set shot opportunity + a note, Save. Keeping sightings on the "+" only means nothing gets double-counted.
 HOW TO log which buck (tagged buck): when you tap "+" -> Buck, a "Is it one of your tagged bucks?" row appears — tap his name to tie the sighting to him
-(lands on his timeline), or leave it blank for an unknown buck.
+(lands on his timeline), or leave it blank for an unknown buck. And when you tap an EXISTING sighting on the map to edit it, the buck list stays tucked
+behind a "🦌 Tag a buck" box (tagging's rare, so it's collapsed to keep the card short) — tap that box to open the buck list only when you want it; it shows
+"Tagged: <name>" once one's set.
 HOW TO open the Journal: LEFT PANEL -> "📋 Hunt Journal" (Fish Journal in fishing). Sessions group by
 day, newest first; use the All Time / This Week / This Month / Custom filters; tap a row to expand.
 HOW TO filter your map & lists by date: the four tabs (Sites / Log / Cameras / Analytics) sit like
@@ -422,8 +432,12 @@ TRAIL CAMERAS
 HOW TO register a camera — TWO ways (Cameras tab, one-time setup):
   • WITH a tag: tap "🏷 Scan Register" -> "📷 Scan a tag" (or point your phone's normal Camera app at the
     printed tag) -> fill Name/Make/Model/Notes -> Save. This ties that tag's number to the camera.
-  • WITHOUT a tag: tap "✍ Register by Hand" -> type the camera's name -> add make/model/notes -> Save. It
-    lands in your list ready to deploy — no decal needed.
+  • WITHOUT a tag: tap "✍ Register by Hand". A camera is just a NUMBER — it auto-fills the NEXT free number
+    (Camera 1, 2, 3…; you can type a different one, but it's DIGITS ONLY), Save. Then a little details screen lets
+    you add an optional Name (YOUR reference only — make/model, "flaky batteries"; it's never shown on the map),
+    plus make/model/notes. It won't let you reuse a number, so you can't end up with two "Camera 10." Think of it
+    this way: a CAMERA is a NUMBER (your gear, which moves around); the SITE it sits on carries the place-NAME. On
+    the map the icon shows just the number — YOUR cameras are orange, a partner's shared cameras are blue.
 Either way, once it's registered you never scan it again; you deploy from the list.
 HOW TO deploy a camera (the easy field way): Cameras tab -> find the camera in your list -> tap the
 green "📍 Deploy here". That's it — it grabs your GPS, drops the spot right where you're standing, and
@@ -456,6 +470,15 @@ HOW TO fix a camera's deploy date/time (adding yesterday's cameras today): Camer
 row -> "📅 Date" -> pick the real date and time it went out -> Save.
 HOW TO undeploy (pick up) a camera: Cameras tab -> the camera's row -> tap "Undeploy". One tap — it
 stamps the pickup date, frees the camera to redeploy, and keeps the spot on the map (no re-registration).
+HOW TO fix duplicate cameras (two "Camera 10"): if two of your cameras ever share a number, a ⚠ banner appears at
+the top of the Cameras tab — tap "Review & merge". It shows each copy with how many photos and deployments it holds
+and where it's deployed; tap "Keep this one" on the good one and the other folds into it (its photos + deployments
+move over, then the empty duplicate is removed). Your photos' sites and tags aren't touched. (Registering by
+number now prevents new duplicates.)
+HOW TO set up a camera on a spot in ONE tap: tap a camera SPOT on the map to open its popup -> "📷 Set up a camera
+here" (it shows on a camera spot of yours that has no camera on it yet). One tap registers the next numbered
+camera, deploys it right on that spot, and back-dates it to just before the first photo already there — handy for
+standing a spot up without walking through register -> deploy -> set-date one at a time.
 HOW TO see deployment history: Cameras tab -> the camera's row -> "📜 History" (date/GPS/weather/moon
 per spot, permanent); "View on Map" shows a dashed-yellow marker at that old spot.
 HOW TO batch-generate QR tags: Cameras tab -> "🏷 Scan Register" -> "🖶 Make QR tag sheet" (ONLY for
@@ -621,7 +644,29 @@ for private, "🤝 <group>" for the pooled camp set; "⚙ Group info & invite co
 HOW TO share a whole farm: be in a group, tap ⚙ by the Property dropdown -> Manage Properties -> on
 the farm tap "🤝 Share" -> pick the group -> confirm. Shares the whole farm (boundary/stands/trails/
 sightings/cameras/photos) read-only; new items auto-share. Only farms you share are visible; the rest
-stays private. Use "🔗 Attach inside" to pull in spots not yet linked to the farm.
+stays private. Use "🔗 Attach inside" to pull in spots not yet linked to the farm. IMPORTANT for two-way:
+sharing is per-person — for a PARTNER'S stuff to show up for YOU, THEY have to share their copy of that same
+farm to the camp from their side too. If a partner's cameras/photos aren't showing, that reverse share is
+usually the missing step.
+HOW TO give a partner a starting copy of your map (onboard them fast): Export -> "🤝 Set Up a Hunting Partner"
+-> "🤝 Send a Starting Copy". It saves a file of your properties, boundaries, stands, and trails (NOT cameras or
+photos). Your partner imports it on their side with "📥 Import a Starting Copy" and gets their OWN editable copy
+of the map — so they skip rebuilding your days of work. One-time snapshot; their map is theirs after.
+HOW TO send a partner a single change (a moved/renamed/added stand, trail, or farm): tap the item (a stand's
+popup, a trail's row, or a farm in Manage Properties) -> "🤝 Send to partner". It downloads a tiny change file;
+your partner imports it with the same "📥 Import a Starting Copy" button and it updates the matching item in
+place (never a duplicate), or removes it if you sent a deletion. You can pick several change files and import
+them all at once.
+HOW TO see a partner's cameras: the camp shares cameras both ways. A partner's cameras show up (1) as a
+read-only "🤝 Partner's Cameras" panel at the BOTTOM of your Cameras tab (blue 📷, each with "📍 Show on map"),
+and (2) on the map as BLUE camera markers when you flip on the "Partner's cameras" toggle in the Map Display
+tray. YOUR cameras stay orange, a partner's are blue — so overlapping numbers are easy to tell apart, and you
+can see where cameras already cover so you don't double up.
+HOW TO keep a spot SECRET (your honey hole): on a farm you share, tap the spot -> its popup -> "🔒 Keep this
+spot secret". That spot — plus any of your cameras/photos filed to it — drops off the shared camp even though
+the rest of the farm stays shared; only you see it (a 🔒 rides on the pin). Tap again to share it back. It hides
+the PIN; if a surveillance camera sits there, also don't share that camera through its vendor app. Works only
+for spots that are yours to hide.
 HOW TO set member permissions (owner): 👤 account menu -> the "📂 My data" scope dropdown -> the group -> "⚙ Group info…" -> a member's
 "⚙ Permissions" -> role Viewer / Suggester / Editor, tick which data types it covers, optionally
 "Allow AI matching" (billed to you), Save.
