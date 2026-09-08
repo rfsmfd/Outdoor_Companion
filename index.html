@@ -2412,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 647</div>
+    <div id="buildBadge">BUILD 648</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -15796,7 +15796,10 @@
   // tagging session on the board, any buck whose recent movement has shifted into daylight (state
   // 'heating') surfaces as a banner on the main screen; tap → straight to his card. Dismissible; a 🔔
   // re-opens it. IN-APP ONLY for now (real push/text waits on cellular-cam auto-ingest, so it can be timely).
-  var hbAlertDismissed = false;
+  // Start collapsed to just the 🔔 bell. The banner used to auto-pop at top-center over the map and STOLE taps
+  // on any marker beneath it (a bedding spot under it opened the Tagged Bucks list instead). Now it opens only
+  // when you tap the bell; the bell + its count is the proactive cue.
+  var hbAlertDismissed = true;
   function heatingBucks(){
     if (typeof buckProfiles === 'undefined' || !buckProfiles.length) return [];
     var out = [];
@@ -15850,7 +15853,7 @@
       rowEl.addEventListener('click', function(){ openBuckProfileById(rowEl.getAttribute('data-buck')); });
     });
   }
-  function refreshHuntAlerts(autoShow){ if (autoShow) hbAlertDismissed = false; renderHuntAlertBanner(); }
+  function refreshHuntAlerts(autoShow){ renderHuntAlertBanner(); }   // autoShow no longer force-opens the banner — the 🔔 bell (with its count) is the cue; the banner opens only when you tap the bell
   function openBuckProfileById(id){
     var banner = document.getElementById('huntAlertBanner'); if (banner) banner.style.display = 'none';
     hbAlertDismissed = true;
