@@ -2412,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 649</div>
+    <div id="buildBadge">BUILD 650</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -13838,10 +13838,18 @@
         '<label>Date & Time <span style="font-weight:400;color:var(--text-dim);">(when this actually happened — matters for accurate analytics)</span></label>' +
         '<input type="datetime-local" id="o_datetime" value="'+dateTimeToLocalInputValue(o.createdAt)+'" />' +
         '<div id="o_datetime_note" style="font-size:10.5px;color:var(--text-dim);margin-bottom:8px;"></div>' +
-        '<label>Buck Profile <span style="font-weight:400;color:var(--text-dim);">(optional — track this specific buck over time)</span></label>' +
-        '<div id="o_buckprofile_list"></div>' +
+        // Buck-tagging is RARE (most sightings never get one), and the candidate list grows without bound as you
+        // name more bucks — so it's COLLAPSED behind a one-line box. The basics show; tap "🦌 Tag a buck" to open
+        // the list only when you actually want to tag one. The tagged buck (if any) shows right on the box.
+        '<button class="btn-ghost" id="o_buckToggle" type="button" style="width:100%;text-align:left;font-size:12px;margin:2px 0 4px;display:flex;align-items:center;gap:6px;">' +
+          '<span>🦌</span><span id="o_buckToggleLabel" style="flex:1;">Tag a buck <span style="color:var(--text-dim);font-weight:400;">(optional)</span></span>' +
+          '<span id="o_buckToggleCaret" style="color:var(--text-dim);">▸</span>' +
+        '</button>' +
+        '<div id="o_buckWrap" style="display:none;">' +
+          '<div id="o_buckprofile_list"></div>' +
+          '<button class="btn-ghost" id="o_newbuckprofile_btn" type="button" style="width:100%;margin-top:6px;font-size:11px;">+ New Buck Profile</button>' +
+        '</div>' +
         '<input type="hidden" id="o_buckprofile" value="'+(o.buckProfileId || '')+'" />' +
-        '<button class="btn-ghost" id="o_newbuckprofile_btn" type="button" style="width:100%;margin-top:6px;font-size:11px;">+ New Buck Profile</button>' +
         (obsTypeMoves(o.type) ?
           '<label style="margin-top:8px;">Heading <span style="font-weight:400;color:var(--text-dim);">(optional — which way he was traveling)</span></label>' +
           '<div id="o_dir_chips" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px;">' +
@@ -14150,8 +14158,21 @@
       if (buckDistances.length === 0){
         listEl.innerHTML = '<div style="font-size:11px;color:var(--text-dim);padding:6px 0;">No buck profiles yet — create one below.</div>';
       }
+      // Show the tagged buck (if any) right on the collapsed box, so you can see it without expanding.
+      var _tgl = node.querySelector('#o_buckToggleLabel');
+      if (_tgl){
+        var _selB = selectedId ? buckProfiles.filter(function(b){ return b.id === selectedId; })[0] : null;
+        _tgl.innerHTML = _selB ? ('Tagged: ' + escapeHtml(_selB.name)) : ('Tag a buck <span style="color:var(--text-dim);font-weight:400;">(optional)</span>');
+      }
     }
     renderBuckCandidateList();
+    // The buck section starts COLLAPSED (tagging is the rare exception) — tap the box to expand the candidate list.
+    var _buckWrap = node.querySelector('#o_buckWrap');
+    var _buckCaret = node.querySelector('#o_buckToggleCaret');
+    function _setBuckExpanded(exp){ if (_buckWrap) _buckWrap.style.display = exp ? 'block' : 'none'; if (_buckCaret) _buckCaret.textContent = exp ? '▾' : '▸'; }
+    var _buckToggle = node.querySelector('#o_buckToggle');
+    if (_buckToggle) _buckToggle.addEventListener('click', function(){ _setBuckExpanded(_buckWrap && _buckWrap.style.display === 'none'); });
+    _setBuckExpanded(false);
 
     var newBuckProfileBtn = node.querySelector('#o_newbuckprofile_btn');
     if (newBuckProfileBtn) newBuckProfileBtn.addEventListener('click', async function(){
