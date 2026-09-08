@@ -2412,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 651</div>
+    <div id="buildBadge">BUILD 652</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -24153,6 +24153,7 @@
     document.getElementById('siteCount').textContent = mine.length + (mine.length===1 ? ' CAMERA' : ' CAMERAS');
     if (mine.length === 0){
       list.innerHTML = '<div class="empty">No cameras in your inventory yet.<br>Tap <strong>Batch Generate QR Codes</strong> to create printable tags, attach one to each camera, then tap <strong>Register / Edit Camera</strong> and scan a tag to fill in its make, model, and details.</div>';
+      appendSharedCameraSection(list);   // still show a partner's shared cameras even if you have none of your own
       return;
     }
     list.innerHTML = '';
@@ -24289,6 +24290,43 @@
 
       row.querySelector('[data-act="delete-cam"]').addEventListener('click', function(){
         deleteCameraFlow(cam.id);
+      });
+    });
+    appendSharedCameraSection(list);   // G: a partner's shared cameras, read-only, in their own panel below yours
+  }
+
+  // Partner's Cameras — a READ-ONLY panel of teammates' shared cameras, kept SEPARATE from your own inventory
+  // (founder's G ask: see them in the Cameras tab without cluttering your deploy/not-deployed list). Only shows if
+  // something is actually shared with you. "📍 Show on map" turns on the blue shared-camera layer and flies to it.
+  function appendSharedCameraSection(listEl){
+    if (typeof sharedCameras === 'undefined' || !sharedCameras || !sharedCameras.length) return;
+    var hdr = document.createElement('div');
+    hdr.style.cssText = 'margin:16px 0 8px;padding-top:12px;border-top:1px solid var(--line);font-size:13px;font-weight:700;color:#5FB6E6;';
+    hdr.innerHTML = '🤝 Partner’s Cameras <span style="font-weight:400;color:var(--text-dim);">(' + sharedCameras.length + ' shared · view only)</span>';
+    listEl.appendChild(hdr);
+    sharedCameras.slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||'', undefined, {numeric:true, sensitivity:'base'}); }).forEach(function(sc){
+      var owner = (typeof photoOwnerName === 'function') ? photoOwnerName(sc.__ownerUid) : 'a partner';
+      var pos = (typeof sharedCamPosition === 'function') ? sharedCamPosition(sc) : null;
+      var siteM = sc.currentSiteId ? sites.filter(function(s){ return s.id === sc.currentSiteId; })[0] : null;
+      var where = sc.currentSiteId ? ('Deployed' + (siteM ? ' at ' + escapeHtml(siteM.name) : '')) : 'Not deployed';
+      var row = document.createElement('div');
+      row.className = 'cam-row';
+      row.innerHTML =
+        '<div class="cam-qr-thumb" style="background:#2f6d94;border:2px solid #9fd3ef;display:flex;align-items:center;justify-content:center;font-size:15px;color:#eaf6ff;">📷</div>' +
+        '<div class="cam-meta">' +
+          '<div class="nm">'+escapeHtml(sc.name || 'Camera')+' <span style="font-size:10px;font-weight:600;color:#5FB6E6;">🤝 '+escapeHtml(owner)+'</span></div>' +
+          '<div class="st'+(sc.currentSiteId?' deployed':'')+'">'+where+' · view only</div>' +
+        '</div>' +
+        '<div class="cam-actions">' +
+          (pos ? '<button class="btn-ghost" data-act="show-shared-cam" style="background:#243b52;color:#dbeafe;border-color:#2f5573;">📍 Show on map</button>' : '') +
+        '</div>';
+      listEl.appendChild(row);
+      var showBtn = row.querySelector('[data-act="show-shared-cam"]');
+      if (showBtn && pos) showBtn.addEventListener('click', function(){
+        if (typeof sharedCamerasOn !== 'undefined' && !sharedCamerasOn){ sharedCamerasOn = true; try{ localStorage.setItem('oc_shared_cams','1'); }catch(e){} }
+        if (typeof renderSharedCameras === 'function') renderSharedCameras();
+        try{ map.setView([pos.lat, pos.lng], Math.max(map.getZoom(), 16)); }catch(e){}
+        if (window.innerWidth <= 820 && typeof closeSidebar === 'function') closeSidebar();
       });
     });
   }
