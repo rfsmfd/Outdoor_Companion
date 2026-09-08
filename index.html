@@ -2412,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 646</div>
+    <div id="buildBadge">BUILD 647</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -5342,6 +5342,9 @@
     var t = getActiveTypes()[type] || getFallbackTypeEntry(false);
     // Gold "buck here" ring for any spot that's produced a buck (sighting or buck-tagged photo).
     var buckRing = (siteId && typeof _buckSites !== 'undefined' && _buckSites[siteId]) ? 'box-shadow:0 0 0 3px #E0B23A,0 0 8px 2px rgba(224,178,58,.55);' : '';
+    // Secret spot → a 🔒 rides on its label so YOU can see at a glance which spots you're keeping off the camp.
+    // (Secret spots are unshared, so a teammate never loads one — this lock only ever shows on the owner's own map.)
+    if (siteId && siteName){ var _secSite = sites.filter(function(x){ return x.id === siteId; })[0]; if (_secSite && _secSite.secret) siteName = '🔒 ' + siteName; }
     // Scout mark — a conjecture pin on the markup board. DASHED purple = unproven; SOLID = verified. Distinct
     // per-kind glyph so a "possible stand" never reads like a real stand until you graduate it.
     if (type === 'scout'){
@@ -12733,7 +12736,9 @@
         '<button class="btn-ghost" data-act="delete" data-id="'+s.id+'">Delete</button>' +
       '</div>' +
       // Send-a-change (Milestone D): push this spot's current state to a partner's copy (independent maps).
-      (myGroups.length ? '<button class="btn-ghost" data-act="sendpartner" data-id="'+s.id+'" style="width:100%;margin-top:4px;font-size:11px;background:#243b52;color:#dbeafe;border-color:#2f5573;">🤝 Send this spot to a partner</button>' : '');
+      (myGroups.length ? '<button class="btn-ghost" data-act="sendpartner" data-id="'+s.id+'" style="width:100%;margin-top:4px;font-size:11px;background:#243b52;color:#dbeafe;border-color:#2f5573;">🤝 Send this spot to a partner</button>' : '') +
+      // Secret spot: keep this pin (and anything filed to it) off the shared camp, even on a shared farm.
+      (myGroups.length ? '<button class="btn-ghost" data-act="togglesecret" data-id="'+s.id+'" style="width:100%;margin-top:4px;font-size:11px;' + (s.secret ? 'background:#3a2444;color:#efe0f7;border-color:#6b4a7a;' : '') + '">' + (s.secret ? '🔒 Secret — hidden from the camp (tap to share it)' : '🔒 Keep this spot secret') + '</button>' : '');
     }
     // One-tap "see this spot's photos" straight from the map — opens the gallery filtered to here.
     var photoCount = importedPhotos.filter(function(p){ return p.matchedSiteId === s.id; }).length;
@@ -12786,7 +12791,7 @@
       : '';
     return '' +
       '<div class="pop">' +
-        '<h3>'+escapeHtml(s.name)+'</h3>' +
+        '<h3>'+(s.secret?'🔒 ':'')+escapeHtml(s.name)+'</h3>' +
         '<div class="ty" style="color:'+t.color+'">'+t.label+'</div>' +
         camInfo +
         scoutInfo +
@@ -12920,6 +12925,8 @@
     });
     var setupCamActBtn = node.querySelector('[data-act="setupcam"]');
     if (setupCamActBtn) setupCamActBtn.addEventListener('click', function(){ map.closePopup(); setupCameraOnSite(id); });
+    var secretActBtn = node.querySelector('[data-act="togglesecret"]');
+    if (secretActBtn) secretActBtn.addEventListener('click', function(){ map.closePopup(); toggleSiteSecret(id); });
     var shareBtn = node.querySelector('[data-act="share"]');
     if (shareBtn) shareBtn.addEventListener('click', function(){
       var s = sites.filter(function(x){ return x.id === id; })[0];
@@ -20367,7 +20374,9 @@
   async function sharePropertyFlow(prop){
     if (!myGroups.length){ showToast('Create or join a group first, then you can share a farm.'); return; }
     var pid = prop.id, current = {}; (prop.__sharedGroups || []).forEach(function(g){ current[g] = true; });
-    var siteKeys = sites.filter(function(s){ return s.propertyId === pid; });
+    // 🔒 Secret spots are excluded from the farm share — and because everything else keys off this list
+    // (cameras/deployments/photos are filtered by farmSiteIds below), a secret spot's stuff drops out too.
+    var siteKeys = sites.filter(function(s){ return s.propertyId === pid && !s.secret; });
     var obsKeys = (typeof observations !== 'undefined' ? observations : []).filter(function(o){ return o.propertyId === pid; });
     // Trails don't always carry a propertyId — also grab any whose path runs inside this farm's boundary.
     var trailKeys = (typeof trails !== 'undefined' ? trails : []).filter(function(t){
@@ -20435,10 +20444,61 @@
       } catch (e){ alert('Could not share the farm:\n' + ((e && e.message) || e)); this.disabled = false; this.textContent = 'Share'; }
     });
   }
+  // ---------- Secret spots ----------
+  // Mark a spot 🔒 secret to keep it (and its cameras/deployments/photos) OFF the shared camp, even on a farm
+  // you otherwise share. It's a per-spot privacy override — the pin stays only in your My Data. Reversible.
+  function itemTiedToSecretSite(prefix, id){
+    var sid = null;
+    if (prefix === 'site'){ var s0 = sites.filter(function(x){ return x.id === id; })[0]; return !!(s0 && s0.secret); }
+    else if (prefix === 'cam'){ var c0 = cameras.filter(function(x){ return x.id === id; })[0]; sid = c0 && c0.currentSiteId; }
+    else if (prefix === 'dep'){ var d0 = deployments.filter(function(x){ return x.id === id; })[0]; sid = d0 && d0.siteId; }
+    else if (prefix === 'photo'){ var p0 = importedPhotos.filter(function(x){ return x.id === id; })[0]; sid = p0 && p0.matchedSiteId; }
+    if (!sid) return false;
+    var s1 = sites.filter(function(x){ return x.id === sid; })[0];
+    return !!(s1 && s1.secret);
+  }
+  // Every sharing key tied to a spot — the pin plus MY cameras/deployments/photos filed to it — so hiding or
+  // restoring the spot moves them together (a still-shared camera or photo would otherwise reveal the location).
+  function siteShareKeys(s){
+    var _u = (typeof firebase !== 'undefined' && firebase.auth && firebase.auth().currentUser) ? firebase.auth().currentUser.uid : null;
+    var mine = function(r){ return !r.__ownerUid || r.__ownerUid === _u; };
+    var keys = ['site:' + s.id];
+    cameras.forEach(function(c){ if (c.currentSiteId === s.id && mine(c)) keys.push('cam:' + c.id); });
+    deployments.forEach(function(d){ if (d.siteId === s.id) keys.push('dep:' + d.id); });
+    importedPhotos.forEach(function(p){ if (p.matchedSiteId === s.id && mine(p)) keys.push('photo:' + p.id); });
+    return keys;
+  }
+  async function toggleSiteSecret(id){
+    var s = sites.filter(function(x){ return x.id === id; })[0];
+    if (!s) return;
+    var makingSecret = !s.secret;
+    s.secret = makingSecret;
+    try{ await saveSite(s); }catch(e){ console.error('Outdoor Companion: save secret flag failed', e); }
+    if (window.storage && typeof window.storage.setSharing === 'function'){
+      var keys = siteShareKeys(s);
+      if (makingSecret){
+        // Pull the spot + everything filed to it off every camp it was on.
+        try{ await bulkSetSharing(keys, []); }catch(e){ console.error('Outdoor Companion: unshare secret spot failed', e); }
+        s.__sharedGroups = [];
+        try{ await saveSite(s); }catch(e){}
+      } else {
+        // No longer secret → if its farm is shared, put the spot (and its stuff) back on that camp.
+        var prop = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === s.propertyId; })[0];
+        var groups = (prop && prop.__sharedGroups) || [];
+        if (groups.length){ try{ await bulkSetSharing(keys, groups); }catch(e){ console.error('Outdoor Companion: reshare spot failed', e); } s.__sharedGroups = groups.slice(); try{ await saveSite(s); }catch(e){} }
+      }
+    }
+    map.closePopup(); renderAll();
+    showToast(makingSecret
+      ? '🔒 "' + (s.name || 'Spot') + '" is now secret — hidden from the camp'
+      : '🔓 "' + (s.name || 'Spot') + '" is no longer secret');
+  }
+
   // When a NEW record lands on a farm that's already shared, it inherits that farm's groups —
   // so a stand or catch you add later shows up for the group without re-sharing the whole farm.
   async function autoShareToPropertyGroups(prefix, id, propertyId){
     if (!propertyId || !id || !window.storage || typeof window.storage.setSharing !== 'function') return;
+    if (itemTiedToSecretSite(prefix, id)) return;   // never auto-share a secret spot (or its cameras/photos)
     var prop = (typeof properties !== 'undefined' ? properties : []).filter(function(p){ return p.id === propertyId; })[0];
     var groups = prop && prop.__sharedGroups;
     if (!groups || !groups.length) return;
