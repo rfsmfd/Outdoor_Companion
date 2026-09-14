@@ -2412,7 +2412,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 652</div>
+    <div id="buildBadge">BUILD 653</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8830,6 +8830,130 @@
     renderAll();
   }
 
+  // ==================================================================================
+  // OFFLINE-FIRST SYNC (field-critical records work with NO signal, sync on reconnect)
+  // ----------------------------------------------------------------------------------
+  // The field bug (2026-09-13): a trip's Start/End (and Quick Log) awaited a CLOUD write before the button did
+  // anything — weak signal froze the button — and when signed in the ONLY copy was the cloud, so a save that
+  // didn't reach the server before signal sagged was lost on refresh. Fix: for the field-critical collections we
+  // write the PHONE copy first (instant, durable, works with no bars), fire the cloud write in the BACKGROUND,
+  // and re-push anything unsynced when signal returns. The reconcile core below is unit-tested
+  // (scratchpad/reconcile_test.js) against every data-loss branch. Photos are excluded (large; a home task).
+  var OC_UNSYNCED_KEY  = 'oc_sync_pending_v1';   // { 'obs:id': ts } — writes not yet confirmed in the cloud
+  var OC_TOMBSTONE_KEY = 'oc_sync_deleted_v1';   // { 'hunt:id': ts } — deletes not yet confirmed in the cloud
+  function ocReadMap(k){ try{ return JSON.parse(localStorage.getItem(k) || '{}') || {}; }catch(e){ return {}; } }
+  function ocWriteMap(k,m){ try{ localStorage.setItem(k, JSON.stringify(m)); }catch(e){} }
+  function ocMarkPending(key){ var m=ocReadMap(OC_UNSYNCED_KEY); m[key]=Date.now(); ocWriteMap(OC_UNSYNCED_KEY,m); }
+  function ocClearPending(key){ var m=ocReadMap(OC_UNSYNCED_KEY); if(m[key]!=null){ delete m[key]; ocWriteMap(OC_UNSYNCED_KEY,m); } }
+  function ocMarkTombstone(key){ var m=ocReadMap(OC_TOMBSTONE_KEY); m[key]=Date.now(); ocWriteMap(OC_TOMBSTONE_KEY,m); ocClearPending(key); }
+  function ocClearTombstone(key){ var m=ocReadMap(OC_TOMBSTONE_KEY); if(m[key]!=null){ delete m[key]; ocWriteMap(OC_TOMBSTONE_KEY,m); } }
+  function ocInGroupScope(){ return (typeof activeScope!=='undefined' && activeScope && activeScope.type==='group'); }
+  // The field-critical collections' local stores, resolved at call time (helpers are hoisted).
+  function ocFieldStores(){
+    return {
+      obs:   { load: obsLocalLoadAll,   save: obsLocalSaveAll },
+      hunt:  { load: huntLocalLoadAll,  save: huntLocalSaveAll }
+      // site/dep/cam/trail added after the obs+hunt engine is proven on the phone.
+    };
+  }
+  // PURE reconcile — mirrored exactly in scratchpad/reconcile_test.js (14/14). cloud=null means the fetch threw
+  // (hard offline). Returns { records, writeLocal } (writeLocal null = leave the phone copy alone).
+  function reconcileLoad(prefix, cloud, localArr, pendingMap, tombstoneMap, online){
+    function key(id){ return prefix + ':' + id; }
+    function tomb(id){ return tombstoneMap[key(id)] != null; }
+    function pend(id){ return pendingMap[key(id)] != null; }
+    localArr = localArr || [];
+    if (cloud === null){
+      return { records: dedupeById(localArr).filter(function(x){ return !tomb(x.id); }), writeLocal: null };
+    }
+    var confident = (cloud.length > 0) || online === true;
+    if (!confident){
+      return { records: dedupeById(localArr).filter(function(x){ return !tomb(x.id); }), writeLocal: null };
+    }
+    var byId = {};
+    cloud.forEach(function(c){ if (c && c.id!=null && !tomb(c.id)) byId[c.id] = c; });
+    localArr.forEach(function(l){
+      if (l && l.id!=null && pend(l.id) && !tomb(l.id)){
+        if (!byId[l.id] || (l.updatedAt||0) >= (byId[l.id].updatedAt||0)) byId[l.id] = l;
+      }
+    });
+    var records = dedupeById(Object.keys(byId).map(function(k){ return byId[k]; }));
+    return { records: records, writeLocal: records };
+  }
+  // Save a field-critical record LOCAL-FIRST: phone copy now (never blocks), cloud in the background.
+  function saveFieldRecordLocalFirst(prefix, rec, load, save){
+    rec.updatedAt = Date.now();
+    var all = load();
+    var idx = all.findIndex(function(x){ return x.id === rec.id; });
+    if (idx >= 0) all[idx] = rec; else all.push(rec);
+    save(all);                                  // phone copy first — always, even signed in
+    var key = prefix + ':' + rec.id;
+    ocClearTombstone(key);                       // (re)creating cancels a pending delete
+    if (hasChatStorage && !ocInGroupScope()){
+      ocMarkPending(key);
+      window.storage.set(key, JSON.stringify(rec), false)
+        .then(function(){ ocClearPending(key); })
+        .catch(function(e){ console.warn('OC offline: cloud save queued for reconnect —', key, e && e.message); });
+    }
+  }
+  // Delete a field-critical record LOCAL-FIRST: drop the phone copy now, delete from cloud in the background.
+  function deleteFieldRecordLocalFirst(prefix, id, load, save){
+    save(load().filter(function(x){ return x.id !== id; }));
+    var key = prefix + ':' + id;
+    if (hasChatStorage && !ocInGroupScope()){
+      ocMarkTombstone(key);
+      window.storage.delete(key, false)
+        .then(function(){ ocClearTombstone(key); })
+        .catch(function(e){ console.warn('OC offline: cloud delete queued for reconnect —', key, e && e.message); });
+    }
+  }
+  // Load a field-critical collection offline-first. Group scope = shared/online data (no personal mirror).
+  async function loadFieldRecordsLocalFirst(prefix, load, save){
+    if (hasChatStorage && ocInGroupScope()){
+      try{
+        var gres = await window.storage.list(prefix+':', false); var gk = (gres&&gres.keys)?gres.keys:[]; var gout=[];
+        for (var gi=0; gi<gk.length; gi++){ try{ var gr = await window.storage.get(gk[gi], false); if (gr && gr.value) gout.push(JSON.parse(gr.value)); }catch(e){} }
+        return dedupeById(gout);
+      }catch(e){ return []; }
+    }
+    if (!hasChatStorage){ return dedupeById(load()); }
+    var cloud = null;
+    try{
+      var res = await window.storage.list(prefix+':', false); var keys = (res&&res.keys)?res.keys:[]; cloud = [];
+      for (var i=0;i<keys.length;i++){ try{ var r = await window.storage.get(keys[i], false); if (r && r.value) cloud.push(JSON.parse(r.value)); }catch(e){} }
+    }catch(e){ cloud = null; }   // fetch threw → hard offline
+    var online = (typeof navigator==='undefined') || navigator.onLine !== false;
+    var rc = reconcileLoad(prefix, cloud, load(), ocReadMap(OC_UNSYNCED_KEY), ocReadMap(OC_TOMBSTONE_KEY), online);
+    if (rc.writeLocal){ try{ save(rc.writeLocal); }catch(e){} }
+    if (cloud !== null){ try{ flushSyncQueue(); }catch(e){} }   // we reached the cloud → push anything queued
+    return rc.records;
+  }
+  // Re-push everything the phone saved/deleted while offline. Runs on 'online' and after any successful cloud load.
+  // USER scope only — the queued keys are the signed-in user's own records (never a group's).
+  var _ocFlushing = false;
+  function flushSyncQueue(){
+    if (!hasChatStorage || ocInGroupScope() || _ocFlushing) return;
+    if (typeof navigator!=='undefined' && navigator.onLine === false) return;
+    _ocFlushing = true;
+    try{
+      var stores = ocFieldStores();
+      var pending = ocReadMap(OC_UNSYNCED_KEY);
+      Object.keys(pending).forEach(function(key){
+        var pfx = key.split(':')[0], id = key.slice(pfx.length+1);
+        var st = stores[pfx]; if (!st){ return; }   // not a managed collection → leave it
+        var rec = st.load().filter(function(x){ return x.id === id; })[0];
+        if (!rec){ ocClearPending(key); return; }   // gone locally → nothing to push
+        window.storage.set(key, JSON.stringify(rec), false).then(function(){ ocClearPending(key); }).catch(function(){});
+      });
+      var tombs = ocReadMap(OC_TOMBSTONE_KEY);
+      Object.keys(tombs).forEach(function(key){
+        var pfx2 = key.split(':')[0]; if (!ocFieldStores()[pfx2]) return;
+        window.storage.delete(key, false).then(function(){ ocClearTombstone(key); }).catch(function(){});
+      });
+    } finally { _ocFlushing = false; }
+  }
+  try{ if (typeof window !== 'undefined') window.addEventListener('online', function(){ try{ flushSyncQueue(); }catch(e){} }); }catch(e){}
+
   async function saveSite(site){
     if (hasChatStorage){
       await window.storage.set('site:'+site.id, JSON.stringify(site), false);
@@ -8862,45 +8986,27 @@
   }
 
   async function loadObservations(){
-    if (hasChatStorage){
-      try{
-        var res = await window.storage.list('obs:', false);
-        var keys = (res && res.keys) ? res.keys : [];
-        var loaded = [];
-        for (var i=0;i<keys.length;i++){
-          try{
-            var r = await window.storage.get(keys[i], false);
-            if (r && r.value) loaded.push(JSON.parse(r.value));
-          }catch(e){}
-        }
-        observations = dedupeById(loaded);
-      }catch(e){
-        observations = [];
-      }
-    } else {
-      observations = dedupeById(obsLocalLoadAll());
-    }
+    // Offline-first: shows the phone copy with no signal, reconciles with the cloud when reachable (group scope
+    // = shared/online data, handled inside the helper).
+    observations = await loadFieldRecordsLocalFirst('obs', obsLocalLoadAll, obsLocalSaveAll);
     renderObsMarkers();
     if (activeTab === 'log') renderLogList();
   }
 
   async function saveObservation(obs){
-    if (hasChatStorage){
-      await window.storage.set('obs:'+obs.id, JSON.stringify(obs), false);
-    } else {
-      var all = obsLocalLoadAll();
-      var idx = all.findIndex(function(o){ return o.id === obs.id; });
-      if (idx >= 0) all[idx] = obs; else all.push(obs);
-      obsLocalSaveAll(all);
+    if (hasChatStorage && ocInGroupScope()){
+      // group scope: a teammate's shared sighting → keep the online owner-routing path (not a personal record)
+      try{ await window.storage.set('obs:'+obs.id, JSON.stringify(obs), false); }catch(e){ console.error('Outdoor Companion: obs cloud save failed', e); }
+      return;
     }
+    saveFieldRecordLocalFirst('obs', obs, obsLocalLoadAll, obsLocalSaveAll);   // phone-first, cloud in background
   }
   async function deleteObservationStorage(id){
-    if (hasChatStorage){
+    if (hasChatStorage && ocInGroupScope()){
       try{ await window.storage.delete('obs:'+id, false); }catch(e){}
-    } else {
-      var all = obsLocalLoadAll().filter(function(o){ return o.id !== id; });
-      obsLocalSaveAll(all);
+      return;
     }
+    deleteFieldRecordLocalFirst('obs', id, obsLocalLoadAll, obsLocalSaveAll);
   }
 
   async function removeObservation(id){
@@ -9230,29 +9336,14 @@
     try{ window.localStorage.setItem(HUNT_LS_KEY, JSON.stringify(list)); }catch(e){}
   }
   async function loadHuntEvents(){
-    if (hasChatStorage){
-      try{
-        var res = await window.storage.list('hunt:', false);
-        var keys = (res && res.keys) ? res.keys : [];
-        var loaded = [];
-        for (var i=0;i<keys.length;i++){
-          try{ var r = await window.storage.get(keys[i], false); if (r && r.value) loaded.push(JSON.parse(r.value)); }catch(e){}
-        }
-        huntEvents = dedupeById(loaded);
-      }catch(e){ huntEvents = []; }
-    } else {
-      huntEvents = dedupeById(huntLocalLoadAll());
-    }
+    huntEvents = await loadFieldRecordsLocalFirst('hunt', huntLocalLoadAll, huntLocalSaveAll);
   }
   async function saveHuntEvent(hunt){
-    if (hasChatStorage){
-      await window.storage.set('hunt:'+hunt.id, JSON.stringify(hunt), false);
-    } else {
-      var all = huntLocalLoadAll();
-      var idx = all.findIndex(function(h){ return h.id === hunt.id; });
-      if (idx >= 0) all[idx] = hunt; else all.push(hunt);
-      huntLocalSaveAll(all);
+    if (hasChatStorage && ocInGroupScope()){
+      try{ await window.storage.set('hunt:'+hunt.id, JSON.stringify(hunt), false); }catch(e){ console.error('Outdoor Companion: hunt cloud save failed', e); }
+      return;
     }
+    saveFieldRecordLocalFirst('hunt', hunt, huntLocalLoadAll, huntLocalSaveAll);   // phone-first, cloud in background
   }
 
   function camLocalLoadAll(){
@@ -18091,10 +18182,10 @@
       observationIds: []
     };
     huntEvents.push(hunt);
-    try{ await saveHuntEvent(hunt); }catch(e){ console.error('Outdoor Companion: failed to save hunt event', e); }
     activeHuntId = hunt.id;
-    updateActiveHuntBar();
+    updateActiveHuntBar();                 // show the timer INSTANTLY — never wait on the network
     showToast((activeModule === 'fishing' ? 'Trip' : 'Hunt') + ' started' + (match ? ' at ' + match.site.name : ''));
+    saveHuntEvent(hunt);                   // phone copy first + cloud in the background (weak-signal safe)
 
     fetchCurrentWeather(lat, lng).then(async function(weatherResult){
       var liveHunt = huntEvents.filter(function(h){ return h.id === hunt.id; })[0];
@@ -18110,10 +18201,10 @@
     var hunt = huntEvents.filter(function(h){ return h.id === activeHuntId; })[0];
     if (!hunt) { activeHuntId = null; updateActiveHuntBar(); return; }
     hunt.checkOutAt = Date.now();
-    try{ await saveHuntEvent(hunt); }catch(e){ console.error('Outdoor Companion: failed to save hunt checkout', e); }
-    var duration = fmtHuntDuration(hunt.checkInAt, hunt.checkOutAt);
     activeHuntId = null;
-    updateActiveHuntBar();
+    updateActiveHuntBar();                 // end the timer INSTANTLY — the End button never hangs on signal
+    saveHuntEvent(hunt);                   // phone copy first + cloud in the background
+    var duration = fmtHuntDuration(hunt.checkInAt, hunt.checkOutAt);
     var endEventNoun = activeModule === 'fishing' ? 'catch' : 'sighting';
     showToast((activeModule === 'fishing' ? 'Trip' : 'Hunt') + ' ended · ' + duration + ' · ' + hunt.observationIds.length + ' ' + pluralizeEventNoun(hunt.observationIds.length, endEventNoun));
     if (activeModule === 'hunting') showSitLog(hunt);   // close the loop: log what the sit produced → feeds the ranking
@@ -21564,7 +21655,15 @@
       initLoadAndUrlCheck();
       return;
     }
-    try{ firebase.firestore().enablePersistence({ synchronizeTabs: true }).catch(function(){}); }catch(e){}
+    // Firestore's own offline cache — a BONUS on top of our local-first mirror, not what we bet a trip on.
+    // Un-silenced (was swallowing the reason): if it fails on this device we record WHY, so it's never an
+    // invisible assumption again. window.__ocPersist is readable from the console / owner tools for diagnosis.
+    try{
+      window.__ocPersist = 'enabling';
+      firebase.firestore().enablePersistence({ synchronizeTabs: true })
+        .then(function(){ window.__ocPersist = 'on'; })
+        .catch(function(err){ window.__ocPersist = 'OFF: ' + ((err && err.code) || (err && err.message) || err); try{ console.warn('OC: Firestore offline cache OFF —', window.__ocPersist); }catch(e){} });
+    }catch(e){ window.__ocPersist = 'threw: ' + (e && e.message); }
     // Pin auth to LOCAL persistence explicitly (survive reloads/closes). Relying on the default was
     // letting the session drop on some setups — a reload would then bounce to the login screen.
     try{ firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){}); }catch(e){}
