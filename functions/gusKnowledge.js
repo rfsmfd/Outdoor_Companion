@@ -403,7 +403,11 @@ HOW TO mark travel direction: for a Buck/Doe/Bear/Turkey, tap a compass chip in 
 way?" row on Confirm Location — the pin gets a heading arrow.
 HOW TO start/end a Hunt or Trip: tap the "🏹 Start Hunt" pill at the top-center of the map (🎣 Start
 Trip in fishing); confirm the property if asked; a live bar tracks time + count; tap "End Hunt" to
-finish (a summary toast shows).
+finish (a summary toast shows). If the app doesn't recognize the spot you're standing on (common on a
+small pond with no drawn boundary, or when GPS drifts), the "New Lake/Property" window now opens with a
+"Already saved it? Pick it here:" drop-down at the top listing your saved lakes/farms — pick the right
+one and tap "Start here" to start the trip THERE (no duplicate created). Only fill the name box below
+and tap "Save & Start" when it truly is a brand-new spot; "Skip for now" starts with no property.
 HOW TO do the End-of-Hunt Recap (formerly "Log a Sit"): tap "End Hunt" (the sheet auto-pops) or LEFT PANEL -> open "🎯 Hunt" -> "📓 End-of-Hunt Recap".
 The top shows a READ-ONLY tally of what you logged this sit — you do NOT add sightings here (log every animal in the moment with the orange "+"; if you
 missed one, close the Recap and tap the "+"). Then pick the stand + who sat it, confirm the movement rating (💤 Dead / 🐾 Slow / 🦌 Steady / 🔥 Hot — it's
