@@ -2413,7 +2413,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 655</div>
+    <div id="buildBadge">BUILD 656</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -8995,7 +8995,62 @@
       });
     } finally { _ocFlushing = false; }
   }
-  try{ if (typeof window !== 'undefined') window.addEventListener('online', function(){ try{ flushSyncQueue(); }catch(e){} }); }catch(e){}
+  // ---------- Weather backfill for records logged offline ----------
+  // A trip/catch/sighting logged with no signal saves instantly, but its one-shot weather fetch
+  // fails offline, leaving weatherStatus 'pending'/'unavailable' with no weather — and NOTHING
+  // retried it when signal returned, so the record stayed blank forever (founder hit exactly this
+  // on a pond trip: "when reception was regained the catch and trip weather did not update").
+  // This re-fetches weather for the ACTUAL TIME of each such record via the recent-forecast/archive
+  // endpoint (fetchHistoricalWeather picks the hour closest to the event) — so a catch from an hour
+  // ago in a dead zone gets ITS hour's conditions, not the weather from the moment bars returned —
+  // then saves + refreshes the views. Idempotent: only touches records still missing weather that
+  // carry coordinates; skips demo and offline. Runs on reconnect and once shortly after load.
+  var _weatherBackfilling = false;
+  async function backfillFieldWeather(){
+    if (_weatherBackfilling) return;
+    if (typeof demoMode !== 'undefined' && demoMode) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    _weatherBackfilling = true;
+    var obsChanged = false, huntChanged = false;
+    var needsWx = function(rec){ return rec && (rec.weatherStatus === 'pending' || rec.weatherStatus === 'unavailable') && rec.lat != null && rec.lng != null; };
+    try{
+      var obsList = (typeof observations !== 'undefined' ? observations : []).filter(function(o){ return needsWx(o) && o.createdAt; });
+      for (var i=0;i<obsList.length;i++){
+        var w = await fetchHistoricalWeather(obsList[i].lat, obsList[i].lng, obsList[i].createdAt);
+        if (!w) continue;                                              // still can't reach the API — leave for next time
+        var live = observations.filter(function(x){ return x.id === obsList[i].id; })[0];
+        if (!live) continue;                                           // deleted meanwhile
+        live.weather = w; live.weatherStatus = 'ok';
+        try{ await saveObservation(live); obsChanged = true; }catch(e){}
+      }
+      var huntList = (typeof huntEvents !== 'undefined' ? huntEvents : []).filter(function(h){ return needsWx(h) && h.checkInAt; });
+      for (var j=0;j<huntList.length;j++){
+        var wh = await fetchHistoricalWeather(huntList[j].lat, huntList[j].lng, huntList[j].checkInAt);
+        if (!wh) continue;
+        var liveH = huntEvents.filter(function(x){ return x.id === huntList[j].id; })[0];
+        if (!liveH) continue;
+        liveH.weather = wh; liveH.weatherStatus = 'ok';
+        try{ await saveHuntEvent(liveH); huntChanged = true; }catch(e){}
+      }
+      // Camera deployments also stamp weather at deploy time — a deploy in a dead zone left it blank too.
+      var depList = (typeof deployments !== 'undefined' ? deployments : []).filter(function(d){ return needsWx(d) && d.deployedAt; });
+      for (var k=0;k<depList.length;k++){
+        var wd = await fetchHistoricalWeather(depList[k].lat, depList[k].lng, depList[k].deployedAt);
+        if (!wd) continue;
+        var liveD = deployments.filter(function(x){ return x.id === depList[k].id; })[0];
+        if (!liveD) continue;
+        liveD.weather = wd; liveD.weatherStatus = 'ok';
+        try{ await saveDeployment(liveD); }catch(e){}
+      }
+    } finally { _weatherBackfilling = false; }
+    try{
+      if (obsChanged){ if (typeof renderObsMarkers === 'function') renderObsMarkers(); if (typeof activeTab !== 'undefined' && activeTab === 'log' && typeof renderLogList === 'function') renderLogList(); }
+      if (huntChanged && typeof updateActiveHuntBar === 'function') updateActiveHuntBar();
+      var jm = document.getElementById('huntLogModalBackdrop');
+      if ((obsChanged || huntChanged) && jm && jm.classList.contains('show') && typeof renderHuntLog === 'function') renderHuntLog();
+    }catch(e){}
+  }
+  try{ if (typeof window !== 'undefined') window.addEventListener('online', function(){ try{ flushSyncQueue(); }catch(e){} setTimeout(function(){ try{ backfillFieldWeather(); }catch(e){} }, 2500); }); }catch(e){}
 
   async function saveSite(site){
     if (hasChatStorage && ocInGroupScope()){
@@ -19877,6 +19932,10 @@
     // Now that properties are loaded, frame the home farm as the default view (unless GPS already
     // centered us). Runs once, on the first load — not on later scope switches.
     try { applyDefaultHomeView(); } catch (e) {}
+    // Fill in weather for anything logged offline in a prior session (trip/catch/sighting/deploy that
+    // saved instantly but never got its conditions). Deferred so it never delays first render; the
+    // 'online' event handles a live reconnect, this handles "opened again with signal."
+    try { setTimeout(function(){ try { backfillFieldWeather(); } catch(e){} }, 4000); } catch (e) {}
   }
 
   // ================= Cloud sync (Firebase) — Phase 1: login + per-user sync =================
