@@ -1410,6 +1410,7 @@
   #huntLogModal{ width:460px; max-width:92vw; }
   #propDisambigModal{ width:360px; max-width:90vw; }
   #newSpotModal{ width:380px; max-width:90vw; }
+  #newSpotUseExistingBtn:disabled{ opacity:.45; cursor:default; }
 
   #tagHistoryBtn{
     margin:0 16px 10px 16px;
@@ -2412,7 +2413,7 @@
     </div>
     <button id="parcelToggleBtn" title="Property lines + state boundaries (green states = covered: VA, NC, WI — more over time)">📐</button>
     <input type="file" id="mapImportInput" accept="image/*" style="display:none;">
-    <div id="buildBadge">BUILD 654</div>
+    <div id="buildBadge">BUILD 655</div>
     <div id="huntBar">
       <button id="huntStartBtn">🏹 Start Hunt</button>
       <div id="huntActiveInfo" style="display:none;">
@@ -3015,7 +3016,18 @@
   <div class="oc-modal-backdrop" id="newSpotModalBackdrop">
     <div class="oc-modal" id="newSpotModal">
       <h3><span id="newSpotTitle">New Spot</span></h3>
-      <p style="font-size:12px;color:var(--text-dim);margin:0 0 12px 0;">No saved spot recognized here. Want to save this area for next time?</p>
+      <p style="font-size:12px;color:var(--text-dim);margin:0 0 12px 0;">No saved spot recognized at your location.</p>
+
+      <!-- The common case: the spot IS already saved, GPS just didn't land inside its boundary
+           (small ponds have no drawn boundary; GPS drifts; offline the boundary may not match).
+           Let them pick the one they already have instead of forcing a brand-new duplicate. -->
+      <div id="newSpotExistingWrap">
+        <label id="newSpotExistingLabel" style="display:block;font-size:13px;color:var(--accent);margin:0 0 6px 0;font-weight:700;">Already saved it? Pick it here:</label>
+        <select id="newSpotExisting" style="width:100%;padding:11px;font-size:15px;margin:0 0 8px 0;"></select>
+        <button class="btn-primary" id="newSpotUseExistingBtn" style="width:100%;" disabled>Start here</button>
+        <div style="text-align:center;font-size:11px;color:var(--text-dim);margin:12px 0 10px 0;">— or save this spot as a new one —</div>
+      </div>
+
       <p style="font-size:11px;color:var(--accent);margin:0 0 8px 0;">📍 Pan/zoom the map (behind this window) to frame the whole area first, then name it.</p>
       <input type="text" id="newSpotName" placeholder="e.g. Eddie's Farm" />
       <div class="row" style="margin-top:10px;">
@@ -8657,17 +8669,47 @@
   function promptNewSpot(){
     return new Promise(function(resolve){
       var noun = activeModule === 'fishing' ? 'Lake' : 'Property';
+      var nounLower = noun.toLowerCase();
       document.getElementById('newSpotTitle').textContent = 'New ' + noun;
       var nameInput = document.getElementById('newSpotName');
       nameInput.value = '';
       var backdrop = document.getElementById('newSpotModalBackdrop');
       var saveBtn = document.getElementById('newSpotSaveBtn');
       var skipBtn = document.getElementById('newSpotSkipBtn');
+      var existingWrap = document.getElementById('newSpotExistingWrap');
+      var existingSel = document.getElementById('newSpotExisting');
+      var useExistingBtn = document.getElementById('newSpotUseExistingBtn');
+
+      // Populate the "already saved it?" picker with this module's own properties/lakes,
+      // sorted by name. When there are none yet, hide the whole picker and just show the
+      // create-new form (the original behavior).
+      var mine = propsForModule().slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+      if (mine.length){
+        existingWrap.style.display = '';
+        document.getElementById('newSpotExistingLabel').textContent = 'Already saved this ' + nounLower + '? Pick it here:';
+        var opts = '<option value="">— choose a saved ' + nounLower + ' —</option>';
+        mine.forEach(function(p){ opts += '<option value="' + escapeHtml(p.id) + '">' + escapeHtml(p.name || '(unnamed)') + '</option>'; });
+        existingSel.innerHTML = opts;
+        existingSel.value = '';
+        useExistingBtn.disabled = true;
+      } else {
+        existingWrap.style.display = 'none';
+      }
 
       function cleanup(){
         saveBtn.removeEventListener('click', onSave);
         skipBtn.removeEventListener('click', onSkip);
         backdrop.removeEventListener('click', onBackdropClick);
+        existingSel.removeEventListener('change', onExistingChange);
+        useExistingBtn.removeEventListener('click', onUseExisting);
+      }
+      function onExistingChange(){ useExistingBtn.disabled = !existingSel.value; }
+      function onUseExisting(){
+        var prop = properties.filter(function(p){ return p.id === existingSel.value; })[0];
+        if (!prop) return;
+        backdrop.classList.remove('show');
+        cleanup();
+        resolve(prop);   // start THIS trip at the already-saved spot — nothing new is created
       }
       async function onSave(){
         var name = nameInput.value.trim();
@@ -8690,6 +8732,8 @@
       saveBtn.addEventListener('click', onSave);
       skipBtn.addEventListener('click', onSkip);
       backdrop.addEventListener('click', onBackdropClick);
+      existingSel.addEventListener('change', onExistingChange);
+      useExistingBtn.addEventListener('click', onUseExisting);
 
       closeAllModals();
       backdrop.classList.add('show');
